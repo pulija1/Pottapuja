@@ -6,7 +6,8 @@
 
 // The negation must sit right before the word ("no salt", "skip the sugar"), so
 // "skip the sugar and add honey" still catches the honey.
-const NEGATION = /\b(no|without|skip|omit|avoid|don'?t add|do not add|never add|free of|instead of)\s+((the|any|added|extra|a|of)\s+){0,2}$/i;
+// A list carries the negation ("no salt or sugar", "without salt, sugar or honey"); "and add" does not.
+const NEGATION = /\b(no|without|skip|omit|avoid|don'?t add|do not add|never add|free of|instead of)\s+((the|any|added|extra|a|of)\s+){0,2}([\w-]+(\s*,\s*|\s+or\s+|\s+nor\s+)((the|any|added|extra)\s+)?){0,5}$/i;
 
 // Words that contain "nut" but are not tree nuts or peanuts.
 const NOT_NUTS = /\b(coconut|nutmeg|butternut|doughnut|donut|nutrition|nutritious|nutrient|nutrients)\b/gi;
@@ -23,7 +24,11 @@ const GROUND_BEFORE = /\b(ground|powdered|finely ground)\s+(\w+\s+)?$/i;
 //   (c) it is ground to a powder or paste right after: "cashews ground to a fine paste",
 //       "soak almonds overnight, peel and grind to a fine powder"
 // Nut oils and "nut-free" are not nuts. Everything else counts as a whole or chopped nut.
-const VERB_BEFORE = /\b(grind|blend|powder|crush|puree|pulse)\s+(the\s+)?((soaked|peeled|roasted|blanched|dry[- ]roasted)\s+){0,2}$/i;
+const NUT_PREP = "(the\\s+)?((soaked|peeled|roasted|blanched|dry[- ]roasted)\\s+){0,2}$";
+const VERB_BEFORE = new RegExp("\\b(grind|blend|powder|puree)\\s+" + NUT_PREP, "i");
+// "crush" and "pulse" can mean coarse pieces, so they need "to a fine powder/paste" after the nut.
+const COARSE_VERB_BEFORE = new RegExp("\\b(crush|pulse)\\s+" + NUT_PREP, "i");
+const TO_FINE = /^\s*(\w+\s+){0,2}(to|into)\s+a\s+(very\s+)?(fine|smooth)\s+(powder|paste)\b/i;
 const GROUND_LATER = /^\s*(?:,?\s*(?:overnight|peel(?:ed)?|and|then|soaked|dry|roast(?:ed)?|lightly|well)\b\s*,?)*\s*(?:ground|grind|blend(?:ed)?|powder(?:ed)?)\s+(?:to|into)\s+(?:a\s+)?(?:very\s+)?(?:fine|smooth)?\s*(?:powder|paste)\b/i;
 
 // Returns the first nut in the text that is not clearly ground, or null.
@@ -37,6 +42,7 @@ function findWholeNut(text) {
     if (/^\s*(oil\b|-?\s*free\b)/i.test(rest)) continue;
     if (GROUND_AFTER.test(rest.slice(0, 12)) || GROUND_BEFORE.test(before)) continue;
     if (VERB_BEFORE.test(before)) continue;
+    if (COARSE_VERB_BEFORE.test(before) && TO_FINE.test(rest)) continue;
     if (GROUND_LATER.test(rest)) continue;
     return m;
   }
