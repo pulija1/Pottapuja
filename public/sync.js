@@ -4,28 +4,33 @@
 // so it works on GitHub Pages with no server. The token lives only in this browser, under its
 // own storage key, and never goes into backups or check-ins.
 
-import { toMarkdownFiles, fromMarkdownFiles, sessionMd, summarize, FILES, INDEX } from "./shared/markdown.js";
+import { toMarkdownFiles, fromMarkdownFiles, sessionMd, summarize, fingerprint, FILES, INDEX } from "./shared/markdown.js";
 
 const KEY = "familyMealPlanner.sync";
 const API = "https://api.github.com";
-const DEFAULTS = { name: "", login: "", avatar: "", repo: "", branch: "main", folder: "output", token: "", lastSha: "", lastAt: "", lastSummary: null, skipped: false };
+const DEFAULTS = { name: "", login: "", avatar: "", repo: "", branch: "main", folder: "output", token: "", remember: true, lastSha: "", lastAt: "", lastSummary: null, fileHashes: {}, skipped: false };
 
+// With "remember me" off, the token is kept only for this browser tab (sessionStorage).
 export function getSync() {
-  try {
-    return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(KEY) || "{}") };
-  } catch {
-    return { ...DEFAULTS };
-  }
+  let s;
+  try { s = { ...DEFAULTS, ...JSON.parse(localStorage.getItem(KEY) || "{}") }; } catch { s = { ...DEFAULTS }; }
+  if (!s.token) { try { s.token = sessionStorage.getItem(KEY + ".token") || ""; } catch {} }
+  return s;
 }
 
 export function setSync(patch) {
   const next = { ...getSync(), ...patch };
-  try { localStorage.setItem(KEY, JSON.stringify(next)); } catch {}
+  const kept = { ...next };
+  try {
+    if (next.remember === false) { sessionStorage.setItem(KEY + ".token", next.token); kept.token = ""; }
+    else sessionStorage.removeItem(KEY + ".token");
+  } catch {}
+  try { localStorage.setItem(KEY, JSON.stringify(kept)); } catch {}
   return next;
 }
 
 export function signOut() {
-  return setSync({ token: "", login: "", avatar: "", lastSha: "", lastAt: "", lastSummary: null, skipped: false });
+  return setSync({ token: "", login: "", avatar: "", lastSha: "", lastAt: "", lastSummary: null, fileHashes: {}, skipped: false });
 }
 
 // A quick, unauthenticated check (3 s) used to decide whether to show the sign-in page at all.
@@ -54,24 +59,43 @@ class SyncError extends Error {
   constructor(msg, kind = "") { super(msg); this.kind = kind; }
 }
 
-async function gh(s, path, init = {}) {
+export const REQUEST_TIMEOUT_MS = 20000;   // mobile connections can stall; never leave "Syncing…" stuck
+
+// `refUpdate` marks the one request where a 422 means another device moved the branch first.
+async function gh(s, path, { refUpdate = false, ...init } = {}) {
   let res;
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), REQUEST_TIMEOUT_MS);
   try {
     res = await fetch(API + path, {
       ...init,
+      signal: ctl.signal,
       cache: "no-store",
       headers: { Accept: "application/vnd.github+json", Authorization: `Bearer ${s.token}`, "X-GitHub-Api-Version": "2022-11-28", ...(init.body ? { "Content-Type": "application/json" } : {}) },
     });
+    if (res.ok) return res.status === 204 ? null : await res.json();
   } catch {
+    if (ctl.signal.aborted) throw new SyncError("GitHub took too long to answer. Nothing was changed; try again.", "network");
     throw new SyncError("Couldn't reach GitHub. Check the internet connection and try again.", "network");
+  } finally {
+    clearTimeout(timer);
   }
-  if (res.ok) return res.status === 204 ? null : res.json();
-  if (res.status === 401) throw new SyncError("GitHub didn't accept the token. Sign in again with a new token.", "auth");
+  const text = await res.text().catch(() => "");
+  if (res.status === 401) throw new SyncError("The GitHub token has expired or was removed. Sign in again with a new token.", "expired");
+  if ((res.status === 403 || res.status === 429) && (res.headers.get("x-ratelimit-remaining") === "0" || /rate limit/i.test(text))) {
+    throw new SyncError("GitHub is busy right now. Try again in a few minutes.", "busy");
+  }
   if (res.status === 403) throw new SyncError("The token isn't allowed to do this. Give it Contents: Read and write on the data repository.", "auth");
   if (res.status === 404) throw new SyncError("Not found", "missing");
   if (res.status === 409) throw new SyncError("The repository is empty", "empty");
-  if (res.status === 422) throw new SyncError("Someone else checked in at the same moment", "conflict");
+  if (res.status === 422 && refUpdate) throw new SyncError("Someone else checked in at the same moment", "conflict");
+  if (res.status === 422) throw new SyncError("GitHub couldn't save the files. Check the folder name in More settings.");
   throw new SyncError(`GitHub answered ${res.status}. Try again in a minute.`);
+}
+
+// "output", "family/meal-planner"; never "..", empty or leading-slash segments.
+export function cleanFolder(text) {
+  return String(text || "").split("/").map((x) => x.trim()).filter((x) => x && x !== "." && x !== "..").join("/") || "output";
 }
 
 const encPath = (p) => p.split("/").filter(Boolean).map(encodeURIComponent).join("/");
@@ -151,7 +175,10 @@ export async function checkIn(state, { force = false, now = new Date(), today = 
     if (existing !== null) return { conflict: true };
   }
   const meta = { at: stamp(now), name: s.name || s.login, today };
-  const files = toMarkdownFiles(state, meta);
+  const all = toMarkdownFiles(state, meta);
+  // Upload only files whose text changed since this device last synced the same commit.
+  const known = head === s.lastSha ? s.fileHashes || {} : {};
+  const files = Object.fromEntries(Object.entries(all).filter(([p, text]) => known[p] !== fingerprint(text)));
   const sessionName = `${now.toISOString().slice(0, 19).replace(/[T:]/g, "-")}${s.login ? "-" + s.login.replace(/[^\w-]/g, "") : ""}.md`;
   files[`sessions/${sessionName}`] = sessionMd(state, s.lastSummary, meta);
   const commit = await gh(s, `/repos/${s.repo}/git/commits/${head}`);
@@ -164,12 +191,12 @@ export async function checkIn(state, { force = false, now = new Date(), today = 
     body: JSON.stringify({ message: `Check in from ${meta.name || "the meal planner"}, ${meta.at}`, tree: tree.sha, parents: [head] }),
   });
   try {
-    await gh(s, `/repos/${s.repo}/git/refs/heads/${encPath(s.branch)}`, { method: "PATCH", body: JSON.stringify({ sha: next.sha, force: false }) });
+    await gh(s, `/repos/${s.repo}/git/refs/heads/${encPath(s.branch)}`, { method: "PATCH", refUpdate: true, body: JSON.stringify({ sha: next.sha, force: false }) });
   } catch (e) {
     if (e.kind === "conflict") return { conflict: true };
     throw e;
   }
-  setSync({ lastSha: next.sha, lastAt: now.toISOString(), lastSummary: summarize(state) });
+  setSync({ lastSha: next.sha, lastAt: now.toISOString(), lastSummary: summarize(state), fileHashes: Object.fromEntries(Object.entries(all).map(([p, t]) => [p, fingerprint(t)])) });
   return { ok: true, url: `https://github.com/${s.repo}/tree/${s.branch}/${s.folder}` };
 }
 
@@ -179,10 +206,12 @@ export async function loadLatest({ now = new Date() } = {}) {
   if (!syncReady(s)) throw new SyncError("Sign in first.");
   const head = await headSha(s);
   if (!head) return null;
-  const files = {};
-  for (const f of [INDEX, ...Object.keys(FILES)]) files[f] = await readFile(s, `${s.folder}/${f}`, head);
+  const names = [INDEX, ...Object.keys(FILES)];
+  const texts = await Promise.all(names.map((f) => readFile(s, `${s.folder}/${f}`, head)));
+  const files = Object.fromEntries(names.map((f, i) => [f, texts[i]]));
   const data = fromMarkdownFiles(files);
   if (!data) return null;
-  setSync({ lastSha: head, lastAt: now.toISOString(), lastSummary: summarize(data) });
+  const fileHashes = Object.fromEntries(names.filter((f) => files[f] !== null).map((f) => [f, fingerprint(files[f])]));
+  setSync({ lastSha: head, lastAt: now.toISOString(), lastSummary: summarize(data), fileHashes });
   return data;
 }

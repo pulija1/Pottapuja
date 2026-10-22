@@ -2,15 +2,12 @@
 
 import { addDays, isSchoolDay, occurrences } from "./dates.js";
 
-// The children's names, used in every label.
-export const KIDS = { kid: "Dhari", baby: "Maya" };
-
 export const SLOTS = [
-  { id: "baby_breakfast", who: "baby", label: "Maya breakfast" },
-  { id: "baby_lunch", who: "baby", label: "Maya lunch" },
-  { id: "baby_snack", who: "baby", label: "Maya evening snack" },
-  { id: "baby_dinner", who: "baby", label: "Maya dinner" },
-  { id: "kid_breakfast", who: "kid", label: "Dhari breakfast" },
+  { id: "baby_breakfast", who: "baby", label: "{baby} breakfast" },
+  { id: "baby_lunch", who: "baby", label: "{baby} lunch" },
+  { id: "baby_snack", who: "baby", label: "{baby} evening snack" },
+  { id: "baby_dinner", who: "baby", label: "{baby} dinner" },
+  { id: "kid_breakfast", who: "kid", label: "{kid} breakfast" },
   { id: "kid_lunchbox", who: "kid", label: "School lunchbox", schoolOnly: true },
   { id: "kid_snack", who: "kid", label: "Snack box / after school" },
   { id: "family_dinner", who: "family", label: "Family dinner" },
@@ -18,10 +15,25 @@ export const SLOTS = [
 
 // The day panel groups meals into these collapsible sections, in this order.
 export const MEAL_GROUPS = [
-  { who: "kid", label: "Dhari (4 yrs)", icon: "👧" },
-  { who: "baby", label: "Maya (8 months)", icon: "👶" },
-  { who: "family", label: "Family", icon: "🍛" },
+  { who: "kid", icon: "👧" },
+  { who: "baby", icon: "👶" },
+  { who: "family", icon: "🍛" },
 ];
+
+// The children's names live in the family's own data (settings), never in the code, because
+// the code is public. Without names the labels fall back to the ages.
+export function whoLabel(who, settings = {}, { age = false } = {}) {
+  const kid = String(settings?.kidName || "").trim();
+  const baby = String(settings?.babyName || "").trim();
+  if (who === "kid") return kid ? (age ? `${kid} (4 yrs)` : kid) : "4-year-old";
+  if (who === "baby") return baby ? (age ? `${baby} (8 months)` : baby) : age ? "8-month-old" : "Baby";
+  if (who === "both") return kid && baby ? `${kid} and ${baby}` : "Both kids";
+  return "Family";
+}
+
+export function slotLabel(slot, settings) {
+  return slot.label.replace("{kid}", whoLabel("kid", settings)).replace("{baby}", whoLabel("baby", settings));
+}
 
 // Ideas offered as one-tap to-dos.
 export const TODO_IDEAS = [

@@ -15,7 +15,7 @@ export function defaultState() {
     todos: [],
     reminders: [],
     notified: {},
-    settings: { schoolNutFree: false },
+    settings: { schoolNutFree: false, kidName: "", babyName: "" },
     updatedAt: null,   // last change made in the app; check-in compares it with the last sync
   };
 }
