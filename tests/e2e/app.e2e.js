@@ -934,3 +934,13 @@ test("E2E SYNC-20 unchanged files aren't re-uploaded; an expired token goes back
   assert.equal(await tid(a.page, "login-repo").inputValue(), "fam/data");
   await a.ctx.close();
 });
+
+test("E2E BOOT-01 if the app's scripts fail to load, the page explains and offers Reload instead of staying blank", async () => {
+  const ctx = await newContext();
+  await ctx.route("**/shared/plan.js*", (r) => r.fulfill({ status: 200, contentType: "text/javascript", body: "export const SLOTS = [];" }));
+  const page = await ctx.newPage();
+  await page.goto(`${mock.url}?today=${TODAY}`);
+  await tid(page, "boot-error").waitFor({ timeout: 10000 });
+  assert.match(await tid(page, "boot-error").innerText(), /Reload/);
+  await ctx.close();
+});
