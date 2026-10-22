@@ -1,10 +1,10 @@
 import { load, save, exportJson, importJson, onChange } from "./store.js";
-import { getSync, setSync, signOut, syncReady, cleanRepo, verify, checkIn, loadLatest, githubReachable } from "./sync.js";
+import { getSync, setSync, signOut, syncReady, cleanRepo, cleanFolder, verify, checkIn, loadLatest, githubReachable } from "./sync.js";
 import { todayKey, addDays, addMonths, monthGrid, monthLabel, prettyDate, fromKey, isDateKey, isSchoolDay, occurrences } from "./shared/dates.js";
 import { checkRecipe, checkForAudience, isNutIngredient, isSchoolFood } from "./shared/safety.js";
 import { LIBRARY, suggestFromLibrary } from "./shared/recipes.js";
 import { mergeItems, groupByAisle, formatQty, missingFromPantry, normName, normUnit, aisleFor } from "./shared/shopping.js";
-import { SLOTS, emptyDay, getDay, dayHasPlan, markEdited, approveDay, unapproveDay, slotsFor, todosOn, MEAL_GROUPS, TODO_IDEAS, remindersOn, pendingFor, dayStatus } from "./shared/plan.js";
+import { SLOTS, emptyDay, getDay, dayHasPlan, markEdited, approveDay, unapproveDay, slotsFor, todosOn, MEAL_GROUPS, whoLabel, slotLabel, TODO_IDEAS, remindersOn, pendingFor, dayStatus } from "./shared/plan.js";
 
 const state = load();
 let TODAY = todayKey();
@@ -38,7 +38,6 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
 const ESC = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ESC[c]);
-const WHO_LABEL = { baby: "Maya (8 mo)", kid: "Dhari (4 yrs)", family: "Family", both: "Dhari and Maya" };
 
 function toast(msg) {
   const t = $("#toast");
@@ -144,14 +143,14 @@ function slotIssues(key) {
     if (res.errors.length) {
       const msgs = res.errors.map((e) => e.message);
       if (forBaby && linked && linked.forWhom !== "baby") msgs.push("This is not a baby recipe: take out a plain, mashed portion before salt and spice.");
-      out[s.id] = { label: s.label, messages: [...new Set(msgs)] };
+      out[s.id] = { label: slotLabel(s, state.settings), messages: [...new Set(msgs)] };
     }
   }
   return out;
 }
 
 function whoPill(who) {
-  return `<span class="pill ${esc(who)}">${esc(WHO_LABEL[who] || who)}</span>`;
+  return `<span class="pill ${esc(who)}">${esc(whoLabel(who, state.settings, { age: true }))}</span>`;
 }
 
 // ---------- AI status ----------
@@ -210,6 +209,14 @@ function setStatus(text) {
 
 function syncError(err) {
   ui.syncBusy = false;
+  if (err?.kind === "expired") {
+    // An expired or revoked token can't do anything: forget it and ask for a new one.
+    setSync({ token: "" });
+    renderSyncButtons();
+    $("dialog[data-testid=profile-dialog]")?.close();
+    showLogin(err.message);
+    return;
+  }
   renderSyncButtons();
   const msg = err?.message || "Something went wrong talking to GitHub.";
   setStatus("⚠️ " + msg);
@@ -262,6 +269,7 @@ function modal(testid, html, onClick) {
   dlg.dataset.testid = testid;
   dlg.innerHTML = html;
   dlg.addEventListener("click", (e) => { const b = e.target.closest("button[data-sync]"); if (b) onClick(b.dataset.sync, dlg, b); });
+  dlg.addEventListener("submit", (e) => e.preventDefault());
   document.body.appendChild(dlg);
   dlg.addEventListener("close", () => dlg.remove());
   dlg.showModal();
@@ -293,7 +301,8 @@ function showLogin(note = "") {
     <label class="field"><span>Your name</span><input name="name" value="${esc(s.name)}" maxlength="40" placeholder="e.g. Ram" autocomplete="name" data-testid="login-name"></label>
     <label class="field"><span>Private data repository</span><input name="repo" value="${esc(s.repo)}" placeholder="owner/name, e.g. pulija1/Pottapuja-data" autocapitalize="off" spellcheck="false" data-testid="login-repo"></label>
     <label class="field"><span>GitHub access token</span><input name="token" type="password" placeholder="github_pat_…" autocomplete="current-password" data-testid="login-token"></label>
-    <p class="small muted">GitHub doesn't let apps sign in with your password. Create a <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">fine-grained token</a> for only the data repository with <b>Contents: Read and write</b>, and paste it here once on each device. It stays in this browser and is never checked in.</p>
+    <p class="small muted">GitHub doesn't let apps sign in with your password. Create a <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">fine-grained token</a> for only the data repository with <b>Contents: Read and write</b> and an expiry such as 90 days, and paste it here. It stays in this browser and is never checked in.</p>
+    <label class="row small"><input type="checkbox" name="remember" ${s.remember === false ? "" : "checked"} data-testid="login-remember"> Remember me on this device (untick on a shared phone or computer)</label>
     <p class="small sync-status" data-testid="login-status" role="status"></p>
     <button class="btn primary" data-testid="login-submit">Sign in</button>
     <button type="button" class="btn ghost" data-login="skip" data-testid="login-skip">Use on this device only, without signing in</button>
@@ -326,7 +335,7 @@ $("#login").addEventListener("submit", async (e) => {
     const user = await verify({ token, repo });
     const old = getSync();
     const sameRepo = old.repo === repo;
-    setSync({ name: f.name.value.trim() || user.name, login: user.login, avatar: user.avatar, repo, token, branch: sameRepo ? old.branch : user.branch, skipped: false, ...(sameRepo ? {} : { lastSha: "", lastAt: "", lastSummary: null }) });
+    setSync({ name: f.name.value.trim() || user.name, login: user.login, avatar: user.avatar, repo, token, remember: f.remember.checked, branch: sameRepo ? old.branch : user.branch, skipped: false, ...(sameRepo ? {} : { lastSha: "", lastAt: "", lastSummary: null }) });
     hideLogin();
     renderSyncButtons();
     toast(`Signed in as ${user.login}`);
@@ -350,8 +359,34 @@ async function maybeShowLogin() {
 
 function profileDialog() {
   const s = getSync();
-  if (!syncReady(s)) return showLogin();
-  modal("profile-dialog", `<form class="stack" onsubmit="return false">
+  const signedIn = syncReady(s);
+  const family = `<details ${state.settings.kidName ? "" : "open"} data-testid="family-names"><summary class="small">Children's names</summary>
+      <p class="small muted">Saved with your data (and checked in to your private repository), not in the app's public code.</p>
+      <label class="field"><span>4-year-old</span><input name="kidName" value="${esc(state.settings.kidName || "")}" maxlength="30" data-testid="kid-name"></label>
+      <label class="field"><span>8-month-old</span><input name="babyName" value="${esc(state.settings.babyName || "")}" maxlength="30" data-testid="baby-name"></label>
+      <button type="button" class="btn sm" data-sync="names" data-testid="save-names">Save names</button>
+    </details>`;
+  const onNames = (dlg) => {
+    const f = dlg.querySelector("form").elements;
+    state.settings = { ...state.settings, kidName: f.kidName.value.trim(), babyName: f.babyName.value.trim() };
+    commit();
+    toast("Names saved.");
+  };
+  if (!signedIn) {
+    modal("profile-dialog", `<form class="stack">
+      <h2>Profile</h2>
+      <p class="small muted">Not signed in. Your data is saved on this device only.</p>
+      <button type="button" class="btn primary" data-sync="signin" data-testid="profile-signin">Sign in to check in to GitHub</button>
+      ${family}
+      <button type="button" class="btn ghost sm" data-sync="close">Close</button>
+    </form>`, (act, dlg) => {
+      if (act === "signin") { dlg.close(); showLogin(); }
+      else if (act === "names") onNames(dlg);
+      else if (act === "close") dlg.close();
+    });
+    return;
+  }
+  modal("profile-dialog", `<form class="stack">
     <div class="row">${s.avatar ? `<img class="avatar-img" src="${esc(s.avatar)}" alt="" width="40" height="40">` : ""}<div class="grow"><strong data-testid="profile-name">${esc(s.name || s.login)}</strong><div class="small muted">Signed in as ${esc(s.login)} · ${esc(s.repo)}</div></div></div>
     <p class="small sync-status" data-testid="sync-status">${s.lastAt ? `Last synced ${esc(new Date(s.lastAt).toLocaleString())}.${unsynced(s) ? " This device has changes that aren't checked in." : " Everything is checked in."}` : "Not synced yet."}</p>
     <div class="row">
@@ -359,6 +394,7 @@ function profileDialog() {
       <button type="button" class="btn" data-sync="load" data-testid="sync-load">⬇ Load latest</button>
     </div>
     <p class="small"><a href="https://github.com/${esc(s.repo)}/tree/${esc(s.branch)}/${esc(s.folder)}" target="_blank" rel="noopener">Open the Markdown files on GitHub</a></p>
+    ${family}
     <details><summary class="small">More settings</summary>
       <label class="field"><span>Your name</span><input name="name" value="${esc(s.name)}" maxlength="40" data-testid="sync-name"></label>
       <label class="field"><span>Branch</span><input name="branch" value="${esc(s.branch)}" data-testid="sync-branch"></label>
@@ -382,7 +418,7 @@ function profileDialog() {
         break;
       case "save": {
         const f = dlg.querySelector("form").elements;
-        const patch = { name: f.name.value.trim(), branch: f.branch.value.trim() || "main", folder: f.folder.value.trim().replace(/^\/+|\/+$/g, "") || "output" };
+        const patch = { name: f.name.value.trim(), branch: f.branch.value.trim() || "main", folder: cleanFolder(f.folder.value) };
         const old = getSync();
         if (patch.branch !== old.branch || patch.folder !== old.folder) Object.assign(patch, { lastSha: "", lastAt: "", lastSummary: null });
         setSync(patch);
@@ -390,6 +426,7 @@ function profileDialog() {
         toast("Settings saved.");
         break;
       }
+      case "names": onNames(dlg); break;
       case "signout": signOut(); dlg.close(); renderSyncButtons(); showLogin("Signed out. Your data is still on this device."); break;
       case "close": dlg.close(); break;
     }
@@ -557,9 +594,9 @@ function renderSuggestions(key) {
       const r = findRecipe(picks[s.id]);
       const need = shoppingNeeds(r);
       return `<div class="suggest-row" data-testid="suggestion" data-slot="${s.id}">
-        <span class="small muted">${esc(s.label)}</span>
+        <span class="small muted">${esc(slotLabel(s, state.settings))}</span>
         <span class="grow">${esc(r.title)}${r.familyFavorite ? " ⭐" : ""}${need.length ? ` <span class="small" style="color:var(--warn)">· need ${esc(need.map((i) => i.name).join(", "))}</span>` : ' <span class="small" style="color:var(--ok)">· all in the kitchen</span>'}</span>
-        <button type="button" class="iconbtn" data-action="suggest-swap" data-slot="${s.id}" title="Another idea" aria-label="Another idea for ${esc(s.label)}">🔀</button>
+        <button type="button" class="iconbtn" data-action="suggest-swap" data-slot="${s.id}" title="Another idea" aria-label="Another idea for ${esc(slotLabel(s, state.settings))}">🔀</button>
       </div>`;
     }).join("")}
     <div class="row" style="margin-top:8px">
@@ -573,11 +610,11 @@ function slotRow(s, day, issues) {
   const m = day.meals?.[s.id];
   const r = m?.recipeId ? findRecipe(m.recipeId) : null;
   return `<div class="slot">
-    <span class="slot-label">${esc(s.label)}</span>
+    <span class="slot-label">${esc(slotLabel(s, state.settings))}</span>
     <div class="slot-row">
-      <input type="text" list="dl-${s.who}" value="${esc(m?.title || "")}" placeholder="Pick a recipe or type a dish" data-action="slot" data-slot="${s.id}" data-who="${s.who}" data-testid="slot-${s.id}" aria-label="${esc(s.label)}">
+      <input type="text" list="dl-${s.who}" value="${esc(m?.title || "")}" placeholder="Pick a recipe or type a dish" data-action="slot" data-slot="${s.id}" data-who="${s.who}" data-testid="slot-${s.id}" aria-label="${esc(slotLabel(s, state.settings))}">
       ${r ? `<button class="iconbtn" data-action="view-recipe" data-id="${esc(r.id)}" title="View recipe" aria-label="View recipe">📖</button>` : ""}
-      ${m?.title ? `<button class="iconbtn" data-action="clear-slot" data-slot="${s.id}" title="Clear" aria-label="Clear ${esc(s.label)}">✕</button>` : ""}
+      ${m?.title ? `<button class="iconbtn" data-action="clear-slot" data-slot="${s.id}" title="Clear" aria-label="Clear ${esc(slotLabel(s, state.settings))}">✕</button>` : ""}
     </div>
     ${issues[s.id] ? `<span class="small" style="color:var(--bad)" data-testid="slot-warning">⛔ ${esc(issues[s.id].messages[0])}</span>` : ""}
   </div>`;
@@ -592,8 +629,8 @@ function todoRow(t, { showDate = false } = {}) {
   </div>`;
 }
 
-const WHO_OPTIONS = (sel = "kid") => [["kid", "Dhari"], ["baby", "Maya"], ["family", "Family"]]
-  .map(([v, l]) => `<option value="${v}" ${v === sel ? "selected" : ""}>${l}</option>`).join("");
+const WHO_OPTIONS = (sel = "kid") => ["kid", "baby", "family"].map((v) => [v, whoLabel(v, state.settings)])
+  .map(([v, l]) => `<option value="${v}" ${v === sel ? "selected" : ""}>${esc(l)}</option>`).join("");
 
 function renderDayPanel(key) {
   const day = getDay(state, key) || emptyDay();
@@ -635,7 +672,7 @@ function renderDayPanel(key) {
       const hasIssue = groupSlots.some((s) => issues[s.id]);
       const open = ui.openGroups.has(g.who) || hasIssue;
       return `<details class="meal-group" data-group="${g.who}" data-testid="meal-group-${g.who}" ${open ? "open" : ""}>
-        <summary><span class="grow"><strong>${g.icon} ${esc(g.label)}</strong></span>
+        <summary><span class="grow"><strong>${g.icon} ${esc(whoLabel(g.who, state.settings, { age: true }))}</strong></span>
           <span class="small ${hasIssue ? "" : "muted"}" ${hasIssue ? 'style="color:var(--bad)"' : ""}>${hasIssue ? "⛔ check safety · " : ""}${planned} of ${groupSlots.length} planned</span></summary>
         ${groupSlots.map((s) => slotRow(s, day, issues)).join("")}
       </details>`;
@@ -701,7 +738,7 @@ function renderRecipes() {
       <form data-form="generate" class="form-grid">
         <label class="field"><span>For</span>
           <select name="forWhom" data-testid="gen-for" data-action="gen-field">
-            ${[["both", "Dhari and Maya"], ["baby", "Maya (8 months)"], ["kid", "Dhari (4 yrs)"], ["family", "Whole family"]].map(([v, l]) => `<option value="${v}" ${ui.gen.forWhom === v ? "selected" : ""}>${l}</option>`).join("")}
+            ${[["both", whoLabel("both", state.settings)], ["baby", whoLabel("baby", state.settings, { age: true })], ["kid", whoLabel("kid", state.settings, { age: true })], ["family", "Whole family"]].map(([v, l]) => `<option value="${v}" ${ui.gen.forWhom === v ? "selected" : ""}>${esc(l)}</option>`).join("")}
           </select></label>
         <label class="field"><span>Meal</span>
           <select name="mealType" data-testid="gen-meal" data-action="gen-field">
@@ -829,7 +866,7 @@ function planDialog(recipe) {
   dlg.innerHTML = `<form method="dialog" class="stack">
     <h2>Plan “${esc(recipe.title)}”</h2>
     <label class="field"><span>Date</span><input type="date" name="date" value="${ui.selected >= TODAY ? ui.selected : TODAY}" required data-testid="plan-date"></label>
-    <label class="field"><span>Meal</span><select name="slot" data-testid="plan-slot">${slots.map((s) => `<option value="${s.id}">${esc(s.label)}</option>`).join("")}</select></label>
+    <label class="field"><span>Meal</span><select name="slot" data-testid="plan-slot">${slots.map((s) => `<option value="${s.id}">${esc(slotLabel(s, state.settings))}</option>`).join("")}</select></label>
     <div class="row"><button class="btn primary" value="ok" data-testid="plan-confirm">Add to plan</button><button class="btn" value="cancel" formnovalidate>Cancel</button></div>
   </form>`;
   document.body.appendChild(dlg);

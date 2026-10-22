@@ -603,6 +603,8 @@ function fakeGitHub({ isPrivate = true } = {}) {
     const body = req.postData() ? JSON.parse(req.postData()) : null;
     if (req.method() === "OPTIONS") return route.fulfill({ status: 204, headers: { "access-control-allow-origin": "*", "access-control-allow-headers": "*", "access-control-allow-methods": "*" } });
     if (p === "/zen") return json(200, "ok");
+    if (p === "/user" && gh.expired) return json(401, {});
+    if (p.startsWith("/repos/") && gh.expired) return json(401, {});
     if (p === "/user") return json(200, { login: "ram", name: "Ram", avatar_url: "" });
     if (p === "/repos/fam/data") return json(200, { private: gh.isPrivate, permissions: { push: true }, default_branch: "main" });
     if (p === "/repos/fam/data/git/ref/heads/main") return gh.head ? json(200, { object: { sha: gh.head } }) : json(409, {});
@@ -624,6 +626,7 @@ function fakeGitHub({ isPrivate = true } = {}) {
     }
     if ((m = p.match(/^\/repos\/fam\/data\/git\/commits\/(.+)$/))) return json(200, { tree: { sha: gh.commits[m[1]].tree } });
     if (p === "/repos/fam/data/git/trees") {
+      gh.lastUpload = body.tree.map((f) => f.path);
       const tree = id("t"); gh.trees[tree] = { ...gh.trees[body.base_tree] };
       for (const f of body.tree) gh.trees[tree][f.path] = f.content;
       return json(201, { sha: tree });
@@ -718,4 +721,33 @@ test("E2E SYNC-03 sign-in refuses a public repository; GitHub unreachable skips 
   await tid(page, "login-skip").click();
   assert.equal(await tid(page, "login").isVisible(), false);
   await ctx.close();
+});
+
+test("E2E SYNC-04 unchanged files aren't re-uploaded; an expired token goes back to sign-in; names live in the data", async () => {
+  const gh = fakeGitHub();
+  const a = await device(gh);
+  await signIn(a.page);
+  await tid(a.page, "login").waitFor({ state: "hidden" });
+  await tid(a.page, "profile").click();
+  await tid(a.page, "kid-name").fill("Asha");
+  await tid(a.page, "baby-name").fill("Nila");
+  await tid(a.page, "save-names").click();
+  await a.page.keyboard.press("Escape");
+  await cell(a.page, TOMORROW).click();
+  assert.match(await tid(a.page, "meal-group-kid").locator("summary").innerText(), /Asha \(4 yrs\)/);
+  await tid(a.page, "checkin").click();
+  await a.page.waitForFunction(() => document.querySelector("#toast").textContent.includes("Checked in"));
+  assert.match(gh.files()["output/kitchen.md"], /"kidName": "Asha"/);
+  await tid(a.page, "tab-todo").click();
+  await tid(a.page, "todo-idea").first().click();
+  await a.page.evaluate(() => document.querySelector("#toast").textContent = "");
+  await tid(a.page, "checkin").click();
+  await a.page.waitForFunction(() => document.querySelector("#toast").textContent.includes("Checked in"));
+  assert.deepEqual(gh.lastUpload.filter((f) => !f.includes("/sessions/")).sort(), ["output/README.md", "output/todo.md"]);
+  gh.expired = true;
+  await tid(a.page, "checkin").click();
+  await tid(a.page, "login-form").waitFor();
+  assert.match(await tid(a.page, "login-form").innerText(), /expired/);
+  assert.equal(await tid(a.page, "login-repo").inputValue(), "fam/data");
+  await a.ctx.close();
 });

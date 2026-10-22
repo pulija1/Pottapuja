@@ -3,7 +3,7 @@
 // inside an HTML comment (invisible when GitHub shows the file). Loading reads only that
 // comment, so editing the readable part by hand can't break the app.
 
-import { SLOTS } from "./plan.js";
+import { SLOTS, whoLabel, slotLabel } from "./plan.js";
 import { formatQty, groupByAisle } from "./shopping.js";
 
 // Which parts of the app's data each file carries.
@@ -18,7 +18,6 @@ export const FILES = {
 export const INDEX = "README.md";
 
 const MARK = "meal-planner-data";
-const WHO = { baby: "Maya", kid: "Dhari", family: "Family", both: "Dhari and Maya" };
 const STATUS = { approved: "✅ Approved", pending: "⏳ Waiting for approval" };
 const cell = (s) => String(s ?? "").replace(/\|/g, "\\|").replace(/\r?\n/g, " ");
 
@@ -27,8 +26,10 @@ function dataBlock(obj) {
   return `<!-- ${MARK}\n${JSON.stringify(obj, null, 1).replace(/-->/g, "--\\u003e")}\n-->\n`;
 }
 
+// The app always writes its block last, so the last match wins over anything that looks like one earlier.
 export function readDataBlock(md) {
-  const m = String(md || "").match(new RegExp(`<!-- ${MARK}\\n([\\s\\S]*?)\\n-->`));
+  const all = [...String(md || "").matchAll(new RegExp(`<!-- ${MARK}\\n([\\s\\S]*?)\\n-->`, "g"))];
+  const m = all[all.length - 1];
   if (!m) return null;
   try { return JSON.parse(m[1]); } catch { return null; }
 }
@@ -37,8 +38,9 @@ function pick(state, keys) {
   return Object.fromEntries(keys.map((k) => [k, state[k]]));
 }
 
-function header(title, meta) {
-  return `# ${title}\n\n_Checked in ${meta.at}${meta.name ? ` by ${meta.name}` : ""}. Written by the Family Meal Planner app; edit in the app, not here._\n\n`;
+// No time or name in the data files, so a file only changes (and is only uploaded) when its data does.
+function header(title) {
+  return `# ${title}\n\n_Written by the Family Meal Planner app. Make changes in the app; the data at the end of this file is what it reads back._\n\n`;
 }
 
 function mealPlanMd(state, meta) {
@@ -46,14 +48,14 @@ function mealPlanMd(state, meta) {
     const d = state.days[k];
     return Object.values(d.meals || {}).some((m) => m?.title) || (d.schedule || []).length;
   }).sort().reverse();
-  let out = header("Meal plan", meta);
+  let out = header("Meal plan");
   if (!keys.length) out += "Nothing planned yet.\n\n";
   for (const k of keys) {
     const d = state.days[k];
     out += `## ${k} · ${STATUS[d.status] || STATUS.pending}${d.changedAfterApproval && d.status !== "approved" ? " (changed after approval)" : ""}\n\n`;
     const meals = SLOTS.filter((s) => d.meals?.[s.id]?.title);
     if (meals.length) {
-      out += "| Meal | Dish |\n|---|---|\n" + meals.map((s) => `| ${cell(s.label)} | ${cell(d.meals[s.id].title)} |`).join("\n") + "\n\n";
+      out += "| Meal | Dish |\n|---|---|\n" + meals.map((s) => `| ${cell(slotLabel(s, state.settings))} | ${cell(d.meals[s.id].title)} |`).join("\n") + "\n\n";
     }
     if ((d.schedule || []).length) {
       out += "Schedule:\n" + [...d.schedule].sort((a, b) => String(a.time || "99").localeCompare(String(b.time || "99")))
@@ -64,7 +66,7 @@ function mealPlanMd(state, meta) {
 }
 
 function shoppingMd(state, meta) {
-  let out = header("Shopping list", meta);
+  let out = header("Shopping list");
   const items = state.shopping || [];
   if (!items.length) out += "The list is empty.\n\n";
   for (const [aisle, list] of groupByAisle(items)) {
@@ -74,19 +76,19 @@ function shoppingMd(state, meta) {
 }
 
 function todoMd(state, meta) {
-  let out = header("To do for the kids", meta);
+  let out = header("To do for the kids");
   const todos = [...(state.todos || [])].sort((a, b) => (b.date + (b.time || "")).localeCompare(a.date + (a.time || "")));
   if (!todos.length) out += "Nothing to do yet.\n\n";
   let date = "";
   for (const t of todos) {
     if (t.date !== date) { date = t.date; out += `\n## ${date}\n\n`; }
-    out += `- [${t.done ? "x" : " "}] ${t.time ? t.time + " " : ""}${cell(t.text)} · ${WHO[t.who] || cell(t.who)}\n`;
+    out += `- [${t.done ? "x" : " "}] ${t.time ? t.time + " " : ""}${cell(t.text)} · ${cell(whoLabel(t.who, state.settings))}\n`;
   }
   return out + "\n";
 }
 
 function remindersMd(state, meta) {
-  let out = header("Reminders", meta);
+  let out = header("Reminders");
   const list = [...(state.reminders || [])].sort((a, b) => (a.date + (a.time || "")).localeCompare(b.date + (b.time || "")));
   if (!list.length) return out + "No reminders.\n\n";
   out += "| Date | Time | Reminder | Repeats | Done on |\n|---|---|---|---|---|\n";
@@ -95,7 +97,7 @@ function remindersMd(state, meta) {
 }
 
 function kitchenMd(state, meta) {
-  let out = header("In the kitchen", meta);
+  let out = header("In the kitchen");
   const p = [...(state.pantry || [])].sort((a, b) => a.localeCompare(b));
   out += p.length ? p.map((x) => `- ${cell(x)}`).join("\n") + "\n\n" : "The kitchen list is empty.\n\n";
   out += `School is ${state.settings?.schoolNutFree ? "" : "not "}nut-free.\n\n`;
@@ -103,11 +105,11 @@ function kitchenMd(state, meta) {
 }
 
 function recipesMd(state, meta) {
-  let out = header("Saved recipes", meta);
+  let out = header("Saved recipes");
   const list = state.savedRecipes || [];
   if (!list.length) return out + "No saved recipes yet.\n\n";
   for (const r of list) {
-    out += `## ${cell(r.title)}\n\n_For ${WHO[r.forWhom] || cell(r.forWhom || "family")}${r.prepMinutes ? `, ${r.prepMinutes} min` : ""}_\n\n`;
+    out += `## ${cell(r.title)}\n\n_For ${cell(whoLabel(r.forWhom, state.settings))}${r.prepMinutes ? `, ${r.prepMinutes} min` : ""}_\n\n`;
     if (r.ingredients?.length) out += r.ingredients.map((i) => `- ${cell(i.name)}${formatQty(i) ? ` (${formatQty(i)})` : ""}`).join("\n") + "\n\n";
     if (r.steps?.length) out += r.steps.map((s, n) => `${n + 1}. ${cell(s)}`).join("\n") + "\n\n";
   }
@@ -143,7 +145,7 @@ export function sessionMd(state, prev, meta) {
     const d = prev ? now[k] - (prev[k] || 0) : null;
     return `| ${SUMMARY_LABELS[k]} | ${now[k]} | ${d === null ? "" : d > 0 ? "+" + d : d} |`;
   });
-  return `# Check-in ${meta.at}\n\n- By: ${meta.name || "someone"}\n- Device date: ${meta.today}\n${prev ? "" : "- First check-in from this device\n"}\n` +
+  return `# Check-in ${cell(meta.at)}\n\n- By: ${cell(meta.name || "someone")}\n- Device date: ${cell(meta.today)}\n${prev ? "" : "- First check-in from this device\n"}\n` +
     `| | Now | Change since last check-in |\n|---|---|---|\n${rows.join("\n")}\n\n` + dataBlock({ summary: now });
 }
 
@@ -152,12 +154,19 @@ export function toMarkdownFiles(state, meta) {
   const files = {};
   for (const [file, keys] of Object.entries(FILES)) files[file] = WRITERS[file](state, meta) + dataBlock(pick(state, keys));
   const s = summarize(state);
-  files[INDEX] = header("Family Meal Planner data", meta) +
+  files[INDEX] = `# Family Meal Planner data\n\n_Last check-in ${cell(meta.at)}${meta.name ? ` by ${cell(meta.name)}` : ""}._\n\n` +
     `This folder is the family's check-in record. The app saves to it with **Check in** and reads it back with **Load latest**.\n\n` +
     Object.keys(FILES).map((f) => `- [${f.replace(/\.md$/, "").replace(/-/g, " ")}](${f})`).join("\n") +
     `\n- [check-in sessions](sessions/)\n\n${s.mealsPlanned} meals planned, ${s.daysApproved} days approved, ${s.shoppingItems - s.bought} things to buy, ${s.todos - s.todosDone} to-dos open.\n\n` +
     dataBlock({ version: state.version || 1, updatedAt: state.updatedAt || null });
   return files;
+}
+
+// A short fingerprint of a file's text, to skip uploading files that haven't changed.
+export function fingerprint(text) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 0x01000193);
+  return (h >>> 0).toString(16) + ":" + text.length;
 }
 
 // Back from files (path -> text) to app data. Missing or unreadable files are left out,

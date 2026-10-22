@@ -9,6 +9,7 @@ const meta = { at: "2026-10-22 03:30 UTC", name: "Ram", today: "2026-10-22" };
 function sample() {
   const s = defaultState();
   s.updatedAt = "2026-10-22T03:29:00.000Z";
+  s.settings = { ...s.settings, kidName: "Asha", babyName: "Nila" };
   s.days["2026-10-23"] = { meals: { kid_lunchbox: { title: "Lemon rice", forWhom: "kid" }, baby_lunch: { title: "Moong dal khichdi (soft)", forWhom: "baby" } }, schedule: [{ id: "a", time: "08:15", text: "School drop-off" }], status: "approved", approvedAt: "x", changedAfterApproval: false };
   s.shopping = [{ id: "s1", name: "toor dal", quantity: 1, unit: "kg", bought: false }, { id: "s2", name: "paneer", quantity: null, unit: "", bought: true }];
   s.todos = [{ id: "t1", text: "Buy dresses | <b>party</b> -->", who: "kid", date: "2026-10-23", time: "", done: false }];
@@ -31,8 +32,9 @@ test("SYNC-02 the files are readable Markdown with names, and '-->' in text can'
   assert.match(files["meal-plan.md"], /## 2026-10-23 · ✅ Approved/);
   assert.match(files["meal-plan.md"], /\| School lunchbox \| Lemon rice \|/);
   assert.match(files["shopping-list.md"], /- \[x\] paneer/);
-  assert.match(files["todo.md"], /- \[ \] Buy dresses \\\| <b>party<\/b> --> · Dhari/);
+  assert.match(files["todo.md"], /- \[ \] Buy dresses \\\| <b>party<\/b> --> · Asha/);
   assert.match(files["reminders.md"], /Maya vaccine/);
+  assert.match(files["meal-plan.md"], /\| Nila lunch \| Moong dal khichdi/);
   assert.match(files["recipes.md"], /## Ragi dosa[\s\S]*1\. Mix\./);
   assert.equal(readDataBlock(files["todo.md"]).todos[0].text, "Buy dresses | <b>party</b> -->");
 });
@@ -56,4 +58,17 @@ test("SYNC-04 the session log shows what changed since the last check-in", () =>
   assert.match(md, /\| Meals planned \| 2 \| \+2 \|/);
   assert.match(md, /\| To-dos done \| 0 \| -1 \|/);
   assert.match(sessionMd(s, null, meta), /First check-in from this device/);
+});
+
+test("SYNC-05 names come from the family's settings; without them labels use the ages", async () => {
+  const { whoLabel, slotLabel, SLOTS } = await import("../public/shared/plan.js");
+  assert.equal(whoLabel("kid", {}, { age: true }), "4-year-old");
+  assert.equal(whoLabel("baby", {}), "Baby");
+  assert.equal(whoLabel("kid", { kidName: "Asha" }, { age: true }), "Asha (4 yrs)");
+  assert.equal(whoLabel("both", { kidName: "Asha", babyName: "Nila" }), "Asha and Nila");
+  assert.equal(slotLabel(SLOTS.find((x) => x.id === "baby_lunch"), {}), "Baby lunch");
+  assert.equal(slotLabel(SLOTS.find((x) => x.id === "kid_breakfast"), { kidName: "Asha" }), "Asha breakfast");
+  const s = sample();
+  const a = toMarkdownFiles(s, meta), b = toMarkdownFiles(s, { ...meta, at: "later", name: "Someone else" });
+  for (const f of Object.keys(FILES)) assert.equal(a[f], b[f], f + " should not change when only the time or person changes");
 });
