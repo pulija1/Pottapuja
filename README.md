@@ -13,11 +13,11 @@ All data lives in the browser (localStorage). There is a backup download and res
 ## Run it
 
 ```bash
-cd meal-planner
 npm install
 ANTHROPIC_API_KEY=sk-ant-... npm start      # AI recipes on, http://localhost:3000
 npm run start:mock                          # no key needed: AI answers come from the built-in recipe book
-npm test                                    # unit tests (node:test)
+npm test                                    # unit and API tests (node:test)
+npm run test:e2e                            # browser tests (Playwright, Chromium)
 ```
 
 ### Settings (environment variables)
@@ -49,7 +49,7 @@ The app never depends on the AI. If `/api/recipes` fails, times out (50 s in the
 ## Layout
 
 ```
-meal-planner/
+./
   server.js           static files + /api routes (Node, no framework)
   lib/ai.js           Claude call with structured output, mock/off modes, safety screening
   public/             the browser app (plain ES modules, no build step)
