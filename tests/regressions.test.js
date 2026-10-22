@@ -85,3 +85,13 @@ test("AGE-26 common 'no salt or sugar' phrasings are not flagged", () => {
   assert.equal(baby(["rice"], ["Skip the sugar and add honey."]).safe, false);
   assert.equal(baby(["rice"], ["Avoid salt; add a little jaggery."]).safe, false);
 });
+
+test("AGE-27 nuts described as crunchy, coarse or in pieces are blocked even after blending", () => {
+  assert.equal(baby(["rice"], ["Blend the cashews briefly for a crunchy topping."]).safe, false);
+  assert.equal(baby(["rice"], ["Grind the almonds coarsely and sprinkle the bits on top."]).safe, false);
+});
+
+test("AGE-28 'and' joins a negated list too: 'Avoid salt and sugar'", () => {
+  assert.equal(baby(["rice"], ["Avoid salt and sugar."]).safe, true);
+  assert.equal(baby(["rice"], ["Avoid salt and add jaggery."]).safe, false);
+});
