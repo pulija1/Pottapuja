@@ -1,0 +1,157 @@
+// Shopping list helpers: name normalising, unit conversion, merging, and aisle grouping.
+
+const UNIT_ALIASES = {
+  g: "g", gm: "g", gms: "g", gram: "g", grams: "g",
+  kg: "kg", kgs: "kg", kilo: "kg", kilos: "kg", kilogram: "kg", kilograms: "kg",
+  ml: "ml", millilitre: "ml", milliliter: "ml", millilitres: "ml", milliliters: "ml",
+  l: "l", ltr: "l", litre: "l", liter: "l", litres: "l", liters: "l",
+  tsp: "tsp", teaspoon: "tsp", teaspoons: "tsp",
+  tbsp: "tbsp", tablespoon: "tbsp", tablespoons: "tbsp",
+  cup: "cup", cups: "cup",
+  pc: "pcs", pcs: "pcs", piece: "pcs", pieces: "pcs", nos: "pcs", no: "pcs", "": "pcs",
+  bunch: "bunch", bunches: "bunch", packet: "packet", packets: "packet", pack: "packet",
+  dozen: "dozen",
+};
+
+// Units that convert into a common base so 500 g + 1 kg merge to 1.5 kg.
+const BASE = { g: ["g", 1], kg: ["g", 1000], ml: ["ml", 1], l: ["ml", 1000], dozen: ["pcs", 12], pcs: ["pcs", 1] };
+
+export function normUnit(u) {
+  const k = String(u ?? "").trim().toLowerCase().replace(/\.$/, "");
+  return UNIT_ALIASES[k] ?? k;
+}
+
+const SYNONYMS = {
+  "toor dal": "toor dal", "tuvar dal": "toor dal", "arhar dal": "toor dal", "kandi pappu": "toor dal", "thuvaram paruppu": "toor dal",
+  "moong dal": "moong dal", "mung dal": "moong dal", "pesara pappu": "moong dal", "yellow moong dal": "moong dal", "split moong dal": "moong dal",
+  "urad dal": "urad dal", "minapa pappu": "urad dal", "ulundu": "urad dal",
+  "curd": "curd", "yogurt": "curd", "yoghurt": "curd", "perugu": "curd", "thayir": "curd", "dahi": "curd",
+  "ragi flour": "ragi flour", "finger millet flour": "ragi flour", "nachni flour": "ragi flour",
+  "ragi": "ragi flour",
+  "rava": "rava", "sooji": "rava", "suji": "rava", "semolina": "rava", "upma rava": "rava",
+  "curry leaves": "curry leaves", "karivepaku": "curry leaves", "kadi patta": "curry leaves",
+  "coriander leaves": "coriander leaves", "cilantro": "coriander leaves", "kothimeera": "coriander leaves",
+  "ghee": "ghee", "neyyi": "ghee",
+  "tomato": "tomato", "tomatoes": "tomato",
+  "potato": "potato", "potatoes": "potato", "aloo": "potato",
+  "onion": "onion", "onions": "onion",
+  "carrot": "carrot", "carrots": "carrot",
+  "banana": "banana", "bananas": "banana",
+  "apple": "apple", "apples": "apple",
+  "egg": "egg", "eggs": "egg",
+  "lemon": "lemon", "lemons": "lemon", "lime": "lemon",
+  "sweet potato": "sweet potato", "sweet potatoes": "sweet potato",
+  "idli batter": "idli/dosa batter", "dosa batter": "idli/dosa batter", "idli dosa batter": "idli/dosa batter",
+  "vermicelli": "vermicelli", "semiya": "vermicelli", "semia": "vermicelli",
+};
+
+export function normName(name) {
+  const k = String(name || "").trim().toLowerCase().replace(/\s+/g, " ");
+  if (SYNONYMS[k]) return SYNONYMS[k];
+  // simple plural -> singular
+  if (k.endsWith("es") && SYNONYMS[k.slice(0, -2)]) return SYNONYMS[k.slice(0, -2)];
+  if (k.endsWith("s") && SYNONYMS[k.slice(0, -1)]) return SYNONYMS[k.slice(0, -1)];
+  return k;
+}
+
+const AISLES = [
+  ["Vegetables", /\b(tomato|onion|potato|carrot|beans|brinjal|okra|bhindi|drumstick|spinach|palak|gourd|cabbage|cauliflower|peas|capsicum|chill?i|ginger|garlic|curry leaves|coriander leaves|mint|pumpkin|sweet potato|beetroot|cucumber|lemon|plantain|raw banana|yam|colocasia)\b/],
+  ["Fruits", /\b(banana|apple|pear|papaya|mango|chikoo|sapota|grape|pomegranate|orange|avocado|guava|watermelon|melon|berries|strawberr)/],
+  ["Rice, dals & flours", /\b(rice|dal|ragi|rava|flour|atta|poha|aval|vermicelli|millet|oats|besan|maida|sabudana|batter)\b/],
+  ["Dairy & eggs", /\b(milk|curd|ghee|butter|paneer|cheese|egg|cream)\b/],
+  ["Spices & tempering", /\b(salt|turmeric|cumin|jeera|mustard|hing|asafoetida|pepper|chill?i powder|sambar powder|rasam powder|cardamom|elaichi|cinnamon|clove|tamarind|jaggery|sugar|seeds|masala|methi)\b/],
+  ["Oil, nuts & dry fruits", /\b(oil|cashew|almond|peanut|groundnut|walnut|raisin|dates|coconut)\b/],
+  ["Baby care", /\b(diaper|wipes|formula|cerelac|baby|sipper|bib)\b/],
+  ["School & household", /\b(tissue|napkin|foil|lunch ?box|bottle|soap|detergent|bag)\b/],
+];
+
+export function aisleFor(name) {
+  const n = normName(name);
+  for (const [aisle, re] of AISLES) if (re.test(n)) return aisle;
+  return "Other";
+}
+
+export const AISLE_ORDER = [...AISLES.map((a) => a[0]), "Other"];
+
+function toBase(qty, unit) {
+  const b = BASE[unit];
+  if (!b || typeof qty !== "number" || !isFinite(qty)) return null;
+  return { unit: b[0], qty: qty * b[1] };
+}
+
+function fromBase(qty, baseUnit) {
+  if (baseUnit === "g" && qty >= 1000) return { quantity: round(qty / 1000), unit: "kg" };
+  if (baseUnit === "ml" && qty >= 1000) return { quantity: round(qty / 1000), unit: "l" };
+  return { quantity: round(qty), unit: baseUnit };
+}
+
+function round(n) {
+  return Math.round(n * 100) / 100;
+}
+
+// Merge a list of {name, quantity, unit, ...} into one entry per (name, compatible unit).
+// Quantities that cannot be added (missing, or incompatible units) are kept as separate lines.
+export function mergeItems(items) {
+  const out = new Map();
+  for (const raw of items || []) {
+    if (!raw || !String(raw.name || "").trim()) continue;
+    const name = normName(raw.name);
+    const unit = normUnit(raw.unit);
+    const qty = raw.quantity === "" || raw.quantity == null ? null : Number(raw.quantity);
+    const base = qty != null && !isNaN(qty) ? toBase(qty, unit) : null;
+    const key = base ? `${name}|${base.unit}` : `${name}|${unit}`;
+    const existing = out.get(key);
+    const sources = raw.source ? [raw.source] : [];
+    if (!existing) {
+      out.set(key, {
+        ...raw,
+        name,
+        quantity: base ? base.qty : qty != null && !isNaN(qty) ? qty : null,
+        unit: base ? base.unit : unit,
+        aisle: raw.aisle || aisleFor(name),
+        sources,
+        bought: !!raw.bought,
+        _base: !!base,
+      });
+    } else {
+      if (existing.quantity != null && qty != null && !isNaN(qty)) {
+        existing.quantity = round(existing.quantity + (base ? base.qty : qty));
+      } else if (existing.quantity == null && qty != null && !isNaN(qty)) {
+        existing.quantity = base ? base.qty : qty;
+      }
+      for (const s of sources) if (!existing.sources.includes(s)) existing.sources.push(s);
+      existing.bought = existing.bought && !!raw.bought;
+      if (!existing.store && raw.store) existing.store = raw.store;
+    }
+  }
+  return [...out.values()].map((e) => {
+    const { _base, ...rest } = e;
+    if (_base && rest.quantity != null) Object.assign(rest, fromBase(rest.quantity, rest.unit));
+    return rest;
+  });
+}
+
+export function groupByAisle(items) {
+  const groups = new Map(AISLE_ORDER.map((a) => [a, []]));
+  for (const it of items) {
+    const a = it.aisle && groups.has(it.aisle) ? it.aisle : aisleFor(it.name);
+    groups.get(a).push(it);
+  }
+  for (const list of groups.values()) list.sort((x, y) => x.name.localeCompare(y.name));
+  return [...groups.entries()].filter(([, list]) => list.length);
+}
+
+export function formatQty(item) {
+  if (item.quantity == null || item.quantity === "") return item.unit && item.unit !== "pcs" ? item.unit : "";
+  return `${item.quantity} ${item.unit || ""}`.trim();
+}
+
+// Items needed by a recipe that are not in the pantry.
+export function missingFromPantry(recipe, pantry) {
+  const have = new Set((pantry || []).map((p) => normName(typeof p === "string" ? p : p.name)));
+  const BASICS = new Set(["water", "salt", "oil"]);
+  return (recipe?.ingredients || []).filter((i) => {
+    const n = normName(i.name);
+    return n && !have.has(n) && !BASICS.has(n);
+  });
+}

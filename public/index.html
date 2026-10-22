@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#1f6f5c">
+  <title>Family Meal Planner</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="modulepreload" href="app.js">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo" aria-hidden="true">🍛</span>
+      <div>
+        <h1>Family Meal Planner</h1>
+        <p class="sub" id="today-label" data-testid="today-label"></p>
+      </div>
+    </div>
+    <button class="ai-chip" id="ai-chip" data-testid="ai-status" type="button" title="Recipe AI status">AI: checking…</button>
+  </header>
+
+  <nav class="tabs" role="tablist" aria-label="Sections">
+    <button role="tab" data-tab="calendar" data-testid="tab-calendar" aria-selected="true"><span aria-hidden="true">📅</span>Calendar</button>
+    <button role="tab" data-tab="recipes" data-testid="tab-recipes"><span aria-hidden="true">🥣</span>Recipes</button>
+    <button role="tab" data-tab="shopping" data-testid="tab-shopping"><span aria-hidden="true">🛒</span>Shopping</button>
+    <button role="tab" data-tab="bring" data-testid="tab-bring"><span aria-hidden="true">🎒</span>To bring</button>
+    <button role="tab" data-tab="reminders" data-testid="tab-reminders"><span aria-hidden="true">⏰</span>Reminders</button>
+  </nav>
+
+  <main id="main">
+    <section id="view-calendar" class="view" data-testid="view-calendar"></section>
+    <section id="view-recipes" class="view" hidden data-testid="view-recipes"></section>
+    <section id="view-shopping" class="view" hidden data-testid="view-shopping"></section>
+    <section id="view-bring" class="view" hidden data-testid="view-bring"></section>
+    <section id="view-reminders" class="view" hidden data-testid="view-reminders"></section>
+  </main>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" data-testid="toast"></div>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
