@@ -4,7 +4,9 @@
 //   { safe, errors: [{ rule, message, match }], warnings: [{ rule, message, match }] }
 // A recipe is "safe" when it has no errors. Warnings are shown but do not block.
 
-const NEGATION = /\b(no|without|skip|omit|avoid|don'?t add|do not add|never add|free of|instead of)\b[^.;,]{0,25}$/i;
+// The negation must sit right before the word ("no salt", "skip the sugar"), so
+// "skip the sugar and add honey" still catches the honey.
+const NEGATION = /\b(no|without|skip|omit|avoid|don'?t add|do not add|never add|free of|instead of)\s+((the|any|added|extra|a|of)\s+){0,2}$/i;
 
 // Words that contain "nut" but are not tree nuts or peanuts.
 const NOT_NUTS = /\b(coconut|nutmeg|butternut|doughnut|donut|nutrition|nutritious|nutrient|nutrients)\b/gi;
@@ -15,24 +17,27 @@ const WHOLE_NUT = /\b(peanuts?|groundnuts?|cashews?|almonds?|walnuts?|pistachios
 const GROUND_AFTER = /^\s*(powder|paste|butter|flour|meal|milk)\b/i;
 const GROUND_BEFORE = /\b(ground|powdered|finely ground)\s+(\w+\s+)?$/i;
 
-// True if any nut in the text is not in a ground form.
+// For the baby a nut is allowed only when it is clearly ground:
+//   (a) the name is a ground form: "cashew powder", "peanut butter", "almond milk", "ground almonds"
+//   (b) a grinding verb acts on it directly: "grind the soaked cashews", "blend almonds"
+//   (c) it is ground to a powder or paste right after: "cashews ground to a fine paste",
+//       "soak almonds overnight, peel and grind to a fine powder"
+// Nut oils and "nut-free" are not nuts. Everything else counts as a whole or chopped nut.
+const VERB_BEFORE = /\b(grind|blend|powder|crush|puree|pulse)\s+(the\s+)?((soaked|peeled|roasted|blanched|dry[- ]roasted)\s+){0,2}$/i;
+const GROUND_LATER = /^\s*(?:,?\s*(?:overnight|peel(?:ed)?|and|then|soaked|dry|roast(?:ed)?|lightly|well)\b\s*,?)*\s*(?:ground|grind|blend(?:ed)?|powder(?:ed)?)\s+(?:to|into)\s+(?:a\s+)?(?:very\s+)?(?:fine|smooth)?\s*(?:powder|paste)\b/i;
+
+// Returns the first nut in the text that is not clearly ground, or null.
 function findWholeNut(text) {
   const re = new RegExp(WHOLE_NUT.source, "gi");
   let m;
   while ((m = re.exec(text)) !== null) {
     if (isNegated(text, m.index)) continue;
-    const after = text.slice(m.index + m[0].length, m.index + m[0].length + 12);
-    const before = text.slice(Math.max(0, m.index - 30), m.index);
-    if (GROUND_AFTER.test(after) || GROUND_BEFORE.test(before)) continue;
-    // "groundnut oil", "nut-free"
-    if (/^\s*(oil\b|-?\s*free\b)/i.test(after)) continue;
-    // Ground at home in the same sentence: "cashews ground to a fine paste", "soak almonds, grind to a powder".
-    // "whole cashews", "chopped almonds", "roasted peanuts" are never ground.
-    if (/\b(whole|chopped|halved|roasted|fried|toasted|slivered|sliced|crushed)\s+(\w+\s+)?$/i.test(before)) return m;
-    // The grinding must apply to this nut: stop at the end of the sentence or a new step ("then", "serve", "top").
-    const clause = text.slice(m.index + m[0].length).split(/[.;]|\b(?:then|serve|top|garnish|sprinkle)\b/i)[0];
-    const near = clause.split(/\s+/).slice(0, 9).join(" ");
-    if (/\b(ground|grind|grinded|powder(ed)?|paste|blend(ed)?)\b/i.test(near)) continue;
+    const rest = text.slice(m.index + m[0].length);
+    const before = text.slice(Math.max(0, m.index - 40), m.index);
+    if (/^\s*(oil\b|-?\s*free\b)/i.test(rest)) continue;
+    if (GROUND_AFTER.test(rest.slice(0, 12)) || GROUND_BEFORE.test(before)) continue;
+    if (VERB_BEFORE.test(before)) continue;
+    if (GROUND_LATER.test(rest)) continue;
     return m;
   }
   return null;
@@ -40,7 +45,7 @@ function findWholeNut(text) {
 
 const RULES = {
   baby: [
-    { rule: "honey", level: "error", re: /\b(honey|thene|then(?= \(honey\))|tene|jenu|madhu|shahad)\b/i,
+    { rule: "honey", level: "error", re: /\b(honey(ed|s)?|thene|then(?= \(honey\))|tene|jenu|madhu|shahad)\b/i,
       message: "Honey is not safe under 12 months (infant botulism risk)." },
     { rule: "added-salt", level: "error",
       re: /\b(salt|salted|namak|uppu|rock salt|sea salt|black salt|kala namak)\b/i,

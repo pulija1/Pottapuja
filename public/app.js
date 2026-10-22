@@ -6,8 +6,8 @@ import { mergeItems, groupByAisle, formatQty, missingFromPantry, normName, normU
 import { SLOTS, emptyDay, getDay, dayHasPlan, markEdited, approveDay, unapproveDay, slotsFor, bringItemsFor, remindersOn, pendingFor, dayStatus } from "./shared/plan.js";
 
 const state = load();
-const TODAY = todayKey();
-const AI_TIMEOUT_MS = 60000;
+let TODAY = todayKey();
+const AI_TIMEOUT_MS = 50000;  // the server gives up at 40 s
 
 const ui = {
   tab: "calendar",
@@ -52,6 +52,35 @@ function toast(msg) {
 
 function commit() {
   save(state);
+  clearCaches();
+  render();
+}
+
+// The calendar asks for pending items and reminders of 42 days on every render; cache them until data changes.
+const pendCache = new Map();
+const remCache = new Map();
+function clearCaches() {
+  pendCache.clear();
+  remCache.clear();
+}
+function pend(key) {
+  if (!pendCache.has(key)) pendCache.set(key, pendingFor(state, key, TODAY));
+  return pendCache.get(key);
+}
+function remsOn(key) {
+  if (!remCache.has(key)) remCache.set(key, remindersOn(state, key));
+  return remCache.get(key);
+}
+
+// "Today" moves on at midnight even if the app stays open.
+function refreshToday() {
+  const now = todayKey();
+  if (now === TODAY) return;
+  if (ui.selected === TODAY) ui.selected = now;
+  if (ui.month === TODAY) ui.month = now;
+  TODAY = now;
+  window.__mealPlanner.TODAY = now;
+  clearCaches();
   render();
 }
 
@@ -167,13 +196,13 @@ function renderCalendar() {
   const dows = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
   const grid = cells.map((c) => {
     const st = dayStatus(state, c.key);
-    const pend = pendingFor(state, c.key, TODAY);
-    const rems = remindersOn(state, c.key).length;
+    const pending = pend(c.key);
+    const rems = remsOn(c.key).length;
     const cls = ["cal-cell", c.inMonth ? "" : "out", c.key === TODAY ? "today" : "", c.key === ui.selected ? "sel" : ""].join(" ");
-    const label = `${prettyDate(c.key)}: ${st === "approved" ? "approved" : st === "pending" ? "waiting for approval" : "no plan"}${pend.length ? ", " + pend.length + " pending" : ""}`;
-    return `<button type="button" class="${cls}" data-action="select-day" data-date="${c.key}" data-testid="cal-day-${c.key}" data-status="${st}" data-pending="${pend.length}" aria-label="${esc(label)}">
+    const label = `${prettyDate(c.key)}: ${st === "approved" ? "approved" : st === "pending" ? "waiting for approval" : "no plan"}${pending.length ? ", " + pending.length + " pending" : ""}`;
+    return `<button type="button" class="${cls}" data-action="select-day" data-date="${c.key}" data-testid="cal-day-${c.key}" data-status="${st}" data-pending="${pending.length}" aria-label="${esc(label)}">
       <span class="d">${c.day}</span>
-      <span class="marks"><span class="dot ${st}"></span>${pend.length ? `<span class="badge" title="Pending">${pend.length}</span>` : ""}${rems ? `<span class="badge rem" title="Reminders">⏰${rems}</span>` : ""}</span>
+      <span class="marks"><span class="dot ${st}"></span>${pending.length ? `<span class="badge" title="Pending">${pending.length}</span>` : ""}${rems ? `<span class="badge rem" title="Reminders">⏰${rems}</span>` : ""}</span>
     </button>`;
   }).join("");
 
@@ -211,7 +240,7 @@ function renderUpcomingPending() {
   const rows = [];
   for (let i = -7; i <= 13; i++) {
     const k = addDays(TODAY, i);
-    const p = pendingFor(state, k, TODAY);
+    const p = pend(k);
     if (p.length) rows.push({ k, p });
   }
   if (!rows.length) return `<div class="card"><h2>Pending</h2><p class="muted">Nothing pending in the next two weeks.</p></div>`;
@@ -241,12 +270,12 @@ function slotDatalist(who) {
 function renderDayPanel(key) {
   const day = getDay(state, key) || emptyDay();
   const st = dayStatus(state, key);
-  const pend = pendingFor(state, key, TODAY);
+  const pendList = pend(key);
   const slots = slotsFor(key);
   const hasPlan = dayHasPlan(day);
   const bring = bringItemsFor(state, key);
   const packed = bring.filter((b) => b.packed).length;
-  const rems = remindersOn(state, key);
+  const rems = remsOn(key);
   const issues = slotIssues(key);
   const issueList = Object.values(issues);
 
@@ -268,7 +297,7 @@ function renderDayPanel(key) {
       ${isSchoolDay(key) ? '<span class="pill kid">School day</span>' : '<span class="pill">Weekend</span>'}</div>
     ${banner}
     ${safetyBox}
-    ${pend.length ? `<h3>Pending for this date</h3><ul class="pending-list" data-testid="day-pending">${pend.map((p) => `<li data-type="${p.type}">${{ approval: "⏳", plan: "📝", reminder: "⏰", bring: "🎒" }[p.type]} ${esc(p.text)}${p.overdue ? ' <span class="pill bad">overdue</span>' : ""}</li>`).join("")}</ul>` : `<p class="small muted" data-testid="day-pending-none">Nothing pending for this date.</p>`}
+    ${pendList.length ? `<h3>Pending for this date</h3><ul class="pending-list" data-testid="day-pending">${pendList.map((p) => `<li data-type="${p.type}">${{ approval: "⏳", plan: "📝", reminder: "⏰", bring: "🎒" }[p.type]} ${esc(p.text)}${p.overdue ? ' <span class="pill bad">overdue</span>' : ""}</li>`).join("")}</ul>` : `<p class="small muted" data-testid="day-pending-none">Nothing pending for this date.</p>`}
 
     <h3>Meals</h3>
     <div data-testid="day-meals">
@@ -457,9 +486,16 @@ async function generate(form) {
   }
 }
 
+// Items can carry a `key` (date|slot|recipe|ingredient). An item whose key is already on the
+// list and not yet bought is skipped, so pressing "add" twice doesn't double the quantities.
+// Returns how many items were added.
 function addToShopping(items, source) {
-  const fresh = items.map((i) => ({ id: uid(), name: i.name, quantity: i.quantity ?? null, unit: normUnit(i.unit), store: i.store || "", bought: false, source }));
+  const onList = new Set(state.shopping.filter((i) => !i.bought).flatMap((i) => i.keys || []));
+  const fresh = items
+    .filter((i) => !i.key || !onList.has(i.key))
+    .map((i) => ({ id: uid(), name: i.name, quantity: i.quantity ?? null, unit: normUnit(i.unit), store: i.store || "", bought: false, source: i.source || source, keys: i.key ? [i.key] : [] }));
   state.shopping = mergeItems([...state.shopping, ...fresh]).map((i) => ({ ...i, id: i.id || uid() }));
+  return fresh.length;
 }
 
 function planDialog(recipe) {
@@ -555,9 +591,9 @@ function plannedRecipes(fromKey_, days) {
     const k = addDays(fromKey_, i);
     const d = getDay(state, k);
     if (!d) continue;
-    for (const m of Object.values(d.meals || {})) {
+    for (const [slot, m] of Object.entries(d.meals || {})) {
       const r = m?.recipeId ? findRecipe(m.recipeId) : findRecipeByTitle(m?.title);
-      if (r) out.push({ date: k, recipe: r });
+      if (r) out.push({ date: k, slot, recipe: r });
     }
   }
   return out;
@@ -610,13 +646,24 @@ function renderBring() {
 const CATS = { school: "🏫 School", health: "🩺 Doctor / vaccine", family: "🎉 Family event", shopping: "🛒 Shopping", other: "📌 Other" };
 
 function renderReminders(prefillDate) {
-  const from = addDays(TODAY, -14);
-  const to = addDays(TODAY, 60);
+  // One row per reminder: a one-off shows its date; a repeating one shows its next date
+  // (today's if it is not done yet). Missed: one-offs in the last 14 days that were not ticked.
   const occ = [];
-  for (const r of state.reminders) for (const d of occurrences(r, from, to)) occ.push({ r, d, done: !!r.done?.[d] });
-  occ.sort((a, b) => (a.d + (a.r.time || "99")).localeCompare(b.d + (b.r.time || "99")));
-  const overdue = occ.filter((o) => o.d < TODAY && !o.done);
-  const upcoming = occ.filter((o) => o.d >= TODAY);
+  const overdue = [];
+  for (const r of state.reminders) {
+    if (!r.repeat || r.repeat === "none") {
+      const o = { r, d: r.date, done: !!r.done?.[r.date] };
+      if (r.date < TODAY) { if (!o.done && r.date >= addDays(TODAY, -14)) overdue.push(o); }
+      else occ.push(o);
+      continue;
+    }
+    const next = occurrences(r, TODAY, addDays(TODAY, 62)).find((d) => d > TODAY || !r.done?.[d]);
+    if (next) occ.push({ r, d: next, done: false });
+  }
+  const byDate = (a, b) => (a.d + (a.r.time || "99")).localeCompare(b.d + (b.r.time || "99"));
+  occ.sort(byDate);
+  overdue.sort(byDate);
+  const upcoming = occ;
   const row = (o) => `<div class="rem ${o.done ? "done" : ""} ${o.d < TODAY && !o.done ? "overdue" : ""}" data-testid="reminder-item">
       <input type="checkbox" data-action="rem-done" data-id="${esc(o.r.id)}" data-date="${o.d}" ${o.done ? "checked" : ""} aria-label="Done" style="width:22px;height:22px">
       <span class="when">${esc(prettyDate(o.d))}${o.r.time ? "<br>" + esc(o.r.time) : ""}</span>
@@ -722,11 +769,11 @@ document.addEventListener("click", (e) => {
       break;
     }
     case "day-to-shopping": {
-      const needs = plannedRecipes(ui.selected, 1).flatMap(({ recipe }) => shoppingNeeds(recipe).map((i) => ({ ...i })));
+      const needs = plannedRecipes(ui.selected, 1).flatMap(({ date, slot, recipe }) => shoppingNeeds(recipe).map((i) => ({ ...i, key: `${date}|${slot}|${recipe.id}|${normName(i.name)}` })));
       if (!needs.length) { toast("Nothing missing for this day's meals."); break; }
-      addToShopping(needs, prettyDate(ui.selected));
+      const added = addToShopping(needs, prettyDate(ui.selected));
       commit();
-      toast(`Added ${needs.length} item${needs.length > 1 ? "s" : ""} to the shopping list.`);
+      toast(added ? `Added ${added} item${added > 1 ? "s" : ""} to the shopping list.` : "Already on the shopping list.");
       break;
     }
     case "del-sched": { const d = day(); d.schedule = d.schedule.filter((s) => s.id !== el.dataset.id); markEdited(d); commit(); break; }
@@ -765,10 +812,10 @@ document.addEventListener("click", (e) => {
     case "recipe-to-shopping": {
       const r = findRecipe(el.dataset.id);
       if (!r) break;
-      const need = shoppingNeeds(r);
-      addToShopping(need, r.title);
+      const need = shoppingNeeds(r).map((i) => ({ ...i, key: `recipe|${r.id}|${normName(i.name)}` }));
+      const added = addToShopping(need, r.title);
       commit();
-      toast(`Added ${need.length} item${need.length > 1 ? "s" : ""} to the shopping list.`);
+      toast(added ? `Added ${added} item${added > 1 ? "s" : ""} to the shopping list.` : "Already on the shopping list.");
       break;
     }
 
@@ -776,11 +823,11 @@ document.addEventListener("click", (e) => {
     case "shop-store": ui.shopStore = el.dataset.store; render(); break;
     case "shop-del": state.shopping = state.shopping.filter((i) => i.id !== el.dataset.id); commit(); break;
     case "plan-to-shopping": {
-      const needs = plannedRecipes(TODAY, 7).flatMap(({ date, recipe }) => shoppingNeeds(recipe).map((i) => ({ ...i, source: prettyDate(date) })));
+      const needs = plannedRecipes(TODAY, 7).flatMap(({ date, slot, recipe }) => shoppingNeeds(recipe).map((i) => ({ ...i, source: prettyDate(date), key: `${date}|${slot}|${recipe.id}|${normName(i.name)}` })));
       if (!needs.length) { toast("Nothing missing for the next 7 days of planned meals."); break; }
-      for (const n of needs) addToShopping([n], n.source);
+      const added = addToShopping(needs);
       commit();
-      toast(`Added ${needs.length} ingredient${needs.length > 1 ? "s" : ""} from the meal plan.`);
+      toast(added ? `Added ${added} ingredient${added > 1 ? "s" : ""} from the meal plan.` : "Everything for the next 7 days is already on the list.");
       break;
     }
     case "bought-to-pantry": {
@@ -875,6 +922,7 @@ document.addEventListener("change", (e) => {
           for (const k of Object.keys(state)) delete state[k];
           Object.assign(state, next);
           save(state, { now: true });
+          clearCaches();
           render();
           toast("Backup restored.");
         } catch (err) {
@@ -966,7 +1014,10 @@ document.addEventListener("submit", (e) => {
 });
 
 window.addEventListener("pagehide", () => save(state, { now: true }));
-document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") save(state, { now: true }); });
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") save(state, { now: true });
+  else refreshToday();
+});
 window.addEventListener("online", checkAi);
 window.addEventListener("offline", () => { ui.ai = "unreachable"; renderHeader(); });
 
@@ -975,7 +1026,7 @@ const initialTab = location.hash.replace("#", "");
 setTab(["calendar", "recipes", "shopping", "bring", "reminders"].includes(initialTab) ? initialTab : "calendar");
 checkAi();
 checkDueReminders();
-setInterval(checkDueReminders, 30000);
+setInterval(() => { refreshToday(); checkDueReminders(); }, 30000);
 
 // Exposed for tests and debugging in the console.
 window.__mealPlanner = { state, ui, TODAY };

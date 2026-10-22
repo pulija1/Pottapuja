@@ -16,7 +16,7 @@ const UNIT_ALIASES = {
 };
 
 // Units that convert into a common base so 500 g + 1 kg merge to 1.5 kg.
-const BASE = { g: ["g", 1], kg: ["g", 1000], ml: ["ml", 1], l: ["ml", 1000], dozen: ["pcs", 12], pcs: ["pcs", 1] };
+const BASE = { g: ["g", 1], kg: ["g", 1000], ml: ["ml", 1], l: ["ml", 1000], dozen: ["pcs", 12], pcs: ["pcs", 1], tsp: ["tsp", 1], tbsp: ["tsp", 3] };
 
 export function normUnit(u) {
   const k = String(u ?? "").trim().toLowerCase().replace(/\.$/, "");
@@ -66,6 +66,8 @@ export function normName(name) {
   // "ragi flour (finger millet)" -> "ragi flour"
   const k = String(name || "").toLowerCase().replace(/\s*\(.*?\)\s*/g, " ").trim().replace(/\s+/g, " ");
   if (SYNONYMS[k]) return SYNONYMS[k];
+  if (/chill?ies$/.test(k)) return normName(k.replace(/ies$/, "i"));
+  if (k.endsWith("ies") && k.length > 4) return normName(k.slice(0, -3) + "y");
   // simple plural -> singular
   if (k.endsWith("es") && SYNONYMS[k.slice(0, -2)]) return SYNONYMS[k.slice(0, -2)];
   if (k.endsWith("s") && SYNONYMS[k.slice(0, -1)]) return SYNONYMS[k.slice(0, -1)];
@@ -103,6 +105,7 @@ function toBase(qty, unit) {
 function fromBase(qty, baseUnit) {
   if (baseUnit === "g" && qty >= 1000) return { quantity: round(qty / 1000), unit: "kg" };
   if (baseUnit === "ml" && qty >= 1000) return { quantity: round(qty / 1000), unit: "l" };
+  if (baseUnit === "tsp" && qty >= 3 && Math.abs(qty / 3 - Math.round(qty / 3)) < 1e-9) return { quantity: round(qty / 3), unit: "tbsp" };
   return { quantity: round(qty), unit: baseUnit };
 }
 
@@ -122,7 +125,8 @@ export function mergeItems(items) {
     const base = qty != null && !isNaN(qty) ? toBase(qty, unit) : null;
     const key = base ? `${name}|${base.unit}` : `${name}|${unit}`;
     const existing = out.get(key);
-    const sources = raw.source ? [raw.source] : [];
+    const sources = [...(raw.sources || []), ...(raw.source ? [raw.source] : [])];
+    const keys = [...(raw.keys || [])];
     if (!existing) {
       out.set(key, {
         ...raw,
@@ -130,7 +134,8 @@ export function mergeItems(items) {
         quantity: base ? base.qty : qty != null && !isNaN(qty) ? qty : null,
         unit: base ? base.unit : unit,
         aisle: raw.aisle || aisleFor(name),
-        sources,
+        sources: [...new Set(sources)],
+        keys,
         bought: !!raw.bought,
         _base: !!base,
       });
@@ -141,13 +146,14 @@ export function mergeItems(items) {
         existing.quantity = base ? base.qty : qty;
       }
       for (const s of sources) if (!existing.sources.includes(s)) existing.sources.push(s);
+      for (const k of keys) if (!existing.keys.includes(k)) existing.keys.push(k);
       existing.bought = existing.bought && !!raw.bought;
       if (!existing.store && raw.store) existing.store = raw.store;
     }
   }
   return [...out.values()].map((e) => {
     const { _base, ...rest } = e;
-    if ((_base || rest.unit === "g" || rest.unit === "ml") && rest.quantity != null) Object.assign(rest, fromBase(rest.quantity, rest.unit));
+    if ((_base || rest.unit === "g" || rest.unit === "ml" || rest.unit === "tsp") && rest.quantity != null) Object.assign(rest, fromBase(rest.quantity, rest.unit));
     return rest;
   });
 }

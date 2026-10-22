@@ -27,12 +27,12 @@ npm test                                    # unit tests (node:test)
 | `AI_MODE` | `live` if `ANTHROPIC_API_KEY` is set, else `off` | `live` calls Claude, `mock` returns built-in recipes with no network, `off` makes `/api/recipes` answer 503 |
 | `ANTHROPIC_API_KEY` | | Claude API key (server side only, never sent to the browser) |
 | `CLAUDE_MODEL` | `claude-opus-5-5` | Model used for recipes |
-| `AI_TIMEOUT_MS` | `60000` | Server-side timeout for the AI call |
+| `AI_TIMEOUT_MS` | `40000` | Server-side timeout for the AI call |
 | `PORT` | `3000` | |
 
 ### When the AI or the server is down
 
-The app never depends on the AI. If `/api/recipes` fails, times out (60 s, with a Cancel button), or the server can't be reached at all (for example when the `public/` folder is opened from GitHub Pages), the Recipes tab shows the best matches from the built-in recipe book and says why. The calendar, shopping list, bring list and reminders are fully local and keep working offline.
+The app never depends on the AI. If `/api/recipes` fails, times out (50 s in the browser and 40 s on the server, with a Cancel button), or the server can't be reached at all (for example when the `public/` folder is opened from GitHub Pages), the Recipes tab shows the best matches from the built-in recipe book and says why. The calendar, shopping list, bring list and reminders are fully local and keep working offline.
 
 ## For testers
 

@@ -133,3 +133,17 @@ test("server input is bounded and AI output is screened", () => {
   assert.equal(kept.length, 1);
   assert.equal(rejected[0].errors[0].rule, "honey");
 });
+
+test("negation only covers the word right after it", () => {
+  assert.equal(checkRecipe(baby(["rice"], ["Skip the sugar and add honey."]), { age: "baby" }).safe, false);
+  assert.equal(checkRecipe(baby(["honeyed carrots"]), { age: "baby" }).safe, false);
+  assert.equal(checkRecipe(baby(["rice"], ["Skip the sugar."]), { age: "baby" }).safe, true);
+});
+
+test("teaspoons merge into tablespoons and -ies plurals merge", () => {
+  const out = mergeItems([{ name: "ghee", quantity: 1, unit: "tbsp" }, { name: "ghee", quantity: 3, unit: "tsp" }, { name: "berries", quantity: 1, unit: "cup" }, { name: "berry", quantity: 1, unit: "cup" }]);
+  const ghee = out.find((i) => i.name === "ghee");
+  assert.deepEqual([ghee.quantity, ghee.unit], [2, "tbsp"]);
+  assert.equal(out.filter((i) => i.name === "berry").length, 1);
+  assert.equal(normName("green chillies"), "green chilli");
+});

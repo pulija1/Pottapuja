@@ -75,10 +75,16 @@ async function serveStatic(req, res, pathname) {
   try {
     const s = await stat(file);
     if (!s.isFile()) throw new Error("not a file");
+    const etag = `W/"${s.size.toString(16)}-${Math.floor(s.mtimeMs).toString(16)}"`;
+    if (req.headers["if-none-match"] === etag) {
+      res.writeHead(304, { etag, "cache-control": "no-cache" }).end();
+      return;
+    }
     const data = await readFile(file);
     res.writeHead(200, {
       "content-type": TYPES[extname(file)] || "application/octet-stream",
       "cache-control": "no-cache",
+      etag,
     });
     res.end(req.method === "HEAD" ? undefined : data);
   } catch {
