@@ -280,3 +280,8 @@ dialog::backdrop { background: rgba(0,0,0,.35); }
 /* Sign-in page */
 .login-card p { margin: 0; }
 .login-card .btn { width: 100%; }
+label.row { flex-wrap: nowrap; cursor: pointer; }
+label.row > input[type=checkbox] { width: 22px; height: 22px; accent-color: var(--brand); flex: none; margin: 0; }
+
+/* Settings tucked into details blocks in dialogs: space the fields and buttons */
+dialog details > * + * { margin-top: 8px; }
