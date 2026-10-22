@@ -49,3 +49,12 @@ test("REM-11 weekday repeat starting on a weekend skips to Monday", () => {
 test("REM-12 weekly repeat years later still lands on the right weekday", () => {
   assert.deepEqual(occurrences({ date: "2026-01-01", repeat: "weekly" }, "2029-01-01", "2029-01-14"), ["2029-01-04", "2029-01-11"]);
 });
+
+test("AGE-21 'whole' nuts are never treated as ground, even with a blend word later in the sentence", () => {
+  assert.equal(baby(["rice"], ["Add whole cashews on top, then blend the rice."]).safe, false);
+  assert.equal(baby(["rice"], ["Top with whole almonds and serve with a smooth paste of dal."]).safe, false);
+});
+
+test("AGE-22 a garnish of nuts after the blending step is still caught", () => {
+  assert.equal(baby(["rice"], ["Blend the khichdi smooth, then sprinkle chopped cashews on top."]).safe, false);
+});
