@@ -343,3 +343,81 @@ test("E2E UI-03 every tab fits a phone screen without sideways scroll", async ()
   }
   await ctx.close();
 });
+
+test("E2E CAL-07b unsafe baby slot: warning on the slot, approve holds, 'Approve anyway' works", async () => {
+  const { page, ctx, errors } = await open();
+  await planSlot(page, TOMORROW, "baby_breakfast", "Honey ragi porridge");
+  assert.ok((await tid(page, "slot-warning").count()) >= 1);
+  await tid(page, "approve-day").click();
+  assert.equal(await cell(page, TOMORROW).getAttribute("data-status"), "pending");
+  await tid(page, "day-safety").waitFor();
+  await tid(page, "approve-anyway").click();
+  assert.equal(await cell(page, TOMORROW).getAttribute("data-status"), "approved");
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test("E2E CAL-07c a safe day approves in one click with no safety box", async () => {
+  const { page, ctx } = await open();
+  await planSlot(page, TOMORROW, "baby_breakfast", "Ragi porridge (ragi kanji)");
+  assert.equal(await tid(page, "slot-warning").count(), 0);
+  await tid(page, "approve-day").click();
+  assert.equal(await cell(page, TOMORROW).getAttribute("data-status"), "approved");
+  await ctx.close();
+});
+
+test("E2E REM-07 'School days' repeat shows on weekdays only", async () => {
+  const { page, ctx } = await open();
+  await tid(page, "tab-reminders").click();
+  await tid(page, "rem-title").fill("Pack lunchbox");
+  await tid(page, "rem-date").fill(TODAY);
+  await tid(page, "rem-repeat").selectOption("weekdays");
+  await tid(page, "rem-add").click();
+  await tid(page, "tab-calendar").click();
+  await cell(page, TOMORROW).click();
+  assert.ok((await pendingTypes(page)).includes("reminder"), "Friday has no reminder");
+  await cell(page, "2026-10-24").click();
+  assert.ok(!(await pendingTypes(page)).includes("reminder"), "Saturday has the school reminder");
+  await ctx.close();
+});
+
+test("E2E AGE-11 school nut-free setting: sent to the API and persists", async () => {
+  const { page, ctx } = await open();
+  let body = null;
+  await page.route("**/api/recipes", async (route) => { body = JSON.parse(route.request().postData()); await route.continue(); });
+  await tid(page, "tab-recipes").click();
+  await tid(page, "school-nut-free").check();
+  await tid(page, "gen-for").selectOption("kid");
+  await tid(page, "gen-meal").selectOption("lunchbox");
+  await tid(page, "generate-recipes").click();
+  await tid(page, "recipe-card").first().waitFor({ timeout: 5000 });
+  assert.equal(body?.schoolNutFree, true);
+  assert.equal(await tid(page, "contains-nuts").count(), 0);
+  await page.waitForTimeout(300);
+  await page.reload();
+  await tid(page, "tab-recipes").click();
+  assert.ok(await tid(page, "school-nut-free").isChecked());
+  await ctx.close();
+});
+
+test("E2E REC-12 recipe form keeps For and Meal after a re-render", async () => {
+  const { page, ctx } = await open();
+  await tid(page, "tab-recipes").click();
+  await tid(page, "gen-for").selectOption("kid");
+  await tid(page, "gen-meal").selectOption("lunchbox");
+  await tid(page, "pantry-input").fill("drumstick");
+  await tid(page, "pantry-add").click();
+  assert.equal(await tid(page, "gen-for").inputValue(), "kid");
+  assert.equal(await tid(page, "gen-meal").inputValue(), "lunchbox");
+  await ctx.close();
+});
+
+test("E2E OFF-06 AI off still shows family favorites from the recipe book", async () => {
+  const { page, ctx } = await open(off);
+  await tid(page, "tab-recipes").click();
+  await tid(page, "gen-for").selectOption("family");
+  await tid(page, "generate-recipes").click();
+  await tid(page, "ai-notice").waitFor({ timeout: 5000 });
+  assert.ok((await tid(page, "recipe-card").count()) > 0);
+  await ctx.close();
+});
