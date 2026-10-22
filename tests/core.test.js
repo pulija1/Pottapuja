@@ -26,10 +26,27 @@ test("salt in the steps is caught", () => {
   assert.equal(checkRecipe(baby(["rice"], ["Add a pinch of salt and mash."]), { age: "baby" }).safe, false);
 });
 
-test("nut-free lunchbox for school", () => {
-  const r = { title: "x", forWhom: "kid", mealType: "lunchbox", ingredients: [{ name: "cashews", quantity: 5, unit: "pcs" }], steps: [] };
-  assert.equal(checkForAudience(r).safe, false);
-  assert.equal(checkForAudience({ ...r, mealType: "dinner" }).safe, true);
+test("nut-free lunchbox only when the school-is-nut-free setting is on", () => {
+  const r = { title: "x", forWhom: "kid", mealType: "lunchbox", ingredients: [{ name: "peanut butter", quantity: 1, unit: "tbsp" }], steps: [] };
+  assert.equal(checkForAudience(r).safe, true);
+  assert.equal(checkForAudience(r, { schoolNutFree: true }).safe, false);
+  assert.equal(checkForAudience({ ...r, mealType: "dinner" }, { schoolNutFree: true }).safe, true);
+  const sun = { ...r, ingredients: [{ name: "sunflower butter", quantity: 1, unit: "tbsp" }] };
+  assert.equal(checkForAudience(sun, { schoolNutFree: true }).safe, true);
+});
+
+test("whole nuts warn for the 4-year-old, nut butter does not", () => {
+  const kid = (name) => checkRecipe({ title: "x", ingredients: [{ name }], steps: [] }, { age: "kid" });
+  assert.equal(kid("cashews").warnings[0].rule, "whole-nuts");
+  assert.equal(kid("peanut butter").warnings.length, 0);
+});
+
+test("nut-free setting filters library suggestions and family favorites rank up", () => {
+  const withNuts = suggestFromLibrary([], { forWhom: "kid", limit: 100 });
+  const nutFree = suggestFromLibrary([], { forWhom: "kid", limit: 100, schoolNutFree: true });
+  assert.ok(withNuts.some((r) => r.id === "ds-pb-jam-sandwich"));
+  assert.ok(!nutFree.some((r) => r.id === "ds-pb-jam-sandwich"));
+  assert.equal(suggestFromLibrary(["bread", "peanut butter", "berry jam"], { forWhom: "kid", limit: 1 })[0].id, "ds-pb-jam-sandwich");
 });
 
 test("every built-in recipe passes its own age checks", () => {
@@ -83,9 +100,9 @@ test("missing ingredients skip water, salt and oil", () => {
 
 test("approval flow and pending items", () => {
   const today = "2026-10-22";
-  const state = { days: {}, reminders: [{ id: "r1", title: "PTM", date: today, time: "10:00", repeat: "none", done: {} }], bringTemplates: { kid: ["Lunchbox"], baby: [] } };
+  const state = { days: {}, reminders: [{ id: "r1", title: "PTM", date: today, time: "10:00", repeat: "none", done: {} }], todos: [{ id: "t1", text: "Buy dresses", who: "kid", date: today, done: false }] };
   let p = pendingFor(state, today, today);
-  assert.deepEqual(p.map((x) => x.type).sort(), ["bring", "plan", "reminder"]);
+  assert.deepEqual(p.map((x) => x.type).sort(), ["plan", "reminder", "todo"]);
 
   const d = (state.days[today] = emptyDay());
   d.meals.kid_lunchbox = { title: "Lemon rice" };
@@ -101,9 +118,9 @@ test("approval flow and pending items", () => {
   assert.equal(dayStatus(state, today), "pending");
   assert.equal(d.changedAfterApproval, true);
 
-  // Past days only keep overdue reminders.
+  // Past days only keep overdue reminders and to-dos.
   const past = pendingFor(state, today, "2026-10-25");
-  assert.deepEqual(past.map((x) => x.type), ["reminder"]);
+  assert.deepEqual(past.map((x) => x.type), ["reminder", "todo"]);
   assert.equal(past[0].overdue, true);
 });
 
@@ -115,4 +132,18 @@ test("server input is bounded and AI output is screened", () => {
   const { kept, rejected } = screen([baby(["rice", "honey"]), baby(["rice"])]);
   assert.equal(kept.length, 1);
   assert.equal(rejected[0].errors[0].rule, "honey");
+});
+
+test("negation only covers the word right after it", () => {
+  assert.equal(checkRecipe(baby(["rice"], ["Skip the sugar and add honey."]), { age: "baby" }).safe, false);
+  assert.equal(checkRecipe(baby(["honeyed carrots"]), { age: "baby" }).safe, false);
+  assert.equal(checkRecipe(baby(["rice"], ["Skip the sugar."]), { age: "baby" }).safe, true);
+});
+
+test("teaspoons merge into tablespoons and -ies plurals merge", () => {
+  const out = mergeItems([{ name: "ghee", quantity: 1, unit: "tbsp" }, { name: "ghee", quantity: 3, unit: "tsp" }, { name: "berries", quantity: 1, unit: "cup" }, { name: "berry", quantity: 1, unit: "cup" }]);
+  const ghee = out.find((i) => i.name === "ghee");
+  assert.deepEqual([ghee.quantity, ghee.unit], [2, "tbsp"]);
+  assert.equal(out.filter((i) => i.name === "berry").length, 1);
+  assert.equal(normName("green chillies"), "green chilli");
 });

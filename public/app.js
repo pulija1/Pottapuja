@@ -1,13 +1,13 @@
 import { load, save, exportJson, importJson } from "./store.js";
 import { todayKey, addDays, addMonths, monthGrid, monthLabel, prettyDate, fromKey, isDateKey, isSchoolDay, occurrences } from "./shared/dates.js";
-import { checkForAudience } from "./shared/safety.js";
+import { checkRecipe, checkForAudience, isNutIngredient, isSchoolFood } from "./shared/safety.js";
 import { LIBRARY, suggestFromLibrary } from "./shared/recipes.js";
 import { mergeItems, groupByAisle, formatQty, missingFromPantry, normName, normUnit, aisleFor } from "./shared/shopping.js";
-import { SLOTS, emptyDay, getDay, dayHasPlan, markEdited, approveDay, unapproveDay, slotsFor, bringItemsFor, remindersOn, pendingFor, dayStatus } from "./shared/plan.js";
+import { SLOTS, emptyDay, getDay, dayHasPlan, markEdited, approveDay, unapproveDay, slotsFor, todosOn, MEAL_GROUPS, TODO_IDEAS, remindersOn, pendingFor, dayStatus } from "./shared/plan.js";
 
 const state = load();
-const TODAY = todayKey();
-const AI_TIMEOUT_MS = 60000;
+let TODAY = todayKey();
+const AI_TIMEOUT_MS = 50000;  // the server gives up at 40 s
 
 const ui = {
   tab: "calendar",
@@ -22,8 +22,13 @@ const ui = {
   shopStore: "all",
   storeMode: false,
   hideBought: false,
-  bringDate: nextSchoolDayFrom(TODAY),
+  todoDate: addDays(TODAY, 1),   // the To do tab opens on tomorrow
+  openGroups: new Set(),          // meal sections the parent has expanded in the day panel
+  suggest: {},                    // date -> { seed, picks: { slotId: recipeId } } meal suggestions shown in the day panel
   savedFilter: "",
+  gen: { forWhom: "both", mealType: "", notes: "" },
+  confirmUnsafe: null,    // date whose unsafe plan the parent was warned about
+  // recipe form values survive re-renders
 };
 
 // ---------- helpers ----------
@@ -32,12 +37,6 @@ const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(
 const ESC = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ESC[c]);
 const WHO_LABEL = { baby: "Baby (8 mo)", kid: "4 yr old", family: "Family", both: "Both kids" };
-
-function nextSchoolDayFrom(key) {
-  let k = key;
-  for (let i = 0; i < 7 && !isSchoolDay(k); i++) k = addDays(k, 1);
-  return isSchoolDay(key) ? key : k;
-}
 
 function toast(msg) {
   const t = $("#toast");
@@ -49,6 +48,46 @@ function toast(msg) {
 
 function commit() {
   save(state);
+  clearCaches();
+  render();
+}
+
+// The calendar asks for pending items and reminders of 42 days on every render; cache them until data changes.
+const pendCache = new Map();
+const remCache = new Map();
+// A change that only touches one date (its meals, schedule, to-dos or reminder ticks):
+// drop that date's cached pending list and refresh just its part of the calendar.
+function commitDay(key = ui.selected) {
+  save(state);
+  pendCache.delete(key);
+  remCache.delete(key);
+  for (const e of Object.values(ui.suggest)) e.picks = null;
+  renderDay(key);
+}
+
+function clearCaches() {
+  pendCache.clear();
+  remCache.clear();
+  for (const e of Object.values(ui.suggest)) e.picks = null;
+}
+function pend(key) {
+  if (!pendCache.has(key)) pendCache.set(key, pendingFor(state, key, TODAY));
+  return pendCache.get(key);
+}
+function remsOn(key) {
+  if (!remCache.has(key)) remCache.set(key, remindersOn(state, key));
+  return remCache.get(key);
+}
+
+// "Today" moves on at midnight even if the app stays open.
+function refreshToday() {
+  const now = todayKey();
+  if (now === TODAY) return;
+  if (ui.selected === TODAY) ui.selected = now;
+  if (ui.month === TODAY) ui.month = now;
+  TODAY = now;
+  window.__mealPlanner.TODAY = now;
+  clearCaches();
   render();
 }
 
@@ -73,6 +112,40 @@ function findRecipeByTitle(title, who) {
   const list = [...state.savedRecipes, ...LIBRARY, ...ui.results];
   return list.find((r) => r.title.toLowerCase() === t && (!who || r.forWhom === who || r.forWhom === "family")) ||
     list.find((r) => r.title.toLowerCase() === t) || null;
+}
+
+const nutFreeOn = () => !!state.settings?.schoolNutFree;
+
+// Missing ingredients for a recipe, leaving nuts off the list for school food when the school is nut-free.
+function shoppingNeeds(recipe) {
+  const need = missingFromPantry(recipe, state.pantry);
+  return nutFreeOn() && isSchoolFood(recipe) ? need.filter((i) => !isNutIngredient(i.name)) : need;
+}
+
+// Safety problems for each planned meal on a date, including dishes typed in by hand.
+function slotIssues(key) {
+  const day = getDay(state, key);
+  const out = {};
+  if (!day) return out;
+  for (const s of slotsFor(key)) {
+    const m = day.meals?.[s.id];
+    if (!m?.title || s.who === "family") continue;
+    const linked = m.recipeId ? findRecipe(m.recipeId) : null;
+    const r = linked || { title: m.title, ingredients: [], steps: [] };
+    const forBaby = s.who === "baby";
+    const res = checkRecipe({ ...r, title: m.title }, {
+      age: forBaby ? "baby" : "kid",
+      lunchbox: s.id === "kid_lunchbox" || s.id === "kid_snack",
+      schoolNutFree: nutFreeOn(),
+      nutFreeSwap: r.nutFreeSwap,
+    });
+    if (res.errors.length) {
+      const msgs = res.errors.map((e) => e.message);
+      if (forBaby && linked && linked.forWhom !== "baby") msgs.push("This is not a baby recipe: take out a plain, mashed portion before salt and spice.");
+      out[s.id] = { label: s.label, messages: [...new Set(msgs)] };
+    }
+  }
+  return out;
 }
 
 function whoPill(who) {
@@ -120,25 +193,38 @@ function setTab(tab) {
 
 function render() {
   renderHeader();
-  const fn = { calendar: renderCalendar, recipes: renderRecipes, shopping: renderShopping, bring: renderBring, reminders: renderReminders }[ui.tab];
+  const fn = { calendar: renderCalendar, recipes: renderRecipes, shopping: renderShopping, todo: renderTodo, reminders: renderReminders }[ui.tab];
   fn();
 }
 
 // ---------- calendar ----------
+function calCell(c) {
+  const st = dayStatus(state, c.key);
+  const pending = pend(c.key);
+  const rems = remsOn(c.key).length;
+  const cls = ["cal-cell", c.inMonth ? "" : "out", c.key === TODAY ? "today" : "", c.key === ui.selected ? "sel" : ""].join(" ");
+  const label = `${prettyDate(c.key)}: ${st === "approved" ? "approved" : st === "pending" ? "waiting for approval" : "no plan"}${pending.length ? ", " + pending.length + " pending" : ""}`;
+  return `<button type="button" class="${cls}" data-action="select-day" data-date="${c.key}" data-testid="cal-day-${c.key}" data-status="${st}" data-pending="${pending.length}" aria-label="${esc(label)}">
+    <span class="d">${c.day}</span>
+    <span class="marks"><span class="dot ${st}"></span>${pending.length ? `<span class="badge" title="Pending">${pending.length}</span>` : ""}${rems ? `<span class="badge rem" title="Reminders">⏰${rems}</span>` : ""}</span>
+  </button>`;
+}
+
+// Re-render only what one date can change: its cell, the pending card and the day panel.
+// Rebuilding the whole month on every tick is slow on a phone with a year of data.
+function renderDay(key = ui.selected) {
+  if (ui.tab !== "calendar" || !$("#cal-day")) return render();
+  renderHeader();
+  const cell = $(`[data-testid=cal-day-${key}]`);
+  if (cell) cell.outerHTML = calCell({ key, day: Number(key.slice(8)), inMonth: key.slice(0, 7) === ui.month.slice(0, 7) });
+  $("#cal-upcoming").innerHTML = renderUpcomingPending();
+  $("#cal-day").innerHTML = renderDayPanel(ui.selected);
+}
+
 function renderCalendar() {
   const cells = monthGrid(ui.month);
   const dows = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-  const grid = cells.map((c) => {
-    const st = dayStatus(state, c.key);
-    const pend = pendingFor(state, c.key, TODAY);
-    const rems = remindersOn(state, c.key).length;
-    const cls = ["cal-cell", c.inMonth ? "" : "out", c.key === TODAY ? "today" : "", c.key === ui.selected ? "sel" : ""].join(" ");
-    const label = `${prettyDate(c.key)}: ${st === "approved" ? "approved" : st === "pending" ? "waiting for approval" : "no plan"}${pend.length ? ", " + pend.length + " pending" : ""}`;
-    return `<button type="button" class="${cls}" data-action="select-day" data-date="${c.key}" data-testid="cal-day-${c.key}" data-status="${st}" data-pending="${pend.length}" aria-label="${esc(label)}">
-      <span class="d">${c.day}</span>
-      <span class="marks"><span class="dot ${st}"></span>${pend.length ? `<span class="badge" title="Pending">${pend.length}</span>` : ""}${rems ? `<span class="badge rem" title="Reminders">⏰${rems}</span>` : ""}</span>
-    </button>`;
-  }).join("");
+  const grid = cells.map(calCell).join("");
 
   $("#view-calendar").innerHTML = `
     <div class="cal-layout">
@@ -163,10 +249,10 @@ function renderCalendar() {
             <span><b class="badge">2</b>Pending items</span>
           </div>
         </div>
-        ${renderUpcomingPending()}
+        <div id="cal-upcoming">${renderUpcomingPending()}</div>
         ${renderBackupCard()}
       </div>
-      <div>${renderDayPanel(ui.selected)}</div>
+      <div id="cal-day">${renderDayPanel(ui.selected)}</div>
     </div>`;
 }
 
@@ -174,7 +260,7 @@ function renderUpcomingPending() {
   const rows = [];
   for (let i = -7; i <= 13; i++) {
     const k = addDays(TODAY, i);
-    const p = pendingFor(state, k, TODAY);
+    const p = pend(k);
     if (p.length) rows.push({ k, p });
   }
   if (!rows.length) return `<div class="card"><h2>Pending</h2><p class="muted">Nothing pending in the next two weeks.</p></div>`;
@@ -201,15 +287,115 @@ function slotDatalist(who) {
   return list.filter((r) => !seen.has(r.title) && seen.add(r.title)).map((r) => `<option value="${esc(r.title)}">`).join("");
 }
 
+// Suggested meals for the empty slots of a date, built from what's in the kitchen.
+// Picks are safety-checked for the slot, avoid repeating the day before, and rotate with `seed`.
+function suggestionsFor(key) {
+  const day = getDay(state, key) || emptyDay();
+  const entry = ui.suggest[key] || (ui.suggest[key] = { seed: 0, offsets: {}, picks: null });
+  if (entry.picks) return entry.picks;
+  const prev = getDay(state, addDays(key, -1));
+  const avoid = new Set(Object.values(prev?.meals || {}).map((m) => m?.recipeId).filter(Boolean));
+  const used = new Set(Object.values(day.meals || {}).map((m) => m?.recipeId).filter(Boolean));
+  const picks = {};
+  for (const s of slotsFor(key)) {
+    if (day.meals?.[s.id]?.title) continue;
+    const meal = s.id.split("_")[1];
+    const opt = { forWhom: s.who, schoolNutFree: nutFreeOn(), limit: 40 };
+    const seen = new Set();
+    const candidates = suggestFromLibrary(state.pantry, { ...opt, mealType: meal })
+      .concat(suggestFromLibrary(state.pantry, opt))
+      .filter((r) => r.forWhom === s.who && !seen.has(r.id) && seen.add(r.id))
+      .filter((r) => checkRecipe(r, { age: s.who === "baby" ? "baby" : "kid", lunchbox: s.id === "kid_lunchbox" || s.id === "kid_snack", schoolNutFree: nutFreeOn() }).safe);
+    const fresh = candidates.filter((r) => !used.has(r.id) && !avoid.has(r.id));
+    const pool = (fresh.length ? fresh : candidates).slice(0, 6);
+    if (!pool.length) continue;
+    const r = pool[(entry.seed + (entry.offsets[s.id] || 0)) % pool.length];
+    picks[s.id] = r.id;
+    used.add(r.id);
+  }
+  entry.picks = picks;
+  return picks;
+}
+
+function applySuggestions(key) {
+  const d = ensureDay(key);
+  let n = 0;
+  for (const [slot, id] of Object.entries(suggestionsFor(key))) {
+    const r = findRecipe(id);
+    if (!r || d.meals[slot]?.title) continue;
+    d.meals[slot] = { recipeId: r.id, title: r.title, forWhom: r.forWhom };
+    n++;
+  }
+  if (n) markEdited(d);
+  delete ui.suggest[key];
+  return n;
+}
+
+function renderSuggestions(key) {
+  if (key < TODAY) return "";
+  const picks = suggestionsFor(key);
+  const rows = MEAL_GROUPS.flatMap((g) => slotsFor(key).filter((s) => s.who === g.who && picks[s.id]));
+  if (!rows.length) return "";
+  return `<div class="suggest" data-testid="day-suggestions">
+    <div class="row between"><strong>💡 Suggested from your kitchen</strong>
+      <button type="button" class="btn sm ghost" data-action="suggest-shuffle" data-testid="suggest-shuffle">🔀 Other ideas</button></div>
+    ${rows.map((s) => {
+      const r = findRecipe(picks[s.id]);
+      const need = shoppingNeeds(r);
+      return `<div class="suggest-row" data-testid="suggestion" data-slot="${s.id}">
+        <span class="small muted">${esc(s.label)}</span>
+        <span class="grow">${esc(r.title)}${r.familyFavorite ? " ⭐" : ""}${need.length ? ` <span class="small" style="color:var(--warn)">· need ${esc(need.map((i) => i.name).join(", "))}</span>` : ' <span class="small" style="color:var(--ok)">· all in the kitchen</span>'}</span>
+        <button type="button" class="iconbtn" data-action="suggest-swap" data-slot="${s.id}" title="Another idea" aria-label="Another idea for ${esc(s.label)}">🔀</button>
+      </div>`;
+    }).join("")}
+    <div class="row" style="margin-top:8px">
+      <button class="btn ok sm" data-action="suggest-approve" data-testid="suggest-approve">✅ Approve these meals</button>
+      <button class="btn sm" data-action="autofill" data-testid="autofill-day">Add to plan, approve later</button>
+    </div>
+  </div>`;
+}
+
+function slotRow(s, day, issues) {
+  const m = day.meals?.[s.id];
+  const r = m?.recipeId ? findRecipe(m.recipeId) : null;
+  return `<div class="slot">
+    <span class="slot-label">${esc(s.label)}</span>
+    <div class="slot-row">
+      <input type="text" list="dl-${s.who}" value="${esc(m?.title || "")}" placeholder="Pick a recipe or type a dish" data-action="slot" data-slot="${s.id}" data-who="${s.who}" data-testid="slot-${s.id}" aria-label="${esc(s.label)}">
+      ${r ? `<button class="iconbtn" data-action="view-recipe" data-id="${esc(r.id)}" title="View recipe" aria-label="View recipe">📖</button>` : ""}
+      ${m?.title ? `<button class="iconbtn" data-action="clear-slot" data-slot="${s.id}" title="Clear" aria-label="Clear ${esc(s.label)}">✕</button>` : ""}
+    </div>
+    ${issues[s.id] ? `<span class="small" style="color:var(--bad)" data-testid="slot-warning">⛔ ${esc(issues[s.id].messages[0])}</span>` : ""}
+  </div>`;
+}
+
+function todoRow(t, { showDate = false } = {}) {
+  return `<div class="chk todo ${t.done ? "done" : ""}" data-testid="todo-item">
+    <input type="checkbox" data-action="todo-toggle" data-id="${esc(t.id)}" ${t.done ? "checked" : ""} aria-label="Done: ${esc(t.text)}">
+    <span class="txt grow">${t.time ? `<strong>${esc(t.time)}</strong> ` : ""}${esc(t.text)}${showDate ? ` <span class="small muted">· ${esc(prettyDate(t.date))}</span>` : ""}</span>
+    ${whoPill(t.who)}
+    <button type="button" class="iconbtn" data-action="todo-del" data-id="${esc(t.id)}" aria-label="Delete ${esc(t.text)}">✕</button>
+  </div>`;
+}
+
+const WHO_OPTIONS = (sel = "kid") => [["kid", "4-year-old"], ["baby", "Baby"], ["family", "Family"]]
+  .map(([v, l]) => `<option value="${v}" ${v === sel ? "selected" : ""}>${l}</option>`).join("");
+
 function renderDayPanel(key) {
   const day = getDay(state, key) || emptyDay();
   const st = dayStatus(state, key);
-  const pend = pendingFor(state, key, TODAY);
+  const pendList = pend(key);
   const slots = slotsFor(key);
   const hasPlan = dayHasPlan(day);
-  const bring = bringItemsFor(state, key);
-  const packed = bring.filter((b) => b.packed).length;
-  const rems = remindersOn(state, key);
+  const todos = todosOn(state, key);
+  const rems = remsOn(key);
+  const issues = slotIssues(key);
+  const issueList = Object.values(issues);
+
+  const safetyBox = issueList.length && st !== "approved" ? `<div class="notice" data-testid="day-safety" style="margin-top:8px">
+      ⛔ <strong>Safety check:</strong> ${issueList.map((i) => `${esc(i.label)}: ${esc(i.messages.join(" "))}`).join("<br>")}
+      ${ui.confirmUnsafe === key ? `<div class="row" style="margin-top:8px"><button class="btn sm" data-action="approve-anyway" data-testid="approve-anyway">Approve anyway</button><button class="btn sm ghost" data-action="cancel-approve">Go back and change it</button></div>` : ""}
+    </div>` : "";
 
   const banner = st === "approved"
     ? `<div class="status-banner approved" data-testid="day-status" data-status="approved"><span>✅ Approved${day.approvedAt ? " " + esc(new Date(day.approvedAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })) : ""}</span>
@@ -223,28 +409,28 @@ function renderDayPanel(key) {
     <div class="row between"><h2>${esc(fromKey(key).toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" }))}${key === TODAY ? " · Today" : ""}</h2>
       ${isSchoolDay(key) ? '<span class="pill kid">School day</span>' : '<span class="pill">Weekend</span>'}</div>
     ${banner}
-    ${pend.length ? `<h3>Pending for this date</h3><ul class="pending-list" data-testid="day-pending">${pend.map((p) => `<li data-type="${p.type}">${{ approval: "⏳", plan: "📝", reminder: "⏰", bring: "🎒" }[p.type]} ${esc(p.text)}${p.overdue ? ' <span class="pill bad">overdue</span>' : ""}</li>`).join("")}</ul>` : `<p class="small muted" data-testid="day-pending-none">Nothing pending for this date.</p>`}
+    ${safetyBox}
+    ${pendList.length ? `<h3>Pending for this date</h3><ul class="pending-list" data-testid="day-pending">${pendList.map((p) => `<li data-type="${p.type}">${{ approval: "⏳", plan: "📝", reminder: "⏰", todo: "✅" }[p.type]} ${esc(p.text)}${p.overdue ? ' <span class="pill bad">overdue</span>' : ""}</li>`).join("")}</ul>` : `<p class="small muted" data-testid="day-pending-none">Nothing pending for this date.</p>`}
 
     <h3>Meals</h3>
+    ${renderSuggestions(key)}
     <div data-testid="day-meals">
-    ${slots.map((s) => {
-      const m = day.meals?.[s.id];
-      const r = m?.recipeId ? findRecipe(m.recipeId) : null;
-      return `<div class="slot">
-        <span class="slot-label">${whoPill(s.who)} ${esc(s.label)}</span>
-        <div class="slot-row">
-          <input type="text" list="dl-${s.who}" value="${esc(m?.title || "")}" placeholder="Pick a recipe or type a dish" data-action="slot" data-slot="${s.id}" data-who="${s.who}" data-testid="slot-${s.id}" aria-label="${esc(s.label)}">
-          ${r ? `<button class="iconbtn" data-action="view-recipe" data-id="${esc(r.id)}" title="View recipe" aria-label="View recipe">📖</button>` : ""}
-          ${m?.title ? `<button class="iconbtn" data-action="clear-slot" data-slot="${s.id}" title="Clear" aria-label="Clear ${esc(s.label)}">✕</button>` : ""}
-        </div>
-      </div>`;
+    ${MEAL_GROUPS.map((g) => {
+      const groupSlots = slots.filter((s) => s.who === g.who);
+      const planned = groupSlots.filter((s) => day.meals?.[s.id]?.title).length;
+      const hasIssue = groupSlots.some((s) => issues[s.id]);
+      const open = ui.openGroups.has(g.who) || hasIssue;
+      return `<details class="meal-group" data-group="${g.who}" data-testid="meal-group-${g.who}" ${open ? "open" : ""}>
+        <summary><span class="grow"><strong>${g.icon} ${esc(g.label)}</strong></span>
+          <span class="small ${hasIssue ? "" : "muted"}" ${hasIssue ? 'style="color:var(--bad)"' : ""}>${hasIssue ? "⛔ check safety · " : ""}${planned} of ${groupSlots.length} planned</span></summary>
+        ${groupSlots.map((s) => slotRow(s, day, issues)).join("")}
+      </details>`;
     }).join("")}
     </div>
     <datalist id="dl-baby">${slotDatalist("baby")}</datalist>
     <datalist id="dl-kid">${slotDatalist("kid")}</datalist>
     <datalist id="dl-family">${slotDatalist("family")}</datalist>
     <div class="row" style="margin-top:8px">
-      <button class="btn sm" data-action="autofill" data-testid="autofill-day">✨ Fill empty meals from pantry</button>
       <button class="btn sm" data-action="copy-prev" data-testid="copy-prev">Copy previous day</button>
       <button class="btn sm" data-action="day-to-shopping" data-testid="day-to-shopping">🛒 Add missing to shopping</button>
     </div>
@@ -260,13 +446,13 @@ function renderDayPanel(key) {
     </form>
     ${isSchoolDay(key) ? `<p class="small muted" style="margin-top:6px"><button type="button" class="btn ghost sm" data-action="school-schedule">+ Add usual school-day times</button></p>` : ""}
 
-    <h3>To bring</h3>
-    <div class="row between">
-      <span class="small">${bring.length ? `${packed} of ${bring.length} packed` : "Nothing to bring"}</span>
-      <label class="chk small" style="min-height:0;padding:0"><input type="checkbox" data-action="baby-bag" ${day.useBabyBag ? "checked" : ""} data-testid="baby-bag-toggle"> Baby going out (diaper bag)</label>
-    </div>
-    ${bring.length ? `<div class="progress" style="margin:6px 0"><div style="width:${Math.round((packed / bring.length) * 100)}%"></div></div>` : ""}
-    <button class="btn sm" data-action="open-bring" data-date="${key}">Open checklist</button>
+    <h3>To do</h3>
+    <div data-testid="day-todos">${todos.length ? todos.map((t) => todoRow(t)).join("") : '<p class="small muted">Nothing to do for the kids on this date.</p>'}</div>
+    <form class="row" data-form="todo-add-day" style="margin-top:6px">
+      <input type="text" name="text" class="grow" placeholder="e.g. Buy dresses, check school schedule" aria-label="New to-do" required data-testid="day-todo-input">
+      <select name="who" style="width:120px" aria-label="For">${WHO_OPTIONS()}</select>
+      <button class="btn sm primary" data-testid="day-todo-add">Add</button>
+    </form>
 
     <h3>Reminders</h3>
     ${rems.length ? rems.map((r) => `<label class="chk ${r.doneOnDate ? "done" : ""}"><input type="checkbox" data-action="rem-done" data-id="${esc(r.id)}" data-date="${key}" ${r.doneOnDate ? "checked" : ""}><span class="txt">${esc(r.time || "")} ${esc(r.title)}</span></label>`).join("") : '<p class="small muted">No reminders.</p>'}
@@ -300,21 +486,22 @@ function renderRecipes() {
       <h2>Make recipes from these ingredients</h2>
       <form data-form="generate" class="form-grid">
         <label class="field"><span>For</span>
-          <select name="forWhom" data-testid="gen-for">
-            <option value="both">Both kids</option><option value="baby">Baby (8 months)</option><option value="kid">4-year-old</option><option value="family">Whole family</option>
+          <select name="forWhom" data-testid="gen-for" data-action="gen-field">
+            ${[["both", "Both kids"], ["baby", "Baby (8 months)"], ["kid", "4-year-old"], ["family", "Whole family"]].map(([v, l]) => `<option value="${v}" ${ui.gen.forWhom === v ? "selected" : ""}>${l}</option>`).join("")}
           </select></label>
         <label class="field"><span>Meal</span>
-          <select name="mealType" data-testid="gen-meal">
-            <option value="">Any</option><option value="breakfast">Breakfast</option><option value="lunchbox">School lunchbox</option><option value="lunch">Lunch</option><option value="snack">Snack</option><option value="dinner">Dinner</option>
+          <select name="mealType" data-testid="gen-meal" data-action="gen-field">
+            ${[["", "Any"], ["breakfast", "Breakfast"], ["lunchbox", "School lunchbox"], ["lunch", "Lunch"], ["snack", "Snack"], ["dinner", "Dinner"]].map(([v, l]) => `<option value="${v}" ${ui.gen.mealType === v ? "selected" : ""}>${l}</option>`).join("")}
           </select></label>
+        <label class="chk full" style="min-height:0"><input type="checkbox" data-action="nut-free" ${nutFreeOn() ? "checked" : ""} data-testid="school-nut-free"> School is nut-free (no peanuts or tree nuts in the lunchbox or snack box)</label>
         <label class="field full"><span>Anything else? (optional)</span>
-          <input type="text" name="notes" maxlength="300" placeholder="e.g. baby just started eggs, no onion today" data-testid="gen-notes"></label>
+          <input type="text" name="notes" maxlength="300" value="${esc(ui.gen.notes)}" placeholder="e.g. baby just started eggs, no onion today" data-testid="gen-notes" data-action="gen-field"></label>
         <div class="full row">
           <button class="btn primary" data-testid="generate-recipes" ${ui.aiBusy ? "disabled" : ""}>${aiOnline() ? "✨ Get recipes" : "Find recipes"}</button>
           ${ui.aiBusy ? `<span class="spinner" aria-hidden="true"></span><span class="small muted">Asking the AI… this can take up to a minute</span><button type="button" class="btn sm" data-action="cancel-ai" data-testid="cancel-ai">Cancel</button>` : ""}
         </div>
       </form>
-      <p class="small muted" style="margin-top:8px">Every recipe is checked for age safety: no honey, salt, sugar or whole nuts for the baby, soft textures only, and nut-free lunchboxes for school.</p>
+      <p class="small muted" style="margin-top:8px">Every recipe is checked for age safety: no honey, salt, sugar or whole nuts for the baby, soft textures only, chopped (not whole) nuts for the 4-year-old, and nut-free lunchboxes when the school is nut-free.</p>
     </div>
 
     <div data-testid="recipe-results">
@@ -331,12 +518,14 @@ function renderRecipes() {
 }
 
 function recipeCard(r, { saved = false } = {}) {
-  const safety = checkForAudience(r);
-  const missing = new Set(missingFromPantry(r, state.pantry).map((i) => normName(i.name)));
+  const safety = checkForAudience(r, { schoolNutFree: nutFreeOn() });
+  const missing = new Set(shoppingNeeds(r).map((i) => normName(i.name)));
+  const hasNuts = r.nutFree === false || r.ingredients.some((i) => isNutIngredient(i.name));
   const isSaved = state.savedRecipes.some((s) => s.id === r.id || s.title === r.title);
   const issues = [...safety.errors, ...safety.warnings];
   return `<article class="card recipe" data-testid="recipe-card" data-recipe-id="${esc(r.id)}" data-safe="${safety.safe}">
-    <div class="row between"><h3>${esc(r.title)}</h3>${whoPill(r.forWhom)}</div>
+    <div class="row between"><h3>${esc(r.title)}</h3><span>${r.familyFavorite ? '<span class="pill warn" data-testid="family-favorite">⭐ Family favorite</span> ' : ""}${whoPill(r.forWhom)}</span></div>
+    ${hasNuts && !nutFreeOn() ? `<div class="small muted" data-testid="contains-nuts">🥜 Contains nuts${r.nutFreeSwap ? ". Nut-free swap: " + esc(r.nutFreeSwap) : ""}</div>` : ""}
     <div class="small muted">${esc(r.mealType || "")}${r.prepMinutes ? " · " + esc(r.prepMinutes) + " min" : ""}${r.texture ? " · " + esc(r.texture) : ""}${r.source === "ai" ? " · ✨ AI" : r.source === "library" ? " · Family recipe book" : ""}</div>
     <div class="safety ${safety.safe && !safety.warnings.length ? "ok" : safety.safe ? "warn" : "warn"}" data-testid="safety-badge">
       ${safety.safe ? (safety.warnings.length ? "⚠️ Safe with care" : "✅ Age-safe") : "⛔ Not safe as written"}
@@ -355,17 +544,19 @@ function recipeCard(r, { saved = false } = {}) {
 }
 
 async function generate(form) {
+  ui.gen = { forWhom: form.forWhom.value, mealType: form.mealType.value, notes: form.notes.value };
   const body = {
     ingredients: state.pantry,
     forWhom: form.forWhom.value,
     mealType: form.mealType.value,
     notes: form.notes.value,
     count: 4,
+    schoolNutFree: nutFreeOn(),
   };
   ui.aiNotice = "";
   ui.rejected = [];
   const fallback = (why) => {
-    ui.results = suggestFromLibrary(state.pantry, { forWhom: body.forWhom, mealType: body.mealType, limit: 6 });
+    ui.results = suggestFromLibrary(state.pantry, { forWhom: body.forWhom, mealType: body.mealType, limit: 6, schoolNutFree: body.schoolNutFree });
     ui.aiNotice = `${why} Showing recipes from the built-in family recipe book that best match your kitchen.`;
   };
   if (!aiOnline()) {
@@ -406,9 +597,16 @@ async function generate(form) {
   }
 }
 
+// Items can carry a `key` (date|slot|recipe|ingredient). An item whose key is already on the
+// list and not yet bought is skipped, so pressing "add" twice doesn't double the quantities.
+// Returns how many items were added.
 function addToShopping(items, source) {
-  const fresh = items.map((i) => ({ id: uid(), name: i.name, quantity: i.quantity ?? null, unit: normUnit(i.unit), store: i.store || "", bought: false, source }));
+  const onList = new Set(state.shopping.filter((i) => !i.bought).flatMap((i) => i.keys || []));
+  const fresh = items
+    .filter((i) => !i.key || !onList.has(i.key))
+    .map((i) => ({ id: uid(), name: i.name, quantity: i.quantity ?? null, unit: normUnit(i.unit), store: i.store || "", bought: false, source: i.source || source, keys: i.key ? [i.key] : [] }));
   state.shopping = mergeItems([...state.shopping, ...fresh]).map((i) => ({ ...i, id: i.id || uid() }));
+  return fresh.length;
 }
 
 function planDialog(recipe) {
@@ -487,7 +685,6 @@ function renderShopping() {
       <h2>Fill the list</h2>
       <div class="row">
         <button class="btn" data-action="plan-to-shopping" data-testid="plan-to-shopping">From next 7 days of meals</button>
-        <button class="btn" data-action="bought-to-pantry" data-testid="bought-to-pantry">Move bought items to kitchen</button>
         <button class="btn" data-action="copy-list" data-testid="copy-list">Copy list as text</button>
         <button class="btn danger" data-action="clear-bought" data-testid="clear-bought">Clear bought</button>
       </div>
@@ -504,54 +701,50 @@ function plannedRecipes(fromKey_, days) {
     const k = addDays(fromKey_, i);
     const d = getDay(state, k);
     if (!d) continue;
-    for (const m of Object.values(d.meals || {})) {
+    for (const [slot, m] of Object.entries(d.meals || {})) {
       const r = m?.recipeId ? findRecipe(m.recipeId) : findRecipeByTitle(m?.title);
-      if (r) out.push({ date: k, recipe: r });
+      if (r) out.push({ date: k, slot, recipe: r });
     }
   }
   return out;
 }
 
-// ---------- bring ----------
-function renderBring() {
-  const key = ui.bringDate;
-  const day = getDay(state, key) || emptyDay();
-  const items = bringItemsFor(state, key);
-  const packed = items.filter((i) => i.packed).length;
-  const section = (who, title) => {
-    const list = items.filter((i) => i.who === who);
-    if (!list.length) return "";
-    return `<div><h3>${title}</h3>${list.map((i) => `<label class="chk ${i.packed ? "done" : ""}" data-testid="bring-item"><input type="checkbox" data-action="bring-toggle" data-id="${esc(i.id)}" ${i.packed ? "checked" : ""}><span class="txt grow">${esc(i.text)}</span>${i.extra ? `<button type="button" class="iconbtn" data-action="bring-del" data-id="${esc(i.id.slice(6))}" aria-label="Remove">✕</button>` : ""}</label>`).join("")}</div>`;
-  };
-  const tpl = state.bringTemplates;
-  $("#view-bring").innerHTML = `
+// ---------- to do ----------
+function renderTodo() {
+  const key = ui.todoDate;
+  const list = todosOn(state, key);
+  const left = list.filter((t) => !t.done).length;
+  const soon = (state.todos || [])
+    .filter((t) => !t.done && t.date >= TODAY && t.date <= addDays(TODAY, 7) && t.date !== key)
+    .sort((a, b) => (a.date + (a.time || "99")).localeCompare(b.date + (b.time || "99")));
+  // Newest missed first; only the last two weeks unless asked, since a long list is slow and unread.
+  const allMissed = (state.todos || []).filter((t) => !t.done && t.date < TODAY).sort((a, b) => b.date.localeCompare(a.date));
+  const missed = ui.showOlderMissed ? allMissed : allMissed.filter((t) => t.date >= addDays(TODAY, -14));
+  const older = allMissed.length - missed.length;
+  const dayName = key === TODAY ? "Today" : key === addDays(TODAY, 1) ? "Tomorrow" : prettyDate(key);
+  $("#view-todo").innerHTML = `
     <div class="card">
       <div class="row between">
-        <button class="btn sm" data-action="bring-day" data-delta="-1" aria-label="Previous day">‹</button>
-        <input type="date" value="${key}" data-action="bring-date" style="max-width:180px" aria-label="Date" data-testid="bring-date">
-        <button class="btn sm" data-action="bring-day" data-delta="1" aria-label="Next day">›</button>
+        <button class="btn sm" data-action="todo-day" data-delta="-1" aria-label="Previous day">‹</button>
+        <input type="date" value="${key}" data-action="todo-date" style="max-width:180px" aria-label="Date" data-testid="todo-date">
+        <button class="btn sm" data-action="todo-day" data-delta="1" aria-label="Next day">›</button>
       </div>
-      <p class="small muted" style="text-align:center;margin:6px 0">${esc(prettyDate(key))}${key === TODAY ? " · today" : ""} · ${isSchoolDay(key) ? "School day" : "No school"}</p>
-      <div class="row between"><strong data-testid="bring-progress">${packed} of ${items.length} packed</strong>
-        <label class="chk small" style="min-height:0"><input type="checkbox" data-action="baby-bag" ${day.useBabyBag ? "checked" : ""}> Baby going out</label></div>
-      ${items.length ? `<div class="progress" style="margin:6px 0"><div style="width:${Math.round((packed / items.length) * 100)}%"></div></div>` : ""}
-      <div class="bring-cols" data-testid="bring-list">
-        ${section("kid", "🎒 School bag (4 yr)")}
-        ${section("baby", "👶 Baby bag")}
-        ${section("family", "🧺 Other things")}
-      </div>
-      ${!items.length ? '<p class="empty-state">Nothing to bring for this day. Switch on "Baby going out" or add an item below.</p>' : ""}
-      <form data-form="bring-add" class="row" style="margin-top:10px">
-        <input type="text" name="text" class="grow" placeholder="Add something to bring (e.g. birthday gift, permission slip)" required data-testid="bring-input">
-        <select name="who" style="width:120px"><option value="family">Other</option><option value="kid">School bag</option><option value="baby">Baby bag</option></select>
-        <button class="btn primary">Add</button>
+      <div class="row between" style="margin-top:10px"><h2 style="margin:0">To do: ${esc(dayName)}</h2><span class="pill ${left ? "warn" : "ok"}" data-testid="todo-left">${left ? `${left} left` : list.length ? "All done" : "Nothing yet"}</span></div>
+      <div data-testid="todo-list" style="margin-top:6px">${list.length ? list.map((t) => todoRow(t)).join("") : '<p class="empty-state">Nothing planned for the kids on this day. Add something below or tap an idea.</p>'}</div>
+      <form data-form="todo-add" class="form-grid" style="margin-top:10px">
+        <label class="field full"><span>What needs doing</span><input type="text" name="text" required maxlength="120" placeholder="e.g. Buy dresses for the school function" data-testid="todo-input"></label>
+        <label class="field"><span>For</span><select name="who" data-testid="todo-who">${WHO_OPTIONS()}</select></label>
+        <label class="field"><span>Date</span><input type="date" name="date" value="${key}" required data-testid="todo-input-date"></label>
+        <label class="field"><span>Time (optional)</span><input type="time" name="time"></label>
+        <div class="field" style="justify-content:flex-end"><button class="btn primary" data-testid="todo-add">Add to do</button></div>
       </form>
+      <h3>Quick ideas for ${esc(dayName.toLowerCase() === "today" || dayName.toLowerCase() === "tomorrow" ? dayName.toLowerCase() : prettyDate(key))}</h3>
+      <div class="chips">${TODO_IDEAS.map((i) => `<button class="chip add" data-action="todo-idea" data-text="${esc(i.text)}" data-who="${i.who}" data-testid="todo-idea">+ ${esc(i.text)}</button>`).join("")}</div>
     </div>
-    <div class="card"><h2>Everyday lists</h2>
-      <p class="small muted">These items show up automatically: the school bag on school days, and the baby bag when the baby is going out.</p>
-      ${["kid", "baby"].map((who) => `<h3>${who === "kid" ? "School bag" : "Baby bag"}</h3>
-        <div class="chips">${tpl[who].map((t, i) => `<span class="chip">${esc(t)}<button data-action="tpl-del" data-who="${who}" data-i="${i}" aria-label="Remove ${esc(t)}">✕</button></span>`).join("")}</div>
-        <form data-form="tpl-add" data-who="${who}" class="row" style="margin-top:6px"><input type="text" name="text" class="grow" placeholder="Add to ${who === "kid" ? "school bag" : "baby bag"}" required><button class="btn sm">Add</button></form>`).join("")}
+    ${allMissed.length ? `<div class="card" data-testid="todo-missed"><h2>⚠️ Not done yet</h2>${missed.map((t) => todoRow(t, { showDate: true })).join("")}
+      ${older ? `<button class="btn ghost sm" data-action="todo-older" data-testid="todo-older">Show ${older} older</button>` : ""}</div>` : ""}
+    <div class="card" data-testid="todo-upcoming"><h2>Coming up this week</h2>
+      ${soon.length ? soon.map((t) => todoRow(t, { showDate: true })).join("") : '<p class="small muted">Nothing else in the next 7 days.</p>'}
     </div>`;
 }
 
@@ -559,17 +752,28 @@ function renderBring() {
 const CATS = { school: "🏫 School", health: "🩺 Doctor / vaccine", family: "🎉 Family event", shopping: "🛒 Shopping", other: "📌 Other" };
 
 function renderReminders(prefillDate) {
-  const from = addDays(TODAY, -14);
-  const to = addDays(TODAY, 60);
+  // One row per reminder: a one-off shows its date; a repeating one shows its next date
+  // (today's if it is not done yet). Missed: one-offs in the last 14 days that were not ticked.
   const occ = [];
-  for (const r of state.reminders) for (const d of occurrences(r, from, to)) occ.push({ r, d, done: !!r.done?.[d] });
-  occ.sort((a, b) => (a.d + (a.r.time || "99")).localeCompare(b.d + (b.r.time || "99")));
-  const overdue = occ.filter((o) => o.d < TODAY && !o.done);
-  const upcoming = occ.filter((o) => o.d >= TODAY);
+  const overdue = [];
+  for (const r of state.reminders) {
+    if (!r.repeat || r.repeat === "none") {
+      const o = { r, d: r.date, done: !!r.done?.[r.date] };
+      if (r.date < TODAY) { if (!o.done && r.date >= addDays(TODAY, -14)) overdue.push(o); }
+      else occ.push(o);
+      continue;
+    }
+    const next = occurrences(r, TODAY, addDays(TODAY, 62)).find((d) => d > TODAY || !r.done?.[d]);
+    if (next) occ.push({ r, d: next, done: false });
+  }
+  const byDate = (a, b) => (a.d + (a.r.time || "99")).localeCompare(b.d + (b.r.time || "99"));
+  occ.sort(byDate);
+  overdue.sort(byDate);
+  const upcoming = occ;
   const row = (o) => `<div class="rem ${o.done ? "done" : ""} ${o.d < TODAY && !o.done ? "overdue" : ""}" data-testid="reminder-item">
       <input type="checkbox" data-action="rem-done" data-id="${esc(o.r.id)}" data-date="${o.d}" ${o.done ? "checked" : ""} aria-label="Done" style="width:22px;height:22px">
       <span class="when">${esc(prettyDate(o.d))}${o.r.time ? "<br>" + esc(o.r.time) : ""}</span>
-      <span class="grow"><span class="title">${esc(o.r.title)}</span><br><span class="small muted">${esc(CATS[o.r.category] || "")}${o.r.repeat && o.r.repeat !== "none" ? " · repeats " + esc(o.r.repeat) : ""}${o.r.notes ? " · " + esc(o.r.notes) : ""}</span></span>
+      <span class="grow"><span class="title">${esc(o.r.title)}</span><br><span class="small muted">${esc(CATS[o.r.category] || "")}${o.r.repeat && o.r.repeat !== "none" ? " · repeats " + esc(o.r.repeat === "weekdays" ? "on school days" : o.r.repeat) : ""}${o.r.notes ? " · " + esc(o.r.notes) : ""}</span></span>
       <button class="iconbtn" data-action="rem-del" data-id="${esc(o.r.id)}" aria-label="Delete reminder">🗑</button>
     </div>`;
   const notifState = typeof Notification === "undefined" ? "unsupported" : Notification.permission;
@@ -581,7 +785,7 @@ function renderReminders(prefillDate) {
         <label class="field"><span>Date</span><input type="date" name="date" required value="${esc(prefillDate || TODAY)}" data-testid="rem-date"></label>
         <label class="field"><span>Time</span><input type="time" name="time" data-testid="rem-time"></label>
         <label class="field"><span>Type</span><select name="category">${Object.entries(CATS).map(([k, v]) => `<option value="${k}">${v}</option>`).join("")}</select></label>
-        <label class="field"><span>Repeat</span><select name="repeat" data-testid="rem-repeat"><option value="none">Does not repeat</option><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option></select></label>
+        <label class="field"><span>Repeat</span><select name="repeat" data-testid="rem-repeat"><option value="none">Does not repeat</option><option value="daily">Daily</option><option value="weekdays">School days (Mon to Fri)</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option></select></label>
         <label class="field full"><span>Notes</span><input type="text" name="notes" maxlength="200" placeholder="Optional"></label>
         <div class="full"><button class="btn primary" data-testid="rem-add">Add reminder</button></div>
       </form>
@@ -624,28 +828,66 @@ document.addEventListener("click", (e) => {
   const a = el.dataset.action;
   const day = () => ensureDay(ui.selected);
   switch (a) {
-    case "select-day": ui.selected = el.dataset.date; ui.month = el.dataset.date; if (ui.tab !== "calendar") setTab("calendar"); else render(); break;
+    case "select-day": {
+      const prev = ui.selected;
+      const sameMonth = el.dataset.date.slice(0, 7) === ui.month.slice(0, 7);
+      ui.selected = el.dataset.date;
+      ui.month = el.dataset.date;
+      if (ui.tab !== "calendar") setTab("calendar");
+      else if (!sameMonth || !$("#cal-day")) render();
+      else {
+        $(`[data-testid=cal-day-${prev}]`)?.classList.remove("sel");
+        $(`[data-testid=cal-day-${ui.selected}]`)?.classList.add("sel");
+        $("#cal-day").innerHTML = renderDayPanel(ui.selected);
+      }
+      break;
+    }
     case "month": ui.month = addMonths(ui.month, Number(el.dataset.delta)); render(); break;
     case "goto-today": ui.month = TODAY; ui.selected = TODAY; render(); break;
-    case "approve": approveDay(day()); commit(); toast("Day approved ✅"); break;
-    case "unapprove": unapproveDay(day()); commit(); break;
-    case "clear-slot": { const d = day(); delete d.meals[el.dataset.slot]; markEdited(d); commit(); break; }
+    case "approve":
+      if (Object.keys(slotIssues(ui.selected)).length && ui.confirmUnsafe !== ui.selected) {
+        ui.confirmUnsafe = ui.selected;
+        renderDay();
+        $("[data-testid=day-safety]")?.scrollIntoView({ block: "center", behavior: "smooth" });
+        break;
+      }
+      approveDay(day()); ui.confirmUnsafe = null; commitDay(); toast("Day approved ✅");
+      break;
+    case "approve-anyway": approveDay(day()); ui.confirmUnsafe = null; commitDay(); toast("Day approved ✅"); break;
+    case "cancel-approve": ui.confirmUnsafe = null; renderDay(); break;
+    case "unapprove": unapproveDay(day()); commitDay(); break;
+    case "clear-slot": { const d = day(); delete d.meals[el.dataset.slot]; markEdited(d); commitDay(); break; }
     case "view-recipe": { const r = findRecipe(el.dataset.id); if (r) recipeDialog(r); break; }
     case "autofill": {
-      const d = day();
-      let filled = 0;
-      for (const s of slotsFor(ui.selected)) {
-        if (d.meals[s.id]?.title) continue;
-        const used = new Set(Object.values(d.meals).map((m) => m?.recipeId));
-        const meal = s.id.split("_")[1];
-        const pick = suggestFromLibrary(state.pantry, { forWhom: s.who, mealType: meal === "lunchbox" ? "lunchbox" : meal, limit: 10 })
-          .concat(suggestFromLibrary(state.pantry, { forWhom: s.who, limit: 20 }))
-          .find((r) => (r.forWhom === s.who) && !used.has(r.id));
-        if (pick) { d.meals[s.id] = { recipeId: pick.id, title: pick.title, forWhom: pick.forWhom }; filled++; }
+      const n = applySuggestions(ui.selected);
+      commitDay();
+      toast(n ? `Added ${n} meal${n > 1 ? "s" : ""}. Approve the day when ready.` : "All meals are already planned.");
+      break;
+    }
+    case "suggest-approve": {
+      const n = applySuggestions(ui.selected);
+      if (!n) { commitDay(); toast("All meals are already planned. Use Approve below when ready."); break; }
+      if (Object.keys(slotIssues(ui.selected)).length) {
+        ui.confirmUnsafe = ui.selected;
+        commitDay();
+        toast("Meals added, but one needs a safety check before approving.");
+      } else {
+        approveDay(day());
+        commitDay();
+        toast(`${n} meal${n === 1 ? "" : "s"} added and the day is approved ✅`);
       }
-      if (filled) markEdited(d);
-      commit();
-      toast(filled ? `Filled ${filled} meal${filled > 1 ? "s" : ""}. Review and approve.` : "All meals are already planned.");
+      break;
+    }
+    case "suggest-shuffle": {
+      const e = ui.suggest[ui.selected];
+      if (e) { e.seed++; e.picks = null; }
+      renderDay();
+      break;
+    }
+    case "suggest-swap": {
+      const e = ui.suggest[ui.selected];
+      if (e) { e.offsets[el.dataset.slot] = (e.offsets[el.dataset.slot] || 0) + 1; e.picks = null; }
+      renderDay();
       break;
     }
     case "copy-prev": {
@@ -655,28 +897,33 @@ document.addEventListener("click", (e) => {
       d.meals = structuredClone(prev.meals);
       d.schedule = prev.schedule.map((s) => ({ ...s, id: uid() }));
       markEdited(d);
-      commit();
+      commitDay();
       toast("Copied. Review and approve.");
       break;
     }
     case "day-to-shopping": {
-      const needs = plannedRecipes(ui.selected, 1).flatMap(({ recipe }) => missingFromPantry(recipe, state.pantry).map((i) => ({ ...i })));
+      const needs = plannedRecipes(ui.selected, 1).flatMap(({ date, slot, recipe }) => shoppingNeeds(recipe).map((i) => ({ ...i, key: `${date}|${slot}|${recipe.id}|${normName(i.name)}` })));
       if (!needs.length) { toast("Nothing missing for this day's meals."); break; }
-      addToShopping(needs, prettyDate(ui.selected));
+      const added = addToShopping(needs, prettyDate(ui.selected));
       commit();
-      toast(`Added ${needs.length} item${needs.length > 1 ? "s" : ""} to the shopping list.`);
+      toast(added ? `Added ${added} item${added > 1 ? "s" : ""} to the shopping list.` : "Already on the shopping list.");
       break;
     }
-    case "del-sched": { const d = day(); d.schedule = d.schedule.filter((s) => s.id !== el.dataset.id); markEdited(d); commit(); break; }
+    case "del-sched": { const d = day(); d.schedule = d.schedule.filter((s) => s.id !== el.dataset.id); markEdited(d); commitDay(); break; }
     case "school-schedule": {
       const d = day();
       const add = [["07:30", "Breakfast and get ready"], ["08:15", "School drop-off"], ["12:30", "Baby nap"], ["15:15", "School pick-up"], ["19:30", "Dinner"]];
       for (const [time, text] of add) if (!d.schedule.some((s) => s.text === text)) d.schedule.push({ id: uid(), time, text });
       markEdited(d);
-      commit();
+      commitDay();
       break;
     }
-    case "open-bring": ui.bringDate = el.dataset.date; setTab("bring"); break;
+    case "todo-del": {
+      const t = state.todos.find((x) => x.id === el.dataset.id);
+      state.todos = state.todos.filter((x) => x !== t);
+      if (t && ui.tab === "calendar") commitDay(t.date); else commit();
+      break;
+    }
     case "new-reminder": setTab("reminders"); renderReminders(el.dataset.date); $("[data-testid=rem-title]")?.focus(); break;
     case "export": {
       const blob = new Blob([exportJson(state)], { type: "application/json" });
@@ -703,10 +950,10 @@ document.addEventListener("click", (e) => {
     case "recipe-to-shopping": {
       const r = findRecipe(el.dataset.id);
       if (!r) break;
-      const need = missingFromPantry(r, state.pantry);
-      addToShopping(need, r.title);
+      const need = shoppingNeeds(r).map((i) => ({ ...i, key: `recipe|${r.id}|${normName(i.name)}` }));
+      const added = addToShopping(need, r.title);
       commit();
-      toast(`Added ${need.length} item${need.length > 1 ? "s" : ""} to the shopping list.`);
+      toast(added ? `Added ${added} item${added > 1 ? "s" : ""} to the shopping list.` : "Already on the shopping list.");
       break;
     }
 
@@ -714,19 +961,11 @@ document.addEventListener("click", (e) => {
     case "shop-store": ui.shopStore = el.dataset.store; render(); break;
     case "shop-del": state.shopping = state.shopping.filter((i) => i.id !== el.dataset.id); commit(); break;
     case "plan-to-shopping": {
-      const needs = plannedRecipes(TODAY, 7).flatMap(({ date, recipe }) => missingFromPantry(recipe, state.pantry).map((i) => ({ ...i, source: prettyDate(date) })));
+      const needs = plannedRecipes(TODAY, 7).flatMap(({ date, slot, recipe }) => shoppingNeeds(recipe).map((i) => ({ ...i, source: prettyDate(date), key: `${date}|${slot}|${recipe.id}|${normName(i.name)}` })));
       if (!needs.length) { toast("Nothing missing for the next 7 days of planned meals."); break; }
-      for (const n of needs) addToShopping([n], n.source);
+      const added = addToShopping(needs);
       commit();
-      toast(`Added ${needs.length} ingredient${needs.length > 1 ? "s" : ""} from the meal plan.`);
-      break;
-    }
-    case "bought-to-pantry": {
-      const bought = state.shopping.filter((i) => i.bought);
-      for (const b of bought) if (!state.pantry.some((p) => normName(p) === normName(b.name))) state.pantry.push(b.name);
-      state.shopping = state.shopping.filter((i) => !i.bought);
-      commit();
-      toast(bought.length ? `Moved ${bought.length} item${bought.length > 1 ? "s" : ""} to the kitchen.` : "Nothing marked as bought yet.");
+      toast(added ? `Added ${added} ingredient${added > 1 ? "s" : ""} from the meal plan.` : "Everything for the next 7 days is already on the list.");
       break;
     }
     case "clear-bought": state.shopping = state.shopping.filter((i) => !i.bought); commit(); break;
@@ -737,9 +976,17 @@ document.addEventListener("click", (e) => {
     }
     case "store-del": state.stores = state.stores.filter((s) => s !== el.dataset.store); if (ui.shopStore === el.dataset.store) ui.shopStore = "all"; commit(); break;
 
-    case "bring-day": ui.bringDate = addDays(ui.bringDate, Number(el.dataset.delta)); render(); break;
-    case "bring-del": { const d = ensureDay(ui.bringDate); d.extraBring = d.extraBring.filter((x) => x.id !== el.dataset.id); delete d.bring["extra:" + el.dataset.id]; commit(); break; }
-    case "tpl-del": state.bringTemplates[el.dataset.who].splice(Number(el.dataset.i), 1); commit(); break;
+    case "todo-older": ui.showOlderMissed = true; render(); break;
+    case "todo-day": ui.todoDate = addDays(ui.todoDate, Number(el.dataset.delta)); render(); break;
+    case "todo-idea": {
+      const date = ui.todoDate;
+      if (!state.todos.some((t) => t.date === date && t.text === el.dataset.text)) {
+        state.todos.push({ id: uid(), text: el.dataset.text, who: el.dataset.who, date, time: "", done: false });
+      }
+      commit();
+      toast(`Added for ${prettyDate(date)}.`);
+      break;
+    }
 
     case "rem-del": state.reminders = state.reminders.filter((r) => r.id !== el.dataset.id); commit(); break;
     case "notif": Notification.requestPermission().then(() => render()); break;
@@ -760,16 +1007,25 @@ document.addEventListener("change", (e) => {
       else {
         const r = findRecipeByTitle(title, el.dataset.who);
         d.meals[el.dataset.slot] = { recipeId: r?.id || null, title, forWhom: el.dataset.who };
-        if (r && el.dataset.who === "baby" && !checkForAudience({ ...r, forWhom: "baby" }).safe && r.forWhom !== "baby") toast("Heads up: this dish isn't checked as baby-safe. Take out a plain portion.");
       }
       markEdited(d);
-      commit();
+      commitDay();
       break;
     }
-    case "baby-bag": {
-      const key = ui.tab === "bring" ? ui.bringDate : ui.selected;
-      ensureDay(key).useBabyBag = el.checked;
-      commit();
+    case "todo-toggle": {
+      const t = state.todos.find((x) => x.id === el.dataset.id);
+      if (!t) return;
+      t.done = el.checked;
+      if (ui.tab === "calendar") { commitDay(t.date); break; }
+      if (ui.tab !== "todo") { commit(); break; }
+      // On the To do tab, tick the row in place instead of rebuilding a long list.
+      save(state);
+      pendCache.delete(t.date);
+      el.closest(".chk")?.classList.toggle("done", t.done);
+      const list = todosOn(state, ui.todoDate);
+      const left = list.filter((x) => !x.done).length;
+      const pill = $("[data-testid=todo-left]");
+      if (pill) { pill.textContent = left ? `${left} left` : "All done"; pill.className = `pill ${left ? "warn" : "ok"}`; }
       break;
     }
     case "rem-done": {
@@ -777,12 +1033,25 @@ document.addEventListener("change", (e) => {
       if (!r) return;
       r.done = r.done || {};
       if (el.checked) r.done[el.dataset.date] = true; else delete r.done[el.dataset.date];
-      commit();
+      if (ui.tab === "calendar") commitDay(el.dataset.date); else commit();
       break;
     }
     case "shop-toggle": {
       const it = state.shopping.find((i) => i.id === el.dataset.id);
       if (it) it.bought = el.checked;
+      // Bought food goes straight into the kitchen, so meal suggestions can use it.
+      if (it && el.checked && aisleFor(it.name) !== "Baby care" && aisleFor(it.name) !== "School & household" && !state.pantry.some((p) => normName(p) === normName(it.name))) {
+        state.pantry.push(it.name);
+        it.addedToPantry = true;
+        clearCaches();
+        toast(`${it.name} added to your kitchen`);
+      } else if (it && !el.checked && it.addedToPantry) {
+        // Unticked by mistake: take back only what this tick added, not food already in the kitchen.
+        state.pantry = state.pantry.filter((p) => normName(p) !== normName(it.name));
+        delete it.addedToPantry;
+        clearCaches();
+        toast(`${it.name} taken out of your kitchen`);
+      }
       el.closest(".shop-item")?.classList.toggle("bought", el.checked);
       save(state);
       const left = state.shopping.filter((i) => !i.bought).length;
@@ -792,13 +1061,13 @@ document.addEventListener("change", (e) => {
       break;
     }
     case "hide-bought": ui.hideBought = el.checked; render(); break;
-    case "bring-toggle": {
-      const d = ensureDay(ui.bringDate);
-      if (el.checked) d.bring[el.dataset.id] = true; else delete d.bring[el.dataset.id];
+    case "nut-free":
+      state.settings = { ...state.settings, schoolNutFree: el.checked };
+      ui.results = ui.results.filter((r) => !el.checked || checkForAudience(r, { schoolNutFree: true }).safe || !isSchoolFood(r));
       commit();
+      toast(el.checked ? "Nut-free school: lunchbox nuts are blocked and kept off the shopping list." : "Nuts allowed in the lunchbox.");
       break;
-    }
-    case "bring-date": if (isDateKey(el.value)) { ui.bringDate = el.value; render(); } break;
+    case "todo-date": if (isDateKey(el.value)) { ui.todoDate = el.value; render(); } break;
     case "import": {
       const file = el.files?.[0];
       if (!file) return;
@@ -808,6 +1077,7 @@ document.addEventListener("change", (e) => {
           for (const k of Object.keys(state)) delete state[k];
           Object.assign(state, next);
           save(state, { now: true });
+          clearCaches();
           render();
           toast("Backup restored.");
         } catch (err) {
@@ -820,6 +1090,7 @@ document.addEventListener("change", (e) => {
 });
 
 document.addEventListener("input", (e) => {
+  if (e.target.dataset?.action === "gen-field") ui.gen[e.target.name] = e.target.value;
   if (e.target.dataset?.action === "saved-filter") {
     ui.savedFilter = e.target.value;
     const pos = e.target.selectionStart;
@@ -843,7 +1114,7 @@ document.addEventListener("submit", (e) => {
       const d = ensureDay(ui.selected);
       d.schedule.push({ id: uid(), time: f.time.value, text });
       markEdited(d);
-      commit();
+      commitDay();
       $("[data-testid=sched-text]")?.focus();
       break;
     }
@@ -870,19 +1141,15 @@ document.addEventListener("submit", (e) => {
       commit();
       break;
     }
-    case "bring-add": {
+    case "todo-add":
+    case "todo-add-day": {
       const text = f.text.value.trim();
-      if (!text) return;
-      ensureDay(ui.bringDate).extraBring.push({ id: uid(), text, who: f.who.value });
-      commit();
-      $("[data-testid=bring-input]")?.focus();
-      break;
-    }
-    case "tpl-add": {
-      const text = f.text.value.trim();
-      const who = form.dataset.who;
-      if (text && !state.bringTemplates[who].includes(text)) state.bringTemplates[who].push(text);
-      commit();
+      const date = kind === "todo-add" ? f.date.value : ui.selected;
+      if (!text || !isDateKey(date)) return;
+      state.todos.push({ id: uid(), text, who: f.who.value, date, time: f.time?.value || "", done: false });
+      if (kind === "todo-add") ui.todoDate = date;
+      if (kind === "todo-add-day") commitDay(date); else commit();
+      $(kind === "todo-add" ? "[data-testid=todo-input]" : "[data-testid=day-todo-input]")?.focus();
       break;
     }
     case "rem-add": {
@@ -897,17 +1164,35 @@ document.addEventListener("submit", (e) => {
   }
 });
 
+// Remember which meal sections are open so re-renders don't collapse them. The click
+// is recorded straight away, because the toggle event fires later and is lost if a
+// re-render replaces the section first.
+document.addEventListener("click", (e) => {
+  const d = e.target.closest?.("summary")?.parentElement;
+  const g = d?.dataset?.group;
+  if (!g || e.target.closest("button, input, select, a")) return;
+  if (d.open) ui.openGroups.delete(g); else ui.openGroups.add(g);
+}, true);
+document.addEventListener("toggle", (e) => {
+  const g = e.target?.dataset?.group;
+  if (!g) return;
+  if (e.target.open) ui.openGroups.add(g); else ui.openGroups.delete(g);
+}, true);
+
 window.addEventListener("pagehide", () => save(state, { now: true }));
-document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") save(state, { now: true }); });
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") save(state, { now: true });
+  else refreshToday();
+});
 window.addEventListener("online", checkAi);
 window.addEventListener("offline", () => { ui.ai = "unreachable"; renderHeader(); });
 
 // ---------- start ----------
 const initialTab = location.hash.replace("#", "");
-setTab(["calendar", "recipes", "shopping", "bring", "reminders"].includes(initialTab) ? initialTab : "calendar");
+setTab(["calendar", "recipes", "shopping", "todo", "reminders"].includes(initialTab) ? initialTab : "calendar");
 checkAi();
 checkDueReminders();
-setInterval(checkDueReminders, 30000);
+setInterval(() => { refreshToday(); checkDueReminders(); }, 30000);
 
 // Exposed for tests and debugging in the console.
 window.__mealPlanner = { state, ui, TODAY };

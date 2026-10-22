@@ -4,17 +4,59 @@
 //   { safe, errors: [{ rule, message, match }], warnings: [{ rule, message, match }] }
 // A recipe is "safe" when it has no errors. Warnings are shown but do not block.
 
-const NEGATION = /\b(no|without|skip|omit|avoid|don'?t add|do not add|never add|free of|instead of)\b[^.;,]{0,25}$/i;
+// The negation must sit right before the word ("no salt", "skip the sugar"), so
+// "skip the sugar and add honey" still catches the honey.
+// A list carries the negation ("no salt or sugar", "avoid salt and sugar"); "and add ..." ends it.
+const NEGATION = /\b(no|without|skip|omit|avoid|don'?t add|do not add|never add|free of|instead of)\s+((the|any|added|extra|a|of)\s+){0,2}([\w-]+(\s*,\s*|\s+or\s+|\s+nor\s+|\s+and\s+(?!(?:add|stir|mix|drizzle|put|pour|sprinkle|top|serve|use)\b))((the|any|added|extra)\s+)?){0,5}$/i;
 
 // Words that contain "nut" but are not tree nuts or peanuts.
 const NOT_NUTS = /\b(coconut|nutmeg|butternut|doughnut|donut|nutrition|nutritious|nutrient|nutrients)\b/gi;
 
 const WHOLE_NUT = /\b(peanuts?|groundnuts?|cashews?|almonds?|walnuts?|pistachios?|hazelnuts?|pecans?|nuts?|kaju|badam|moongphali|pista)\b/i;
-const GROUND_FORM = /\b(powder|powdered|ground|paste|butter|flour|meal|finely ground|milk)\b/i;
+// A nut counts as ground only when the ground word sits right next to it:
+// "cashew powder", "peanut butter", "almond milk", "ground almonds", "powdered cashews".
+const GROUND_AFTER = /^\s*(powder|paste|butter|flour|meal|milk)\b/i;
+const GROUND_BEFORE = /\b(ground|powdered|finely ground)\s+(\w+\s+)?$/i;
+
+// For the baby a nut is allowed only when it is clearly ground:
+//   (a) the name is a ground form: "cashew powder", "peanut butter", "almond milk", "ground almonds"
+//   (b) a grinding verb acts on it directly: "grind the soaked cashews", "blend almonds"
+//   (c) it is ground to a powder or paste right after: "cashews ground to a fine paste",
+//       "soak almonds overnight, peel and grind to a fine powder"
+// Nut oils and "nut-free" are not nuts. Everything else counts as a whole or chopped nut.
+const NUT_PREP = "(the\\s+)?((soaked|peeled|roasted|blanched|dry[- ]roasted)\\s+){0,2}$";
+const VERB_BEFORE = new RegExp("\\b(grind|blend|powder|puree)\\s+" + NUT_PREP, "i");
+// "crush" and "pulse" can mean coarse pieces, so they need "to a fine powder/paste" after the nut.
+const COARSE_VERB_BEFORE = new RegExp("\\b(crush|pulse)\\s+" + NUT_PREP, "i");
+const TO_FINE = /^\s*(\w+\s+){0,2}(to|into)\s+a\s+(very\s+)?(fine|smooth)\s+(powder|paste)\b/i;
+const GROUND_LATER = /^\s*(?:,?\s*(?:overnight|peel(?:ed)?|and|then|soaked|dry|roast(?:ed)?|lightly|well)\b\s*,?)*\s*(?:ground|grind|blend(?:ed)?|powder(?:ed)?)\s+(?:to|into)\s+(?:a\s+)?(?:very\s+)?(?:fine|smooth)?\s*(?:powder|paste)\b/i;
+
+// Returns the first nut in the text that is not clearly ground, or null.
+function findWholeNut(text) {
+  const re = new RegExp(WHOLE_NUT.source, "gi");
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    if (isNegated(text, m.index)) continue;
+    // Anything coarse in the same sentence means pieces, whatever else it says.
+    const sentStart = Math.max(text.lastIndexOf(".", m.index), text.lastIndexOf(";", m.index)) + 1;
+    const sentEnd = text.slice(m.index).search(/[.;]/);
+    const sentence = text.slice(sentStart, sentEnd < 0 ? text.length : m.index + sentEnd);
+    if (/\b(crunchy|crunch|coarse|coarsely|bits|pieces|chunks|chunky|halves|slivers)\b/i.test(sentence)) return m;
+    const rest = text.slice(m.index + m[0].length);
+    const before = text.slice(Math.max(0, m.index - 40), m.index);
+    if (/^\s*(oil\b|-?\s*free\b)/i.test(rest)) continue;
+    if (GROUND_AFTER.test(rest.slice(0, 12)) || GROUND_BEFORE.test(before)) continue;
+    if (VERB_BEFORE.test(before)) continue;
+    if (COARSE_VERB_BEFORE.test(before) && TO_FINE.test(rest)) continue;
+    if (GROUND_LATER.test(rest)) continue;
+    return m;
+  }
+  return null;
+}
 
 const RULES = {
   baby: [
-    { rule: "honey", level: "error", re: /\bhoney\b/i,
+    { rule: "honey", level: "error", re: /\b(honey(ed|s)?|thene|then(?= \(honey\))|tene|jenu|madhu|shahad)\b/i,
       message: "Honey is not safe under 12 months (infant botulism risk)." },
     { rule: "added-salt", level: "error",
       re: /\b(salt|salted|namak|uppu|rock salt|sea salt|black salt|kala namak)\b/i,
@@ -75,7 +117,8 @@ function findMatch(re, text) {
   const global = new RegExp(re.source, re.flags.includes("g") ? re.flags : re.flags + "g");
   let m;
   while ((m = global.exec(text)) !== null) {
-    if (!isNegated(text, m.index)) return m;
+    const after = text.slice(m.index + m[0].length, m.index + m[0].length + 8);
+    if (!isNegated(text, m.index) && !/^[- ]?free\b/i.test(after)) return m;
     if (m[0].length === 0) global.lastIndex++;
   }
   return null;
@@ -115,8 +158,8 @@ export function checkRecipe(recipe, opts = {}) {
   // Whole nuts for babies: error unless the nut is clearly ground or a paste.
   if (age === "baby") {
     for (const piece of pieces) {
-      const m = findMatch(WHOLE_NUT, piece);
-      if (m && !GROUND_FORM.test(piece)) {
+      const m = findWholeNut(piece);
+      if (m) {
         add("error", "whole-nuts", "Whole or chopped nuts are a choking hazard for babies. Only finely ground nut powder is OK.", m[0]);
         break;
       }
@@ -129,26 +172,36 @@ export function checkRecipe(recipe, opts = {}) {
 
   if (age === "kid") {
     for (const piece of pieces) {
-      const m = findMatch(WHOLE_NUT, piece);
-      if (m && !GROUND_FORM.test(piece)) {
+      const m = findWholeNut(piece);
+      if (m) {
         add("warning", "whole-nuts", "Whole nuts are a choking risk under 5. Use chopped or powdered.", m[0]);
         break;
       }
     }
   }
 
-  // School lunchbox: many schools are nut-free.
-  if (age === "kid" && opts.lunchbox) {
+  // Nut-free school (a user setting): no nuts in the lunchbox.
+  if (age === "kid" && opts.lunchbox && opts.schoolNutFree) {
     for (const piece of pieces) {
       const m = findMatch(WHOLE_NUT, piece);
       if (m) {
-        add("error", "school-nut-free", "Most schools are nut-free: keep nuts out of the lunchbox.", m[0]);
+        add("error", "school-nut-free", "School is nut-free: keep nuts out of the lunchbox." + (opts.nutFreeSwap ? " Swap: " + opts.nutFreeSwap : ""), m[0]);
         break;
       }
     }
   }
 
   return { safe: errors.length === 0, errors, warnings };
+}
+
+// True for peanut and tree-nut ingredients (including butters and powders), false for coconut, nutmeg etc.
+export function isNutIngredient(name) {
+  return WHOLE_NUT.test(normaliseText(name));
+}
+
+// A kid's lunchbox or snack-box recipe (these go to school).
+export function isSchoolFood(recipe) {
+  return String(recipe?.forWhom || "") === "kid" && /lunch\s*box|school|snack/i.test(String(recipe?.mealType || ""));
 }
 
 // Which ages a recipe should be checked for.
@@ -160,11 +213,12 @@ export function agesFor(recipe) {
 }
 
 // Check a recipe for everyone it is meant for and merge the results.
-export function checkForAudience(recipe) {
+// opts.schoolNutFree: the family's "school is nut-free" setting (off by default).
+export function checkForAudience(recipe, opts = {}) {
   const out = { safe: true, errors: [], warnings: [], byAge: {} };
   for (const age of agesFor(recipe)) {
-    const lunchbox = age === "kid" && /lunch\s*box|school/i.test(String(recipe?.mealType || ""));
-    const r = checkRecipe(recipe, { age, lunchbox });
+    const lunchbox = age === "kid" && /lunch\s*box|school|snack/i.test(String(recipe?.mealType || ""));
+    const r = checkRecipe(recipe, { age, lunchbox, schoolNutFree: !!opts.schoolNutFree, nutFreeSwap: recipe?.nutFreeSwap });
     out.byAge[age] = r;
     if (!r.safe) out.safe = false;
     out.errors.push(...r.errors.map((e) => ({ ...e, age })));

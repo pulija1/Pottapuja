@@ -13,13 +13,25 @@ export const SLOTS = [
   { id: "family_dinner", who: "family", label: "Family dinner" },
 ];
 
-export const DEFAULT_BRING = {
-  kid: ["Lunchbox", "Snack box", "Water bottle", "Napkin", "School diary / folder", "Spare clothes"],
-  baby: ["Diapers (4)", "Wipes", "Change of clothes", "Bib", "Baby food container and spoon", "Milk bottle / formula", "Burp cloth"],
-};
+// The day panel groups meals into these collapsible sections, in this order.
+export const MEAL_GROUPS = [
+  { who: "kid", label: "4-year-old", icon: "👧" },
+  { who: "baby", label: "8-month-old", icon: "👶" },
+  { who: "family", label: "Family", icon: "🍛" },
+];
+
+// Ideas offered as one-tap to-dos.
+export const TODO_IDEAS = [
+  { text: "Buy dresses", who: "kid" },
+  { text: "Check school schedule", who: "kid" },
+  { text: "Pack school bag", who: "kid" },
+  { text: "Doctor's appointment", who: "baby" },
+  { text: "Buy diapers and wipes", who: "baby" },
+  { text: "Pay school fees", who: "kid" },
+];
 
 export function emptyDay() {
-  return { meals: {}, schedule: [], status: "pending", approvedAt: null, changedAfterApproval: false, bring: {}, extraBring: [], useBabyBag: false };
+  return { meals: {}, schedule: [], status: "pending", approvedAt: null, changedAfterApproval: false };
 }
 
 export function getDay(state, key) {
@@ -58,15 +70,26 @@ export function slotsFor(key) {
   return SLOTS.filter((s) => !s.schoolOnly || isSchoolDay(key));
 }
 
-// Bring-list items for a date: kid school bag on school days, baby bag if switched on, plus extras.
-export function bringItemsFor(state, key) {
-  const day = getDay(state, key) || emptyDay();
-  const tpl = state.bringTemplates || DEFAULT_BRING;
-  const items = [];
-  if (isSchoolDay(key)) tpl.kid.forEach((text, i) => items.push({ id: `kid:${text}`, text, who: "kid", order: i }));
-  if (day.useBabyBag) tpl.baby.forEach((text, i) => items.push({ id: `baby:${text}`, text, who: "baby", order: i }));
-  (day.extraBring || []).forEach((x) => items.push({ id: `extra:${x.id}`, text: x.text, who: x.who || "family", extra: true }));
-  return items.map((it) => ({ ...it, packed: !!day.bring?.[it.id] }));
+// To-dos for the kids on a date ({ id, text, who, date, time, done }), timed ones first.
+export function todosOn(state, key) {
+  return (state.todos || [])
+    .filter((t) => t.date === key)
+    .sort((a, b) => String(a.time || "99").localeCompare(String(b.time || "99")) || a.text.localeCompare(b.text));
+}
+
+// Old saved data had per-day "to bring" extras; turn them into to-dos once.
+export function migrateBringToTodos(state) {
+  state.todos = state.todos || [];
+  for (const [date, day] of Object.entries(state.days || {})) {
+    for (const x of day.extraBring || []) {
+      state.todos.push({ id: "b-" + x.id, text: x.text, who: x.who || "family", date, time: "", done: false });
+    }
+    delete day.extraBring;
+    delete day.bring;
+    delete day.useBabyBag;
+  }
+  delete state.bringTemplates;
+  return state;
 }
 
 export function remindersOn(state, key) {
@@ -81,7 +104,7 @@ export function remindersOn(state, key) {
 //   - meal plan / schedule not approved (today and future)
 //   - no meal plan yet (today through the next 6 days)
 //   - reminders not marked done (any date, so overdue ones stay visible)
-//   - bring items not packed (today and tomorrow only)
+//   - to-dos not ticked off (any date, so missed ones stay visible)
 export function pendingFor(state, key, today) {
   const out = [];
   const day = getDay(state, key);
@@ -96,9 +119,8 @@ export function pendingFor(state, key, today) {
   for (const r of remindersOn(state, key)) {
     if (!r.doneOnDate) out.push({ type: "reminder", text: `${r.time ? r.time + " " : ""}${r.title}`, id: r.id, overdue: isPast });
   }
-  if (!isPast && key <= addDays(today, 1)) {
-    const unpacked = bringItemsFor(state, key).filter((i) => !i.packed);
-    if (unpacked.length) out.push({ type: "bring", text: `${unpacked.length} item${unpacked.length > 1 ? "s" : ""} to pack` });
+  for (const t of todosOn(state, key)) {
+    if (!t.done) out.push({ type: "todo", text: `${t.time ? t.time + " " : ""}${t.text}`, id: t.id, overdue: isPast });
   }
   return out;
 }

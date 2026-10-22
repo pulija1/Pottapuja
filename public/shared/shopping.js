@@ -1,5 +1,7 @@
 // Shopping list helpers: name normalising, unit conversion, merging, and aisle grouping.
 
+import { DATASET_ITEMS } from "./dataset.js";
+
 const UNIT_ALIASES = {
   g: "g", gm: "g", gms: "g", gram: "g", grams: "g",
   kg: "kg", kgs: "kg", kilo: "kg", kilos: "kg", kilogram: "kg", kilograms: "kg",
@@ -14,7 +16,7 @@ const UNIT_ALIASES = {
 };
 
 // Units that convert into a common base so 500 g + 1 kg merge to 1.5 kg.
-const BASE = { g: ["g", 1], kg: ["g", 1000], ml: ["ml", 1], l: ["ml", 1000], dozen: ["pcs", 12], pcs: ["pcs", 1] };
+const BASE = { g: ["g", 1], kg: ["g", 1000], ml: ["ml", 1], l: ["ml", 1000], dozen: ["pcs", 12], pcs: ["pcs", 1], tsp: ["tsp", 1], tbsp: ["tsp", 3] };
 
 export function normUnit(u) {
   const k = String(u ?? "").trim().toLowerCase().replace(/\.$/, "");
@@ -43,26 +45,47 @@ const SYNONYMS = {
   "sweet potato": "sweet potato", "sweet potatoes": "sweet potato",
   "idli batter": "idli/dosa batter", "dosa batter": "idli/dosa batter", "idli dosa batter": "idli/dosa batter",
   "vermicelli": "vermicelli", "semiya": "vermicelli", "semia": "vermicelli",
+  "sona masoori rice": "rice", "ponni rice": "rice", "biyyam": "rice", "arisi": "rice", "akki": "rice",
+  "turmeric powder": "turmeric", "haldi": "turmeric", "pasupu": "turmeric", "manjal": "turmeric",
+  "cumin": "jeera", "cumin seeds": "jeera", "jeelakarra": "jeera", "seeragam": "jeera",
+  "asafoetida": "hing", "inguva": "hing", "perungayam": "hing",
+  "green peas": "peas", "french beans": "beans", "whole wheat flour": "atta", "wheat flour": "atta",
+  "plain yogurt": "curd", "pumpkin": "pumpkin", "tomato puree": "tomato puree",
 };
 
+// Regional names from the grocery dataset (Hindi, Tamil, Telugu, Kannada, Malayalam) map to the English name.
+for (const item of DATASET_ITEMS) {
+  const english = item.name.toLowerCase().replace(/\s*\(.*?\)\s*/g, " ").trim();
+  for (const alias of Object.values(item.names || {})) {
+    const a = String(alias).toLowerCase().trim();
+    if (a && !SYNONYMS[a]) SYNONYMS[a] = SYNONYMS[english] || english;
+  }
+}
+
 export function normName(name) {
-  const k = String(name || "").trim().toLowerCase().replace(/\s+/g, " ");
+  // "ragi flour (finger millet)" -> "ragi flour"
+  const k = String(name || "").toLowerCase().replace(/\s*\(.*?\)\s*/g, " ").trim().replace(/\s+/g, " ");
   if (SYNONYMS[k]) return SYNONYMS[k];
+  if (/chill?ies$/.test(k)) return normName(k.replace(/ies$/, "i"));
+  if (k.endsWith("ies") && k.length > 4) return normName(k.slice(0, -3) + "y");
   // simple plural -> singular
   if (k.endsWith("es") && SYNONYMS[k.slice(0, -2)]) return SYNONYMS[k.slice(0, -2)];
   if (k.endsWith("s") && SYNONYMS[k.slice(0, -1)]) return SYNONYMS[k.slice(0, -1)];
   return k;
 }
 
+// Word lists per aisle. Plurals ("small onions", "cherry tomatoes") match too. Order matters: first match wins.
+const words = (list) => new RegExp(`\\b(?:${list.join("|")})(?:s|es)?\\b`);
 const AISLES = [
-  ["Vegetables", /\b(tomato|onion|potato|carrot|beans|brinjal|okra|bhindi|drumstick|spinach|palak|gourd|cabbage|cauliflower|peas|capsicum|chill?i|ginger|garlic|curry leaves|coriander leaves|mint|pumpkin|sweet potato|beetroot|cucumber|lemon|plantain|raw banana|yam|colocasia)\b/],
-  ["Fruits", /\b(banana|apple|pear|papaya|mango|chikoo|sapota|grape|pomegranate|orange|avocado|guava|watermelon|melon|berries|strawberr)/],
-  ["Rice, dals & flours", /\b(rice|dal|ragi|rava|flour|atta|poha|aval|vermicelli|millet|oats|besan|maida|sabudana|batter)\b/],
-  ["Dairy & eggs", /\b(milk|curd|ghee|butter|paneer|cheese|egg|cream)\b/],
-  ["Spices & tempering", /\b(salt|turmeric|cumin|jeera|mustard|hing|asafoetida|pepper|chill?i powder|sambar powder|rasam powder|cardamom|elaichi|cinnamon|clove|tamarind|jaggery|sugar|seeds|masala|methi)\b/],
-  ["Oil, nuts & dry fruits", /\b(oil|cashew|almond|peanut|groundnut|walnut|raisin|dates|coconut)\b/],
-  ["Baby care", /\b(diaper|wipes|formula|cerelac|baby|sipper|bib)\b/],
-  ["School & household", /\b(tissue|napkin|foil|lunch ?box|bottle|soap|detergent|bag)\b/],
+  ["Spices & tempering", /\b(powder|masala)\b/],
+  ["Vegetables", words(["tomato", "onion", "shallot", "potato", "carrot", "beans?", "brinjal", "eggplant", "okra", "lady ?finger", "ladies finger", "bhindi", "drumstick", "spinach", "palak", "gourd", "cabbage", "cauliflower", "peas", "capsicum", "bell pepper", "chill?i", "chillie", "ginger", "garlic", "curry leaves", "coriander leaves", "mint", "methi leaves", "pumpkin", "sweet potato", "beetroot", "beet", "cucumber", "lemon", "lime", "plantain", "raw banana", "yam", "colocasia", "baby corn", "corn", "sweet corn", "radish", "mushroom", "zucchini", "broccoli", "leaves"])],
+  ["Fruits", words(["banana", "apple", "pear", "papaya", "mango", "chikoo", "sapota", "grape", "pomegranate", "orange", "avocado", "guava", "watermelon", "melon", "berry", "berries", "strawberry", "plum", "kiwi", "pineapple"])],
+  ["Rice, dals & flours", /\b(rice|dal|ragi|rava|flour|atta|poha|aval|vermicelli|millet|bajra|jowar|oats|besan|maida|sabudana|batter|bread|tortilla|chana|rajma|lentils?)\b/],
+  ["Dairy & eggs", /\b(milk|curd|ghee|butter|paneer|cheese|eggs?|cream|yogurt)\b/],
+  ["Spices & tempering", /\b(salt|turmeric|cumin|jeera|mustard|hing|asafoetida|pepper|cardamom|elaichi|cinnamon|cloves?|tamarind|jaggery|sugar|seeds|methi|fenugreek|podi|baking)\b/],
+  ["Oil, nuts & dry fruits", words(["oil", "cashew", "almond", "peanut", "groundnut", "walnut", "pistachio", "raisin", "dates", "coconut", "nut", "mixed nuts", "jam"])],
+  ["Baby care", /\b(diapers?|wipes|formula|cerelac|sipper|bib|baby (lotion|soap|oil|shampoo|food))\b/],
+  ["School & household", /\b(tissues?|napkins?|foil|lunch ?box|bottle|soap|detergent|bags?)\b/],
 ];
 
 export function aisleFor(name) {
@@ -71,7 +94,7 @@ export function aisleFor(name) {
   return "Other";
 }
 
-export const AISLE_ORDER = [...AISLES.map((a) => a[0]), "Other"];
+export const AISLE_ORDER = [...new Set(AISLES.map((a) => a[0]))].concat("Other");
 
 function toBase(qty, unit) {
   const b = BASE[unit];
@@ -82,6 +105,7 @@ function toBase(qty, unit) {
 function fromBase(qty, baseUnit) {
   if (baseUnit === "g" && qty >= 1000) return { quantity: round(qty / 1000), unit: "kg" };
   if (baseUnit === "ml" && qty >= 1000) return { quantity: round(qty / 1000), unit: "l" };
+  if (baseUnit === "tsp" && qty >= 3 && Math.abs(qty / 3 - Math.round(qty / 3)) < 1e-9) return { quantity: round(qty / 3), unit: "tbsp" };
   return { quantity: round(qty), unit: baseUnit };
 }
 
@@ -101,7 +125,8 @@ export function mergeItems(items) {
     const base = qty != null && !isNaN(qty) ? toBase(qty, unit) : null;
     const key = base ? `${name}|${base.unit}` : `${name}|${unit}`;
     const existing = out.get(key);
-    const sources = raw.source ? [raw.source] : [];
+    const sources = [...(raw.sources || []), ...(raw.source ? [raw.source] : [])];
+    const keys = [...(raw.keys || [])];
     if (!existing) {
       out.set(key, {
         ...raw,
@@ -109,7 +134,8 @@ export function mergeItems(items) {
         quantity: base ? base.qty : qty != null && !isNaN(qty) ? qty : null,
         unit: base ? base.unit : unit,
         aisle: raw.aisle || aisleFor(name),
-        sources,
+        sources: [...new Set(sources)],
+        keys,
         bought: !!raw.bought,
         _base: !!base,
       });
@@ -120,13 +146,14 @@ export function mergeItems(items) {
         existing.quantity = base ? base.qty : qty;
       }
       for (const s of sources) if (!existing.sources.includes(s)) existing.sources.push(s);
+      for (const k of keys) if (!existing.keys.includes(k)) existing.keys.push(k);
       existing.bought = existing.bought && !!raw.bought;
       if (!existing.store && raw.store) existing.store = raw.store;
     }
   }
   return [...out.values()].map((e) => {
     const { _base, ...rest } = e;
-    if (_base && rest.quantity != null) Object.assign(rest, fromBase(rest.quantity, rest.unit));
+    if ((_base || rest.unit === "g" || rest.unit === "ml" || rest.unit === "tsp") && rest.quantity != null) Object.assign(rest, fromBase(rest.quantity, rest.unit));
     return rest;
   });
 }

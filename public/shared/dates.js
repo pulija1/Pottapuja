@@ -40,6 +40,10 @@ export function addMonths(key, n) {
   return toKey(d);
 }
 
+export function daysBetween(a, b) {
+  return Math.round((fromKey(b) - fromKey(a)) / 86400000);
+}
+
 export function compareKeys(a, b) {
   return a < b ? -1 : a > b ? 1 : 0;
 }
@@ -91,15 +95,22 @@ export function occurrences(reminder, from, to) {
     if (reminder.date >= from && reminder.date <= to) out.push(reminder.date);
     return out;
   }
-  let cur = reminder.date;
-  let i = 0;
-  while (cur <= to && i < 1000) {
-    if (cur >= from) out.push(cur);
-    i++;
-    if (repeat === "daily") cur = addDays(reminder.date, i);
-    else if (repeat === "weekly") cur = addDays(reminder.date, 7 * i);
+  // Start near `from` instead of walking from the first date, so old reminders keep working.
+  const gap = Math.max(0, daysBetween(reminder.date, from));
+  if (repeat === "daily" || repeat === "weekdays") {
+    for (let cur = addDays(reminder.date, gap); cur <= to && out.length < 1000; cur = addDays(cur, 1)) {
+      if (repeat === "daily" || isSchoolDay(cur)) out.push(cur);
+    }
+    return out;
+  }
+  let i = repeat === "weekly" ? Math.floor(gap / 7) : repeat === "monthly" ? Math.max(0, Math.floor(gap / 31) - 1) : 0;
+  for (let n = 0; n < 1000; n++, i++) {
+    let cur;
+    if (repeat === "weekly") cur = addDays(reminder.date, 7 * i);
     else if (repeat === "monthly") cur = addMonths(reminder.date, i);
     else break;
+    if (cur > to) break;
+    if (cur >= from) out.push(cur);
   }
   return out;
 }
