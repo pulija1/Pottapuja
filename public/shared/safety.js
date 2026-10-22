@@ -6,8 +6,8 @@
 
 // The negation must sit right before the word ("no salt", "skip the sugar"), so
 // "skip the sugar and add honey" still catches the honey.
-// A list carries the negation ("no salt or sugar", "without salt, sugar or honey"); "and add" does not.
-const NEGATION = /\b(no|without|skip|omit|avoid|don'?t add|do not add|never add|free of|instead of)\s+((the|any|added|extra|a|of)\s+){0,2}([\w-]+(\s*,\s*|\s+or\s+|\s+nor\s+)((the|any|added|extra)\s+)?){0,5}$/i;
+// A list carries the negation ("no salt or sugar", "avoid salt and sugar"); "and add ..." ends it.
+const NEGATION = /\b(no|without|skip|omit|avoid|don'?t add|do not add|never add|free of|instead of)\s+((the|any|added|extra|a|of)\s+){0,2}([\w-]+(\s*,\s*|\s+or\s+|\s+nor\s+|\s+and\s+(?!(?:add|stir|mix|drizzle|put|pour|sprinkle|top|serve|use)\b))((the|any|added|extra)\s+)?){0,5}$/i;
 
 // Words that contain "nut" but are not tree nuts or peanuts.
 const NOT_NUTS = /\b(coconut|nutmeg|butternut|doughnut|donut|nutrition|nutritious|nutrient|nutrients)\b/gi;
@@ -37,6 +37,11 @@ function findWholeNut(text) {
   let m;
   while ((m = re.exec(text)) !== null) {
     if (isNegated(text, m.index)) continue;
+    // Anything coarse in the same sentence means pieces, whatever else it says.
+    const sentStart = Math.max(text.lastIndexOf(".", m.index), text.lastIndexOf(";", m.index)) + 1;
+    const sentEnd = text.slice(m.index).search(/[.;]/);
+    const sentence = text.slice(sentStart, sentEnd < 0 ? text.length : m.index + sentEnd);
+    if (/\b(crunchy|crunch|coarse|coarsely|bits|pieces|chunks|chunky|halves|slivers)\b/i.test(sentence)) return m;
     const rest = text.slice(m.index + m[0].length);
     const before = text.slice(Math.max(0, m.index - 40), m.index);
     if (/^\s*(oil\b|-?\s*free\b)/i.test(rest)) continue;
