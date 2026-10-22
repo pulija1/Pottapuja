@@ -1101,7 +1101,15 @@ document.addEventListener("submit", (e) => {
   }
 });
 
-// Remember which meal sections are open so re-renders don't collapse them.
+// Remember which meal sections are open so re-renders don't collapse them. The click
+// is recorded straight away, because the toggle event fires later and is lost if a
+// re-render replaces the section first.
+document.addEventListener("click", (e) => {
+  const d = e.target.closest?.("summary")?.parentElement;
+  const g = d?.dataset?.group;
+  if (!g || e.target.closest("button, input, select, a")) return;
+  if (d.open) ui.openGroups.delete(g); else ui.openGroups.add(g);
+}, true);
 document.addEventListener("toggle", (e) => {
   const g = e.target?.dataset?.group;
   if (!g) return;
