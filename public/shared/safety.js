@@ -137,18 +137,28 @@ export function checkRecipe(recipe, opts = {}) {
     }
   }
 
-  // School lunchbox: many schools are nut-free.
-  if (age === "kid" && opts.lunchbox) {
+  // Nut-free school (a user setting): no nuts in the lunchbox.
+  if (age === "kid" && opts.lunchbox && opts.schoolNutFree) {
     for (const piece of pieces) {
       const m = findMatch(WHOLE_NUT, piece);
       if (m) {
-        add("error", "school-nut-free", "Most schools are nut-free: keep nuts out of the lunchbox.", m[0]);
+        add("error", "school-nut-free", "School is nut-free: keep nuts out of the lunchbox." + (opts.nutFreeSwap ? " Swap: " + opts.nutFreeSwap : ""), m[0]);
         break;
       }
     }
   }
 
   return { safe: errors.length === 0, errors, warnings };
+}
+
+// True for peanut and tree-nut ingredients (including butters and powders), false for coconut, nutmeg etc.
+export function isNutIngredient(name) {
+  return WHOLE_NUT.test(normaliseText(name));
+}
+
+// A kid's lunchbox or snack-box recipe (these go to school).
+export function isSchoolFood(recipe) {
+  return String(recipe?.forWhom || "") === "kid" && /lunch\s*box|school|snack/i.test(String(recipe?.mealType || ""));
 }
 
 // Which ages a recipe should be checked for.
@@ -160,11 +170,12 @@ export function agesFor(recipe) {
 }
 
 // Check a recipe for everyone it is meant for and merge the results.
-export function checkForAudience(recipe) {
+// opts.schoolNutFree: the family's "school is nut-free" setting (off by default).
+export function checkForAudience(recipe, opts = {}) {
   const out = { safe: true, errors: [], warnings: [], byAge: {} };
   for (const age of agesFor(recipe)) {
-    const lunchbox = age === "kid" && /lunch\s*box|school/i.test(String(recipe?.mealType || ""));
-    const r = checkRecipe(recipe, { age, lunchbox });
+    const lunchbox = age === "kid" && /lunch\s*box|school|snack/i.test(String(recipe?.mealType || ""));
+    const r = checkRecipe(recipe, { age, lunchbox, schoolNutFree: !!opts.schoolNutFree, nutFreeSwap: recipe?.nutFreeSwap });
     out.byAge[age] = r;
     if (!r.safe) out.safe = false;
     out.errors.push(...r.errors.map((e) => ({ ...e, age })));

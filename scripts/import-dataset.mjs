@@ -11,7 +11,7 @@ const recipes = src.recipes.map((r) => ({
   id: "ds-" + r.id,
   title: r.name,
   forWhom: WHO[r.audience] || "family",
-  mealType: r.audience === "kid-4y-lunchbox" ? "lunchbox" : r.mealType,
+  mealType: r.audience === "kid-4y-lunchbox" && r.mealType !== "snack" ? "lunchbox" : r.mealType,
   texture: r.audience === "baby-8m" ? "mashed" : "",
   prepMinutes: r.prepMinutes,
   ingredients: r.ingredients.map((i) => ({
@@ -22,6 +22,9 @@ const recipes = src.recipes.map((r) => ({
   })),
   steps: r.steps,
   notes: r.ageNotes || "",
+  ...(r.familyFavorite ? { familyFavorite: true } : {}),
+  ...(r.nutFree === false ? { nutFree: false } : {}),
+  ...(r.nutFreeSwap ? { nutFreeSwap: r.nutFreeSwap.replace(/\s*\([a-z-]+\)/g, "") } : {}),
   source: "library",
 }));
 

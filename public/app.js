@@ -1,6 +1,6 @@
 import { load, save, exportJson, importJson } from "./store.js";
 import { todayKey, addDays, addMonths, monthGrid, monthLabel, prettyDate, fromKey, isDateKey, isSchoolDay, occurrences } from "./shared/dates.js";
-import { checkForAudience } from "./shared/safety.js";
+import { checkForAudience, isNutIngredient, isSchoolFood } from "./shared/safety.js";
 import { LIBRARY, suggestFromLibrary } from "./shared/recipes.js";
 import { mergeItems, groupByAisle, formatQty, missingFromPantry, normName, normUnit, aisleFor } from "./shared/shopping.js";
 import { SLOTS, emptyDay, getDay, dayHasPlan, markEdited, approveDay, unapproveDay, slotsFor, bringItemsFor, remindersOn, pendingFor, dayStatus } from "./shared/plan.js";
@@ -24,6 +24,7 @@ const ui = {
   hideBought: false,
   bringDate: nextSchoolDayFrom(TODAY),
   savedFilter: "",
+  gen: { forWhom: "both", mealType: "", notes: "" },  // recipe form values survive re-renders
 };
 
 // ---------- helpers ----------
@@ -73,6 +74,14 @@ function findRecipeByTitle(title, who) {
   const list = [...state.savedRecipes, ...LIBRARY, ...ui.results];
   return list.find((r) => r.title.toLowerCase() === t && (!who || r.forWhom === who || r.forWhom === "family")) ||
     list.find((r) => r.title.toLowerCase() === t) || null;
+}
+
+const nutFreeOn = () => !!state.settings?.schoolNutFree;
+
+// Missing ingredients for a recipe, leaving nuts off the list for school food when the school is nut-free.
+function shoppingNeeds(recipe) {
+  const need = missingFromPantry(recipe, state.pantry);
+  return nutFreeOn() && isSchoolFood(recipe) ? need.filter((i) => !isNutIngredient(i.name)) : need;
 }
 
 function whoPill(who) {
@@ -300,21 +309,22 @@ function renderRecipes() {
       <h2>Make recipes from these ingredients</h2>
       <form data-form="generate" class="form-grid">
         <label class="field"><span>For</span>
-          <select name="forWhom" data-testid="gen-for">
-            <option value="both">Both kids</option><option value="baby">Baby (8 months)</option><option value="kid">4-year-old</option><option value="family">Whole family</option>
+          <select name="forWhom" data-testid="gen-for" data-action="gen-field">
+            ${[["both", "Both kids"], ["baby", "Baby (8 months)"], ["kid", "4-year-old"], ["family", "Whole family"]].map(([v, l]) => `<option value="${v}" ${ui.gen.forWhom === v ? "selected" : ""}>${l}</option>`).join("")}
           </select></label>
         <label class="field"><span>Meal</span>
-          <select name="mealType" data-testid="gen-meal">
-            <option value="">Any</option><option value="breakfast">Breakfast</option><option value="lunchbox">School lunchbox</option><option value="lunch">Lunch</option><option value="snack">Snack</option><option value="dinner">Dinner</option>
+          <select name="mealType" data-testid="gen-meal" data-action="gen-field">
+            ${[["", "Any"], ["breakfast", "Breakfast"], ["lunchbox", "School lunchbox"], ["lunch", "Lunch"], ["snack", "Snack"], ["dinner", "Dinner"]].map(([v, l]) => `<option value="${v}" ${ui.gen.mealType === v ? "selected" : ""}>${l}</option>`).join("")}
           </select></label>
+        <label class="chk full" style="min-height:0"><input type="checkbox" data-action="nut-free" ${nutFreeOn() ? "checked" : ""} data-testid="school-nut-free"> School is nut-free (no peanuts or tree nuts in the lunchbox or snack box)</label>
         <label class="field full"><span>Anything else? (optional)</span>
-          <input type="text" name="notes" maxlength="300" placeholder="e.g. baby just started eggs, no onion today" data-testid="gen-notes"></label>
+          <input type="text" name="notes" maxlength="300" value="${esc(ui.gen.notes)}" placeholder="e.g. baby just started eggs, no onion today" data-testid="gen-notes" data-action="gen-field"></label>
         <div class="full row">
           <button class="btn primary" data-testid="generate-recipes" ${ui.aiBusy ? "disabled" : ""}>${aiOnline() ? "✨ Get recipes" : "Find recipes"}</button>
           ${ui.aiBusy ? `<span class="spinner" aria-hidden="true"></span><span class="small muted">Asking the AI… this can take up to a minute</span><button type="button" class="btn sm" data-action="cancel-ai" data-testid="cancel-ai">Cancel</button>` : ""}
         </div>
       </form>
-      <p class="small muted" style="margin-top:8px">Every recipe is checked for age safety: no honey, salt, sugar or whole nuts for the baby, soft textures only, and nut-free lunchboxes for school.</p>
+      <p class="small muted" style="margin-top:8px">Every recipe is checked for age safety: no honey, salt, sugar or whole nuts for the baby, soft textures only, chopped (not whole) nuts for the 4-year-old, and nut-free lunchboxes when the school is nut-free.</p>
     </div>
 
     <div data-testid="recipe-results">
@@ -331,12 +341,14 @@ function renderRecipes() {
 }
 
 function recipeCard(r, { saved = false } = {}) {
-  const safety = checkForAudience(r);
-  const missing = new Set(missingFromPantry(r, state.pantry).map((i) => normName(i.name)));
+  const safety = checkForAudience(r, { schoolNutFree: nutFreeOn() });
+  const missing = new Set(shoppingNeeds(r).map((i) => normName(i.name)));
+  const hasNuts = r.nutFree === false || r.ingredients.some((i) => isNutIngredient(i.name));
   const isSaved = state.savedRecipes.some((s) => s.id === r.id || s.title === r.title);
   const issues = [...safety.errors, ...safety.warnings];
   return `<article class="card recipe" data-testid="recipe-card" data-recipe-id="${esc(r.id)}" data-safe="${safety.safe}">
-    <div class="row between"><h3>${esc(r.title)}</h3>${whoPill(r.forWhom)}</div>
+    <div class="row between"><h3>${esc(r.title)}</h3><span>${r.familyFavorite ? '<span class="pill warn" data-testid="family-favorite">⭐ Family favorite</span> ' : ""}${whoPill(r.forWhom)}</span></div>
+    ${hasNuts && !nutFreeOn() ? `<div class="small muted" data-testid="contains-nuts">🥜 Contains nuts${r.nutFreeSwap ? ". Nut-free swap: " + esc(r.nutFreeSwap) : ""}</div>` : ""}
     <div class="small muted">${esc(r.mealType || "")}${r.prepMinutes ? " · " + esc(r.prepMinutes) + " min" : ""}${r.texture ? " · " + esc(r.texture) : ""}${r.source === "ai" ? " · ✨ AI" : r.source === "library" ? " · Family recipe book" : ""}</div>
     <div class="safety ${safety.safe && !safety.warnings.length ? "ok" : safety.safe ? "warn" : "warn"}" data-testid="safety-badge">
       ${safety.safe ? (safety.warnings.length ? "⚠️ Safe with care" : "✅ Age-safe") : "⛔ Not safe as written"}
@@ -355,17 +367,19 @@ function recipeCard(r, { saved = false } = {}) {
 }
 
 async function generate(form) {
+  ui.gen = { forWhom: form.forWhom.value, mealType: form.mealType.value, notes: form.notes.value };
   const body = {
     ingredients: state.pantry,
     forWhom: form.forWhom.value,
     mealType: form.mealType.value,
     notes: form.notes.value,
     count: 4,
+    schoolNutFree: nutFreeOn(),
   };
   ui.aiNotice = "";
   ui.rejected = [];
   const fallback = (why) => {
-    ui.results = suggestFromLibrary(state.pantry, { forWhom: body.forWhom, mealType: body.mealType, limit: 6 });
+    ui.results = suggestFromLibrary(state.pantry, { forWhom: body.forWhom, mealType: body.mealType, limit: 6, schoolNutFree: body.schoolNutFree });
     ui.aiNotice = `${why} Showing recipes from the built-in family recipe book that best match your kitchen.`;
   };
   if (!aiOnline()) {
@@ -638,8 +652,9 @@ document.addEventListener("click", (e) => {
         if (d.meals[s.id]?.title) continue;
         const used = new Set(Object.values(d.meals).map((m) => m?.recipeId));
         const meal = s.id.split("_")[1];
-        const pick = suggestFromLibrary(state.pantry, { forWhom: s.who, mealType: meal === "lunchbox" ? "lunchbox" : meal, limit: 10 })
-          .concat(suggestFromLibrary(state.pantry, { forWhom: s.who, limit: 20 }))
+        const opt = { forWhom: s.who, schoolNutFree: nutFreeOn() };
+        const pick = suggestFromLibrary(state.pantry, { ...opt, mealType: meal, limit: 10 })
+          .concat(suggestFromLibrary(state.pantry, { ...opt, limit: 40 }))
           .find((r) => (r.forWhom === s.who) && !used.has(r.id));
         if (pick) { d.meals[s.id] = { recipeId: pick.id, title: pick.title, forWhom: pick.forWhom }; filled++; }
       }
@@ -660,7 +675,7 @@ document.addEventListener("click", (e) => {
       break;
     }
     case "day-to-shopping": {
-      const needs = plannedRecipes(ui.selected, 1).flatMap(({ recipe }) => missingFromPantry(recipe, state.pantry).map((i) => ({ ...i })));
+      const needs = plannedRecipes(ui.selected, 1).flatMap(({ recipe }) => shoppingNeeds(recipe).map((i) => ({ ...i })));
       if (!needs.length) { toast("Nothing missing for this day's meals."); break; }
       addToShopping(needs, prettyDate(ui.selected));
       commit();
@@ -703,7 +718,7 @@ document.addEventListener("click", (e) => {
     case "recipe-to-shopping": {
       const r = findRecipe(el.dataset.id);
       if (!r) break;
-      const need = missingFromPantry(r, state.pantry);
+      const need = shoppingNeeds(r);
       addToShopping(need, r.title);
       commit();
       toast(`Added ${need.length} item${need.length > 1 ? "s" : ""} to the shopping list.`);
@@ -714,7 +729,7 @@ document.addEventListener("click", (e) => {
     case "shop-store": ui.shopStore = el.dataset.store; render(); break;
     case "shop-del": state.shopping = state.shopping.filter((i) => i.id !== el.dataset.id); commit(); break;
     case "plan-to-shopping": {
-      const needs = plannedRecipes(TODAY, 7).flatMap(({ date, recipe }) => missingFromPantry(recipe, state.pantry).map((i) => ({ ...i, source: prettyDate(date) })));
+      const needs = plannedRecipes(TODAY, 7).flatMap(({ date, recipe }) => shoppingNeeds(recipe).map((i) => ({ ...i, source: prettyDate(date) })));
       if (!needs.length) { toast("Nothing missing for the next 7 days of planned meals."); break; }
       for (const n of needs) addToShopping([n], n.source);
       commit();
@@ -792,6 +807,12 @@ document.addEventListener("change", (e) => {
       break;
     }
     case "hide-bought": ui.hideBought = el.checked; render(); break;
+    case "nut-free":
+      state.settings = { ...state.settings, schoolNutFree: el.checked };
+      ui.results = ui.results.filter((r) => !el.checked || checkForAudience(r, { schoolNutFree: true }).safe || !isSchoolFood(r));
+      commit();
+      toast(el.checked ? "Nut-free school: lunchbox nuts are blocked and kept off the shopping list." : "Nuts allowed in the lunchbox.");
+      break;
     case "bring-toggle": {
       const d = ensureDay(ui.bringDate);
       if (el.checked) d.bring[el.dataset.id] = true; else delete d.bring[el.dataset.id];
@@ -820,6 +841,7 @@ document.addEventListener("change", (e) => {
 });
 
 document.addEventListener("input", (e) => {
+  if (e.target.dataset?.action === "gen-field") ui.gen[e.target.name] = e.target.value;
   if (e.target.dataset?.action === "saved-filter") {
     ui.savedFilter = e.target.value;
     const pos = e.target.selectionStart;

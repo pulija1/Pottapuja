@@ -3,6 +3,7 @@
 
 import { normName } from "./shopping.js";
 import { DATASET_RECIPES } from "./dataset.js";
+import { checkForAudience } from "./safety.js";
 
 const r = (id, title, forWhom, mealType, texture, prepMinutes, ingredients, steps, notes = "") => ({
   id: "lib-" + id, title, forWhom, mealType, texture, prepMinutes,
@@ -125,16 +126,19 @@ export function libraryById(id) {
 }
 
 // Rank library recipes by how many of their ingredients are in the pantry.
-export function suggestFromLibrary(pantry, { forWhom = "both", mealType = "", limit = 6 } = {}) {
+// With schoolNutFree, recipes that are not nut-free are left out of lunchbox and snack suggestions.
+export function suggestFromLibrary(pantry, { forWhom = "both", mealType = "", limit = 6, schoolNutFree = false } = {}) {
   const have = new Set((pantry || []).map((p) => normName(typeof p === "string" ? p : p.name)));
   const BASICS = new Set(["water", "salt", "oil", "turmeric"]);
   const wanted = forWhom === "both" ? ["baby", "kid", "family"] : [forWhom, "family"];
   return LIBRARY.filter((x) => wanted.includes(x.forWhom))
     .filter((x) => !mealType || x.mealType === mealType || (mealType === "lunch" && x.mealType === "lunchbox"))
+    .filter((x) => !schoolNutFree || x.forWhom !== "kid" || checkForAudience(x, { schoolNutFree: true }).safe)
     .map((x) => {
       const needed = x.ingredients.map((i) => normName(i.name)).filter((n) => !BASICS.has(n));
       const hit = needed.filter((n) => have.has(n)).length;
-      return { recipe: x, score: needed.length ? hit / needed.length : 0, hit };
+      const score = (needed.length ? hit / needed.length : 0) + (x.familyFavorite ? 0.15 : 0);
+      return { recipe: x, score, hit };
     })
     .sort((a, b) => b.score - a.score || b.hit - a.hit)
     .slice(0, limit)

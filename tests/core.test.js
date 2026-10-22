@@ -26,10 +26,27 @@ test("salt in the steps is caught", () => {
   assert.equal(checkRecipe(baby(["rice"], ["Add a pinch of salt and mash."]), { age: "baby" }).safe, false);
 });
 
-test("nut-free lunchbox for school", () => {
-  const r = { title: "x", forWhom: "kid", mealType: "lunchbox", ingredients: [{ name: "cashews", quantity: 5, unit: "pcs" }], steps: [] };
-  assert.equal(checkForAudience(r).safe, false);
-  assert.equal(checkForAudience({ ...r, mealType: "dinner" }).safe, true);
+test("nut-free lunchbox only when the school-is-nut-free setting is on", () => {
+  const r = { title: "x", forWhom: "kid", mealType: "lunchbox", ingredients: [{ name: "peanut butter", quantity: 1, unit: "tbsp" }], steps: [] };
+  assert.equal(checkForAudience(r).safe, true);
+  assert.equal(checkForAudience(r, { schoolNutFree: true }).safe, false);
+  assert.equal(checkForAudience({ ...r, mealType: "dinner" }, { schoolNutFree: true }).safe, true);
+  const sun = { ...r, ingredients: [{ name: "sunflower butter", quantity: 1, unit: "tbsp" }] };
+  assert.equal(checkForAudience(sun, { schoolNutFree: true }).safe, true);
+});
+
+test("whole nuts warn for the 4-year-old, nut butter does not", () => {
+  const kid = (name) => checkRecipe({ title: "x", ingredients: [{ name }], steps: [] }, { age: "kid" });
+  assert.equal(kid("cashews").warnings[0].rule, "whole-nuts");
+  assert.equal(kid("peanut butter").warnings.length, 0);
+});
+
+test("nut-free setting filters library suggestions and family favorites rank up", () => {
+  const withNuts = suggestFromLibrary([], { forWhom: "kid", limit: 100 });
+  const nutFree = suggestFromLibrary([], { forWhom: "kid", limit: 100, schoolNutFree: true });
+  assert.ok(withNuts.some((r) => r.id === "ds-pb-jam-sandwich"));
+  assert.ok(!nutFree.some((r) => r.id === "ds-pb-jam-sandwich"));
+  assert.equal(suggestFromLibrary(["bread", "peanut butter", "berry jam"], { forWhom: "kid", limit: 1 })[0].id, "ds-pb-jam-sandwich");
 });
 
 test("every built-in recipe passes its own age checks", () => {

@@ -15,6 +15,7 @@ export function defaultState() {
     bringTemplates: structuredClone(DEFAULT_BRING),
     reminders: [],
     notified: {},
+    settings: { schoolNutFree: false },
   };
 }
 
@@ -24,7 +25,8 @@ export function load() {
     if (!raw) return defaultState();
     const data = JSON.parse(raw);
     if (!data || typeof data !== "object" || data.version !== 1) return defaultState();
-    return { ...defaultState(), ...data };
+    const def = defaultState();
+    return { ...def, ...data, settings: { ...def.settings, ...(data.settings || {}) } };
   } catch {
     return defaultState();
   }
