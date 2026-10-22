@@ -17,7 +17,11 @@
         <p class="sub" id="today-label" data-testid="today-label"></p>
       </div>
     </div>
-    <button class="ai-chip" id="ai-chip" data-testid="ai-status" type="button" title="Recipe AI status">AI: checking…</button>
+    <div class="top-right">
+      <button class="ai-chip" id="ai-chip" data-testid="ai-status" type="button" title="Recipe AI status">AI: checking…</button>
+      <button class="checkin" id="checkin" data-testid="checkin" type="button">⬆ Check in</button>
+      <button class="avatar" id="profile" data-testid="profile" type="button" aria-label="Profile and check-in settings">👤</button>
+    </div>
   </header>
 
   <nav class="tabs" role="tablist" aria-label="Sections">
@@ -36,6 +40,7 @@
     <section id="view-reminders" class="view" hidden data-testid="view-reminders"></section>
   </main>
 
+  <section id="login" class="login" hidden aria-label="Sign in" data-testid="login"></section>
   <div id="toast" class="toast" role="status" aria-live="polite" data-testid="toast"></div>
   <script type="module" src="app.js"></script>
 </body>

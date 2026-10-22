@@ -2,12 +2,15 @@
 
 import { addDays, isSchoolDay, occurrences } from "./dates.js";
 
+// The children's names, used in every label.
+export const KIDS = { kid: "Dhari", baby: "Maya" };
+
 export const SLOTS = [
-  { id: "baby_breakfast", who: "baby", label: "Baby breakfast" },
-  { id: "baby_lunch", who: "baby", label: "Baby lunch" },
-  { id: "baby_snack", who: "baby", label: "Baby evening snack" },
-  { id: "baby_dinner", who: "baby", label: "Baby dinner" },
-  { id: "kid_breakfast", who: "kid", label: "Breakfast (4 yr)" },
+  { id: "baby_breakfast", who: "baby", label: "Maya breakfast" },
+  { id: "baby_lunch", who: "baby", label: "Maya lunch" },
+  { id: "baby_snack", who: "baby", label: "Maya evening snack" },
+  { id: "baby_dinner", who: "baby", label: "Maya dinner" },
+  { id: "kid_breakfast", who: "kid", label: "Dhari breakfast" },
   { id: "kid_lunchbox", who: "kid", label: "School lunchbox", schoolOnly: true },
   { id: "kid_snack", who: "kid", label: "Snack box / after school" },
   { id: "family_dinner", who: "family", label: "Family dinner" },
@@ -15,8 +18,8 @@ export const SLOTS = [
 
 // The day panel groups meals into these collapsible sections, in this order.
 export const MEAL_GROUPS = [
-  { who: "kid", label: "4-year-old", icon: "👧" },
-  { who: "baby", label: "8-month-old", icon: "👶" },
+  { who: "kid", label: "Dhari (4 yrs)", icon: "👧" },
+  { who: "baby", label: "Maya (8 months)", icon: "👶" },
   { who: "family", label: "Family", icon: "🍛" },
 ];
 

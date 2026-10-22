@@ -31,9 +31,16 @@ before(async () => {
 });
 after(async () => { await browser?.close(); mock?.proc.kill(); off?.proc.kill(); });
 
+// A browser context that skips the first-launch GitHub sign-in page (tests for it opt back in).
+async function newContext(opts = {}, { signIn = false } = {}) {
+  const ctx = await browser.newContext(opts);
+  if (!signIn) await ctx.addInitScript(() => { if (!localStorage.getItem("familyMealPlanner.sync")) localStorage.setItem("familyMealPlanner.sync", JSON.stringify({ skipped: true })); });
+  return ctx;
+}
+
 // Fresh browser context per test so localStorage starts empty. Collects console errors.
 async function open(server = mock, { today = TODAY, viewport } = {}) {
-  const ctx = await browser.newContext(viewport ? { viewport } : {});
+  const ctx = await newContext(viewport ? { viewport } : {});
   const page = await ctx.newPage();
   const errors = [];
   page.on("pageerror", (e) => errors.push(e.message));
@@ -309,7 +316,7 @@ test("E2E REM-05 a reminder dated in the past is rejected or shown overdue", asy
 test("E2E DATA-02 corrupt saved data does not white-screen the app", async () => {
   // Seed storage before the app loads; writing it on a running page loses to the pagehide save.
   for (const raw of ["{broken", JSON.stringify({ version: 1, days: "oops", reminders: null, shopping: 5, pantry: null, todos: "x", settings: 7 })]) {
-    const ctx = await browser.newContext();
+    const ctx = await newContext();
     await ctx.addInitScript((r) => { if (!sessionStorage.getItem("seeded")) { sessionStorage.setItem("seeded", "1"); localStorage.setItem("familyMealPlanner.v1", r); } }, raw);
     const page = await ctx.newPage();
     const errors = [];
@@ -454,7 +461,7 @@ test("E2E TODO-05 old missed to-dos are folded behind 'Show N older'; ticking up
   }
   todos.push({ id: "tm", text: "Buy shoes", who: "kid", date: TOMORROW, time: "", done: false });
   // Seed before the app loads (a reload would save the app's own state over it on pagehide).
-  const ctx = await browser.newContext();
+  const ctx = await newContext();
   await ctx.addInitScript((t) => { if (!localStorage.getItem("familyMealPlanner.v1")) localStorage.setItem("familyMealPlanner.v1", JSON.stringify({ version: 1, todos: t })); }, todos);
   const page = await ctx.newPage();
   const errors = [];
@@ -558,7 +565,7 @@ test("E2E TODO-03 blank to-dos are ignored and HTML is shown as text", async () 
 
 test("E2E TODO-04 saved data from the old 'To bring' version loads and keeps extra items as to-dos", async () => {
   // Seed storage before the app's first load (writing it on a running page loses to the pagehide save).
-  const ctx = await browser.newContext();
+  const ctx = await newContext();
   await ctx.addInitScript(() => {
     if (sessionStorage.getItem("seeded")) return;
     sessionStorage.setItem("seeded", "1");
@@ -579,5 +586,136 @@ test("E2E TODO-04 saved data from the old 'To bring' version loads and keeps ext
   const todos = await page.evaluate(() => JSON.parse(localStorage.getItem("familyMealPlanner.v1")).todos);
   assert.equal(todos.filter((t) => t.text === "Permission slip").length, 1, "migrated twice");
   assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+// A tiny in-memory GitHub (REST API) for the sign-in and check-in tests, shared by "devices".
+function fakeGitHub({ isPrivate = true } = {}) {
+  const gh = { commits: {}, trees: {}, head: null, n: 0, isPrivate };
+  const id = (p) => `${p}${++gh.n}`;
+  const b64 = (t) => Buffer.from(t, "utf8").toString("base64");
+  gh.files = () => (gh.head ? gh.trees[gh.commits[gh.head].tree] : {});
+  gh.attach = async (ctx) => ctx.route("https://api.github.com/**", async (route) => {
+    const req = route.request();
+    const url = new URL(req.url());
+    const p = decodeURIComponent(url.pathname);
+    const json = (status, body) => route.fulfill({ status, contentType: "application/json", headers: { "access-control-allow-origin": "*" }, body: JSON.stringify(body) });
+    const body = req.postData() ? JSON.parse(req.postData()) : null;
+    if (req.method() === "OPTIONS") return route.fulfill({ status: 204, headers: { "access-control-allow-origin": "*", "access-control-allow-headers": "*", "access-control-allow-methods": "*" } });
+    if (p === "/zen") return json(200, "ok");
+    if (p === "/user") return json(200, { login: "ram", name: "Ram", avatar_url: "" });
+    if (p === "/repos/fam/data") return json(200, { private: gh.isPrivate, permissions: { push: true }, default_branch: "main" });
+    if (p === "/repos/fam/data/git/ref/heads/main") return gh.head ? json(200, { object: { sha: gh.head } }) : json(409, {});
+    if (p === "/repos/fam/data/git/refs/heads/main" && req.method() === "PATCH") {
+      if (gh.commits[body.sha].parents[0] !== gh.head) return json(422, {});
+      gh.head = body.sha;
+      return json(200, {});
+    }
+    let m;
+    if ((m = p.match(/^\/repos\/fam\/data\/contents\/(.+)$/))) {
+      if (req.method() === "PUT") {
+        const tree = id("t"); gh.trees[tree] = { [m[1]]: Buffer.from(body.content, "base64").toString("utf8") };
+        const c = id("c"); gh.commits[c] = { tree, parents: [] }; gh.head = c;
+        return json(201, {});
+      }
+      const ref = url.searchParams.get("ref");
+      const text = gh.trees[gh.commits[ref]?.tree]?.[m[1]];
+      return text === undefined ? json(404, {}) : json(200, { content: b64(text), encoding: "base64", sha: "b" });
+    }
+    if ((m = p.match(/^\/repos\/fam\/data\/git\/commits\/(.+)$/))) return json(200, { tree: { sha: gh.commits[m[1]].tree } });
+    if (p === "/repos/fam/data/git/trees") {
+      const tree = id("t"); gh.trees[tree] = { ...gh.trees[body.base_tree] };
+      for (const f of body.tree) gh.trees[tree][f.path] = f.content;
+      return json(201, { sha: tree });
+    }
+    if (p === "/repos/fam/data/git/commits") { const c = id("c"); gh.commits[c] = { tree: body.tree, parents: body.parents }; return json(201, { sha: c }); }
+    return json(404, {});
+  });
+  return gh;
+}
+
+async function device(gh) {
+  const ctx = await newContext({}, { signIn: true });
+  await gh.attach(ctx);
+  const page = await ctx.newPage();
+  const errors = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await page.goto(`${mock.url}?today=${TODAY}`);
+  return { ctx, page, errors };
+}
+
+async function signIn(page, repo = "fam/data") {
+  await tid(page, "login-form").waitFor();
+  await tid(page, "login-name").fill("Ram");
+  await tid(page, "login-repo").fill(repo);
+  await tid(page, "login-token").fill("github_pat_test");
+  await tid(page, "login-submit").click();
+}
+
+test("E2E SYNC-01 sign in, check in as Markdown files, load on a second device", async () => {
+  const gh = fakeGitHub();
+  const a = await device(gh);
+  await signIn(a.page);
+  await tid(a.page, "login").waitFor({ state: "hidden" });
+  await tid(a.page, "suggest-approve").click();           // plan and approve today
+  await tid(a.page, "checkin").click();
+  await a.page.waitForFunction(() => document.querySelector("#toast").textContent.includes("Checked in"));
+  const files = gh.files();
+  assert.ok(files["output/meal-plan.md"].includes("## 2026-10-22 · ✅ Approved"), files["output/meal-plan.md"]);
+  for (const f of ["README.md", "shopping-list.md", "todo.md", "reminders.md", "kitchen.md", "recipes.md"]) assert.ok(files["output/" + f], f);
+  assert.equal(Object.keys(files).filter((f) => f.startsWith("output/sessions/")).length, 1);
+
+  const b = await device(gh);
+  await signIn(b.page);
+  await b.page.waitForFunction(() => document.querySelector("#toast").textContent.includes("Loaded"));
+  assert.equal(await cell(b.page, TODAY).getAttribute("data-status"), "approved");
+  assert.deepEqual([...a.errors, ...b.errors], []);
+  await a.ctx.close(); await b.ctx.close();
+});
+
+test("E2E SYNC-02 a check-in after another device's asks which data to keep", async () => {
+  const gh = fakeGitHub();
+  const a = await device(gh);
+  await signIn(a.page);
+  await tid(a.page, "login").waitFor({ state: "hidden" });
+  await tid(a.page, "tab-todo").click();
+  await tid(a.page, "todo-idea").first().click();
+  await tid(a.page, "checkin").click();
+  await a.page.waitForFunction(() => document.querySelector("#toast").textContent.includes("Checked in"));
+  const b = await device(gh);
+  await signIn(b.page);
+  await b.page.waitForFunction(() => document.querySelector("#toast").textContent.includes("Loaded"));
+  await tid(b.page, "tab-todo").click();
+  await tid(b.page, "todo-idea").nth(1).click();
+  await tid(b.page, "checkin").click();
+  await b.page.waitForFunction(() => document.querySelector("#toast").textContent.includes("Checked in"));
+  // Device A hasn't loaded B's check-in, so its next check-in must not overwrite it silently.
+  await tid(a.page, "todo-idea").nth(2).click();
+  await tid(a.page, "checkin").click();
+  await tid(a.page, "sync-conflict").waitFor();
+  await tid(a.page, "conflict-load").click();
+  await a.page.waitForFunction(() => document.querySelector("#toast").textContent.includes("Loaded"));
+  assert.equal(await tid(a.page, "todo-item").count(), 2);
+  await a.ctx.close(); await b.ctx.close();
+});
+
+test("E2E SYNC-03 sign-in refuses a public repository; GitHub unreachable skips the sign-in page", async () => {
+  const gh = fakeGitHub({ isPrivate: false });
+  const a = await device(gh);
+  await signIn(a.page);
+  await a.page.waitForFunction(() => document.querySelector("[data-testid=login-status]").textContent.includes("public"));
+  assert.ok(await tid(a.page, "login").isVisible());
+  await a.ctx.close();
+
+  const ctx = await newContext({}, { signIn: true });
+  await ctx.route("https://api.github.com/**", (r) => r.abort());
+  const page = await ctx.newPage();
+  await page.goto(`${mock.url}?today=${TODAY}`);
+  await page.waitForTimeout(500);
+  assert.equal(await tid(page, "login").isVisible(), false);
+  await tid(page, "checkin").click();                      // asks to sign in, still usable
+  await tid(page, "login-form").waitFor();
+  await tid(page, "login-skip").click();
+  assert.equal(await tid(page, "login").isVisible(), false);
   await ctx.close();
 });

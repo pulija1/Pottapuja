@@ -16,6 +16,7 @@ export function defaultState() {
     reminders: [],
     notified: {},
     settings: { schoolNutFree: false },
+    updatedAt: null,   // last change made in the app; check-in compares it with the last sync
   };
 }
 
@@ -56,6 +57,8 @@ export function load() {
 }
 
 let timer = null;
+let changeListener = null;
+export function onChange(fn) { changeListener = fn; }
 let lastError = null;
 
 export function save(state, { now = false } = {}) {
@@ -69,6 +72,8 @@ export function save(state, { now = false } = {}) {
       console.warn("Could not save", e);
     }
   };
+  // Only edits bump the change time; the "now" saves (page close, restore) don't change anything.
+  if (!now) { state.updatedAt = new Date().toISOString(); changeListener?.(); }
   if (now) {
     clearTimeout(timer);
     write();

@@ -10,6 +10,15 @@ A browser app for a South Indian family with an 8-month-old and a 4-year-old who
 
 All data lives in the browser (localStorage). There is a backup download and restore.
 
+### Sign in and Check in (GitHub)
+
+On first launch the app offers a sign-in page (skipped automatically when GitHub can't be reached, or with "Use on this device only"). Signing in takes a private GitHub repository (`owner/name`) and a fine-grained token limited to that repository with **Contents: Read and write**; GitHub doesn't allow apps to sign in with a password. The token stays in that browser only.
+
+- **⬆ Check in** (top right) commits everything to `output/` in the private repository as readable Markdown: `meal-plan.md`, `shopping-list.md`, `todo.md`, `reminders.md`, `kitchen.md`, `recipes.md` and `README.md`, plus a session log in `output/sessions/` with what changed since the last check-in. A dot on the button means there are changes not checked in yet.
+- **⬇ Load latest** (profile menu) reads those Markdown files back. The exact data sits in an HTML comment at the end of each file, so the readable part can be edited without breaking anything.
+- If another device checked in since this one last synced, Check in asks whether to load theirs or keep yours instead of overwriting.
+- Public repositories are refused, so the family's data can't end up readable by everyone.
+
 ## Run it
 
 ```bash
