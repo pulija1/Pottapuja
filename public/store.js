@@ -1,6 +1,6 @@
 // Local storage of all app data. Works fully offline; nothing is sent to the server except recipe requests.
 
-import { DEFAULT_BRING } from "./shared/plan.js";
+import { migrateBringToTodos } from "./shared/plan.js";
 
 const KEY = "familyMealPlanner.v1";
 
@@ -12,7 +12,7 @@ export function defaultState() {
     days: {},
     shopping: [],
     stores: ["Indian grocery", "Supermarket", "Costco"],
-    bringTemplates: structuredClone(DEFAULT_BRING),
+    todos: [],
     reminders: [],
     notified: {},
     settings: { schoolNutFree: false },
@@ -26,7 +26,7 @@ export function load() {
     const data = JSON.parse(raw);
     if (!data || typeof data !== "object" || data.version !== 1) return defaultState();
     const def = defaultState();
-    return { ...def, ...data, settings: { ...def.settings, ...(data.settings || {}) } };
+    return migrateBringToTodos({ ...def, ...data, settings: { ...def.settings, ...(data.settings || {}) } });
   } catch {
     return defaultState();
   }
@@ -65,7 +65,7 @@ export function exportJson(state) {
 export function importJson(text) {
   const data = JSON.parse(text);
   if (!data || data.version !== 1) throw new Error("This is not a meal planner backup.");
-  return { ...defaultState(), ...data };
+  return migrateBringToTodos({ ...defaultState(), ...data });
 }
 
 export const STORAGE_KEY = KEY;

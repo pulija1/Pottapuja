@@ -100,9 +100,9 @@ test("missing ingredients skip water, salt and oil", () => {
 
 test("approval flow and pending items", () => {
   const today = "2026-10-22";
-  const state = { days: {}, reminders: [{ id: "r1", title: "PTM", date: today, time: "10:00", repeat: "none", done: {} }], bringTemplates: { kid: ["Lunchbox"], baby: [] } };
+  const state = { days: {}, reminders: [{ id: "r1", title: "PTM", date: today, time: "10:00", repeat: "none", done: {} }], todos: [{ id: "t1", text: "Buy dresses", who: "kid", date: today, done: false }] };
   let p = pendingFor(state, today, today);
-  assert.deepEqual(p.map((x) => x.type).sort(), ["bring", "plan", "reminder"]);
+  assert.deepEqual(p.map((x) => x.type).sort(), ["plan", "reminder", "todo"]);
 
   const d = (state.days[today] = emptyDay());
   d.meals.kid_lunchbox = { title: "Lemon rice" };
@@ -118,9 +118,9 @@ test("approval flow and pending items", () => {
   assert.equal(dayStatus(state, today), "pending");
   assert.equal(d.changedAfterApproval, true);
 
-  // Past days only keep overdue reminders.
+  // Past days only keep overdue reminders and to-dos.
   const past = pendingFor(state, today, "2026-10-25");
-  assert.deepEqual(past.map((x) => x.type), ["reminder"]);
+  assert.deepEqual(past.map((x) => x.type), ["reminder", "todo"]);
   assert.equal(past[0].overdue, true);
 });
 

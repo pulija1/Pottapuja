@@ -193,9 +193,17 @@ details > summary { cursor: pointer; color: var(--brand); font-weight: 500; }
 .seg button { border: 0; background: var(--card); padding: 6px 12px; min-height: 36px; font-size: .88rem; }
 .seg button[aria-pressed="true"] { background: var(--brand); color: var(--brand-ink); }
 
-/* Bring */
-.bring-cols { display: grid; gap: 14px; }
-@media (min-width: 800px) { .bring-cols { grid-template-columns: 1fr 1fr; } }
+/* Meal sections in the day panel */
+.meal-group { border: 1px solid var(--line); border-radius: 12px; margin-bottom: 8px; background: var(--card); }
+.meal-group > summary { list-style: none; display: flex; align-items: center; gap: 8px; padding: 12px; min-height: 48px; cursor: pointer; }
+.meal-group > summary::-webkit-details-marker { display: none; }
+.meal-group > summary::after { content: "▸"; color: var(--muted); transition: transform .15s; }
+.meal-group[open] > summary::after { transform: rotate(90deg); }
+.meal-group[open] > summary { border-bottom: 1px solid var(--line); }
+.meal-group > .slot { padding: 8px 12px; }
+
+/* To do */
+.chk.todo { border-bottom: 1px dashed var(--line); }
 .progress { height: 8px; border-radius: 999px; background: var(--bg); overflow: hidden; }
 .progress > div { height: 100%; background: var(--brand); transition: width .2s; }
 
@@ -218,3 +226,8 @@ details > summary { cursor: pointer; color: var(--brand); font-weight: 500; }
 dialog { border: 0; border-radius: var(--radius); padding: 18px; max-width: min(460px, calc(100% - 32px)); width: 100%; background: var(--card); color: var(--ink); }
 dialog::backdrop { background: rgba(0,0,0,.35); }
 .empty-state { text-align: center; padding: 18px; color: var(--muted); }
+
+/* Meal suggestions */
+.suggest { border: 1px dashed var(--brand); background: var(--brand-soft); border-radius: 12px; padding: 10px 12px; margin-bottom: 10px; }
+.suggest-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; flex-wrap: wrap; }
+.suggest-row > .small.muted { min-width: 130px; }

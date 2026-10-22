@@ -3,7 +3,7 @@ import { todayKey, addDays, addMonths, monthGrid, monthLabel, prettyDate, fromKe
 import { checkRecipe, checkForAudience, isNutIngredient, isSchoolFood } from "./shared/safety.js";
 import { LIBRARY, suggestFromLibrary } from "./shared/recipes.js";
 import { mergeItems, groupByAisle, formatQty, missingFromPantry, normName, normUnit, aisleFor } from "./shared/shopping.js";
-import { SLOTS, emptyDay, getDay, dayHasPlan, markEdited, approveDay, unapproveDay, slotsFor, bringItemsFor, remindersOn, pendingFor, dayStatus } from "./shared/plan.js";
+import { SLOTS, emptyDay, getDay, dayHasPlan, markEdited, approveDay, unapproveDay, slotsFor, todosOn, MEAL_GROUPS, TODO_IDEAS, remindersOn, pendingFor, dayStatus } from "./shared/plan.js";
 
 const state = load();
 let TODAY = todayKey();
@@ -22,7 +22,9 @@ const ui = {
   shopStore: "all",
   storeMode: false,
   hideBought: false,
-  bringDate: nextSchoolDayFrom(TODAY),
+  todoDate: addDays(TODAY, 1),   // the To do tab opens on tomorrow
+  openGroups: new Set(),          // meal sections the parent has expanded in the day panel
+  suggest: {},                    // date -> { seed, picks: { slotId: recipeId } } meal suggestions shown in the day panel
   savedFilter: "",
   gen: { forWhom: "both", mealType: "", notes: "" },
   confirmUnsafe: null,    // date whose unsafe plan the parent was warned about
@@ -35,12 +37,6 @@ const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(
 const ESC = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ESC[c]);
 const WHO_LABEL = { baby: "Baby (8 mo)", kid: "4 yr old", family: "Family", both: "Both kids" };
-
-function nextSchoolDayFrom(key) {
-  let k = key;
-  for (let i = 0; i < 7 && !isSchoolDay(k); i++) k = addDays(k, 1);
-  return isSchoolDay(key) ? key : k;
-}
 
 function toast(msg) {
   const t = $("#toast");
@@ -62,6 +58,7 @@ const remCache = new Map();
 function clearCaches() {
   pendCache.clear();
   remCache.clear();
+  for (const e of Object.values(ui.suggest)) e.picks = null;
 }
 function pend(key) {
   if (!pendCache.has(key)) pendCache.set(key, pendingFor(state, key, TODAY));
@@ -186,7 +183,7 @@ function setTab(tab) {
 
 function render() {
   renderHeader();
-  const fn = { calendar: renderCalendar, recipes: renderRecipes, shopping: renderShopping, bring: renderBring, reminders: renderReminders }[ui.tab];
+  const fn = { calendar: renderCalendar, recipes: renderRecipes, shopping: renderShopping, todo: renderTodo, reminders: renderReminders }[ui.tab];
   fn();
 }
 
@@ -267,14 +264,107 @@ function slotDatalist(who) {
   return list.filter((r) => !seen.has(r.title) && seen.add(r.title)).map((r) => `<option value="${esc(r.title)}">`).join("");
 }
 
+// Suggested meals for the empty slots of a date, built from what's in the kitchen.
+// Picks are safety-checked for the slot, avoid repeating the day before, and rotate with `seed`.
+function suggestionsFor(key) {
+  const day = getDay(state, key) || emptyDay();
+  const entry = ui.suggest[key] || (ui.suggest[key] = { seed: 0, offsets: {}, picks: null });
+  if (entry.picks) return entry.picks;
+  const prev = getDay(state, addDays(key, -1));
+  const avoid = new Set(Object.values(prev?.meals || {}).map((m) => m?.recipeId).filter(Boolean));
+  const used = new Set(Object.values(day.meals || {}).map((m) => m?.recipeId).filter(Boolean));
+  const picks = {};
+  for (const s of slotsFor(key)) {
+    if (day.meals?.[s.id]?.title) continue;
+    const meal = s.id.split("_")[1];
+    const opt = { forWhom: s.who, schoolNutFree: nutFreeOn(), limit: 40 };
+    const seen = new Set();
+    const candidates = suggestFromLibrary(state.pantry, { ...opt, mealType: meal })
+      .concat(suggestFromLibrary(state.pantry, opt))
+      .filter((r) => r.forWhom === s.who && !seen.has(r.id) && seen.add(r.id))
+      .filter((r) => checkRecipe(r, { age: s.who === "baby" ? "baby" : "kid", lunchbox: s.id === "kid_lunchbox" || s.id === "kid_snack", schoolNutFree: nutFreeOn() }).safe);
+    const fresh = candidates.filter((r) => !used.has(r.id) && !avoid.has(r.id));
+    const pool = (fresh.length ? fresh : candidates).slice(0, 6);
+    if (!pool.length) continue;
+    const r = pool[(entry.seed + (entry.offsets[s.id] || 0)) % pool.length];
+    picks[s.id] = r.id;
+    used.add(r.id);
+  }
+  entry.picks = picks;
+  return picks;
+}
+
+function applySuggestions(key) {
+  const d = ensureDay(key);
+  let n = 0;
+  for (const [slot, id] of Object.entries(suggestionsFor(key))) {
+    const r = findRecipe(id);
+    if (!r || d.meals[slot]?.title) continue;
+    d.meals[slot] = { recipeId: r.id, title: r.title, forWhom: r.forWhom };
+    n++;
+  }
+  if (n) markEdited(d);
+  delete ui.suggest[key];
+  return n;
+}
+
+function renderSuggestions(key) {
+  if (key < TODAY) return "";
+  const picks = suggestionsFor(key);
+  const rows = MEAL_GROUPS.flatMap((g) => slotsFor(key).filter((s) => s.who === g.who && picks[s.id]));
+  if (!rows.length) return "";
+  return `<div class="suggest" data-testid="day-suggestions">
+    <div class="row between"><strong>💡 Suggested from your kitchen</strong>
+      <button type="button" class="btn sm ghost" data-action="suggest-shuffle" data-testid="suggest-shuffle">🔀 Other ideas</button></div>
+    ${rows.map((s) => {
+      const r = findRecipe(picks[s.id]);
+      const need = shoppingNeeds(r);
+      return `<div class="suggest-row" data-testid="suggestion" data-slot="${s.id}">
+        <span class="small muted">${esc(s.label)}</span>
+        <span class="grow">${esc(r.title)}${r.familyFavorite ? " ⭐" : ""}${need.length ? ` <span class="small" style="color:var(--warn)">· need ${esc(need.map((i) => i.name).join(", "))}</span>` : ' <span class="small" style="color:var(--ok)">· all in the kitchen</span>'}</span>
+        <button type="button" class="iconbtn" data-action="suggest-swap" data-slot="${s.id}" title="Another idea" aria-label="Another idea for ${esc(s.label)}">🔀</button>
+      </div>`;
+    }).join("")}
+    <div class="row" style="margin-top:8px">
+      <button class="btn ok sm" data-action="suggest-approve" data-testid="suggest-approve">✅ Approve these meals</button>
+      <button class="btn sm" data-action="autofill" data-testid="autofill-day">Add to plan, approve later</button>
+    </div>
+  </div>`;
+}
+
+function slotRow(s, day, issues) {
+  const m = day.meals?.[s.id];
+  const r = m?.recipeId ? findRecipe(m.recipeId) : null;
+  return `<div class="slot">
+    <span class="slot-label">${esc(s.label)}</span>
+    <div class="slot-row">
+      <input type="text" list="dl-${s.who}" value="${esc(m?.title || "")}" placeholder="Pick a recipe or type a dish" data-action="slot" data-slot="${s.id}" data-who="${s.who}" data-testid="slot-${s.id}" aria-label="${esc(s.label)}">
+      ${r ? `<button class="iconbtn" data-action="view-recipe" data-id="${esc(r.id)}" title="View recipe" aria-label="View recipe">📖</button>` : ""}
+      ${m?.title ? `<button class="iconbtn" data-action="clear-slot" data-slot="${s.id}" title="Clear" aria-label="Clear ${esc(s.label)}">✕</button>` : ""}
+    </div>
+    ${issues[s.id] ? `<span class="small" style="color:var(--bad)" data-testid="slot-warning">⛔ ${esc(issues[s.id].messages[0])}</span>` : ""}
+  </div>`;
+}
+
+function todoRow(t, { showDate = false } = {}) {
+  return `<div class="chk todo ${t.done ? "done" : ""}" data-testid="todo-item">
+    <input type="checkbox" data-action="todo-toggle" data-id="${esc(t.id)}" ${t.done ? "checked" : ""} aria-label="Done: ${esc(t.text)}">
+    <span class="txt grow">${t.time ? `<strong>${esc(t.time)}</strong> ` : ""}${esc(t.text)}${showDate ? ` <span class="small muted">· ${esc(prettyDate(t.date))}</span>` : ""}</span>
+    ${whoPill(t.who)}
+    <button type="button" class="iconbtn" data-action="todo-del" data-id="${esc(t.id)}" aria-label="Delete ${esc(t.text)}">✕</button>
+  </div>`;
+}
+
+const WHO_OPTIONS = (sel = "kid") => [["kid", "4-year-old"], ["baby", "Baby"], ["family", "Family"]]
+  .map(([v, l]) => `<option value="${v}" ${v === sel ? "selected" : ""}>${l}</option>`).join("");
+
 function renderDayPanel(key) {
   const day = getDay(state, key) || emptyDay();
   const st = dayStatus(state, key);
   const pendList = pend(key);
   const slots = slotsFor(key);
   const hasPlan = dayHasPlan(day);
-  const bring = bringItemsFor(state, key);
-  const packed = bring.filter((b) => b.packed).length;
+  const todos = todosOn(state, key);
   const rems = remsOn(key);
   const issues = slotIssues(key);
   const issueList = Object.values(issues);
@@ -297,29 +387,27 @@ function renderDayPanel(key) {
       ${isSchoolDay(key) ? '<span class="pill kid">School day</span>' : '<span class="pill">Weekend</span>'}</div>
     ${banner}
     ${safetyBox}
-    ${pendList.length ? `<h3>Pending for this date</h3><ul class="pending-list" data-testid="day-pending">${pendList.map((p) => `<li data-type="${p.type}">${{ approval: "⏳", plan: "📝", reminder: "⏰", bring: "🎒" }[p.type]} ${esc(p.text)}${p.overdue ? ' <span class="pill bad">overdue</span>' : ""}</li>`).join("")}</ul>` : `<p class="small muted" data-testid="day-pending-none">Nothing pending for this date.</p>`}
+    ${pendList.length ? `<h3>Pending for this date</h3><ul class="pending-list" data-testid="day-pending">${pendList.map((p) => `<li data-type="${p.type}">${{ approval: "⏳", plan: "📝", reminder: "⏰", todo: "✅" }[p.type]} ${esc(p.text)}${p.overdue ? ' <span class="pill bad">overdue</span>' : ""}</li>`).join("")}</ul>` : `<p class="small muted" data-testid="day-pending-none">Nothing pending for this date.</p>`}
 
     <h3>Meals</h3>
+    ${renderSuggestions(key)}
     <div data-testid="day-meals">
-    ${slots.map((s) => {
-      const m = day.meals?.[s.id];
-      const r = m?.recipeId ? findRecipe(m.recipeId) : null;
-      return `<div class="slot">
-        <span class="slot-label">${whoPill(s.who)} ${esc(s.label)}</span>
-        <div class="slot-row">
-          <input type="text" list="dl-${s.who}" value="${esc(m?.title || "")}" placeholder="Pick a recipe or type a dish" data-action="slot" data-slot="${s.id}" data-who="${s.who}" data-testid="slot-${s.id}" aria-label="${esc(s.label)}">
-          ${r ? `<button class="iconbtn" data-action="view-recipe" data-id="${esc(r.id)}" title="View recipe" aria-label="View recipe">📖</button>` : ""}
-          ${m?.title ? `<button class="iconbtn" data-action="clear-slot" data-slot="${s.id}" title="Clear" aria-label="Clear ${esc(s.label)}">✕</button>` : ""}
-        </div>
-        ${issues[s.id] ? `<span class="small" style="color:var(--bad)" data-testid="slot-warning">⛔ ${esc(issues[s.id].messages[0])}</span>` : ""}
-      </div>`;
+    ${MEAL_GROUPS.map((g) => {
+      const groupSlots = slots.filter((s) => s.who === g.who);
+      const planned = groupSlots.filter((s) => day.meals?.[s.id]?.title).length;
+      const hasIssue = groupSlots.some((s) => issues[s.id]);
+      const open = ui.openGroups.has(g.who) || hasIssue;
+      return `<details class="meal-group" data-group="${g.who}" data-testid="meal-group-${g.who}" ${open ? "open" : ""}>
+        <summary><span class="grow"><strong>${g.icon} ${esc(g.label)}</strong></span>
+          <span class="small ${hasIssue ? "" : "muted"}" ${hasIssue ? 'style="color:var(--bad)"' : ""}>${hasIssue ? "⛔ check safety · " : ""}${planned} of ${groupSlots.length} planned</span></summary>
+        ${groupSlots.map((s) => slotRow(s, day, issues)).join("")}
+      </details>`;
     }).join("")}
     </div>
     <datalist id="dl-baby">${slotDatalist("baby")}</datalist>
     <datalist id="dl-kid">${slotDatalist("kid")}</datalist>
     <datalist id="dl-family">${slotDatalist("family")}</datalist>
     <div class="row" style="margin-top:8px">
-      <button class="btn sm" data-action="autofill" data-testid="autofill-day">✨ Fill empty meals from pantry</button>
       <button class="btn sm" data-action="copy-prev" data-testid="copy-prev">Copy previous day</button>
       <button class="btn sm" data-action="day-to-shopping" data-testid="day-to-shopping">🛒 Add missing to shopping</button>
     </div>
@@ -335,13 +423,13 @@ function renderDayPanel(key) {
     </form>
     ${isSchoolDay(key) ? `<p class="small muted" style="margin-top:6px"><button type="button" class="btn ghost sm" data-action="school-schedule">+ Add usual school-day times</button></p>` : ""}
 
-    <h3>To bring</h3>
-    <div class="row between">
-      <span class="small">${bring.length ? `${packed} of ${bring.length} packed` : "Nothing to bring"}</span>
-      <label class="chk small" style="min-height:0;padding:0"><input type="checkbox" data-action="baby-bag" ${day.useBabyBag ? "checked" : ""} data-testid="baby-bag-toggle"> Baby going out (diaper bag)</label>
-    </div>
-    ${bring.length ? `<div class="progress" style="margin:6px 0"><div style="width:${Math.round((packed / bring.length) * 100)}%"></div></div>` : ""}
-    <button class="btn sm" data-action="open-bring" data-date="${key}">Open checklist</button>
+    <h3>To do</h3>
+    <div data-testid="day-todos">${todos.length ? todos.map((t) => todoRow(t)).join("") : '<p class="small muted">Nothing to do for the kids on this date.</p>'}</div>
+    <form class="row" data-form="todo-add-day" style="margin-top:6px">
+      <input type="text" name="text" class="grow" placeholder="e.g. Buy dresses, check school schedule" aria-label="New to-do" required data-testid="day-todo-input">
+      <select name="who" style="width:120px" aria-label="For">${WHO_OPTIONS()}</select>
+      <button class="btn sm primary" data-testid="day-todo-add">Add</button>
+    </form>
 
     <h3>Reminders</h3>
     ${rems.length ? rems.map((r) => `<label class="chk ${r.doneOnDate ? "done" : ""}"><input type="checkbox" data-action="rem-done" data-id="${esc(r.id)}" data-date="${key}" ${r.doneOnDate ? "checked" : ""}><span class="txt">${esc(r.time || "")} ${esc(r.title)}</span></label>`).join("") : '<p class="small muted">No reminders.</p>'}
@@ -574,7 +662,6 @@ function renderShopping() {
       <h2>Fill the list</h2>
       <div class="row">
         <button class="btn" data-action="plan-to-shopping" data-testid="plan-to-shopping">From next 7 days of meals</button>
-        <button class="btn" data-action="bought-to-pantry" data-testid="bought-to-pantry">Move bought items to kitchen</button>
         <button class="btn" data-action="copy-list" data-testid="copy-list">Copy list as text</button>
         <button class="btn danger" data-action="clear-bought" data-testid="clear-bought">Clear bought</button>
       </div>
@@ -599,46 +686,38 @@ function plannedRecipes(fromKey_, days) {
   return out;
 }
 
-// ---------- bring ----------
-function renderBring() {
-  const key = ui.bringDate;
-  const day = getDay(state, key) || emptyDay();
-  const items = bringItemsFor(state, key);
-  const packed = items.filter((i) => i.packed).length;
-  const section = (who, title) => {
-    const list = items.filter((i) => i.who === who);
-    if (!list.length) return "";
-    return `<div><h3>${title}</h3>${list.map((i) => `<label class="chk ${i.packed ? "done" : ""}" data-testid="bring-item"><input type="checkbox" data-action="bring-toggle" data-id="${esc(i.id)}" ${i.packed ? "checked" : ""}><span class="txt grow">${esc(i.text)}</span>${i.extra ? `<button type="button" class="iconbtn" data-action="bring-del" data-id="${esc(i.id.slice(6))}" aria-label="Remove">✕</button>` : ""}</label>`).join("")}</div>`;
-  };
-  const tpl = state.bringTemplates;
-  $("#view-bring").innerHTML = `
+// ---------- to do ----------
+function renderTodo() {
+  const key = ui.todoDate;
+  const list = todosOn(state, key);
+  const left = list.filter((t) => !t.done).length;
+  const soon = (state.todos || [])
+    .filter((t) => !t.done && t.date >= TODAY && t.date <= addDays(TODAY, 7) && t.date !== key)
+    .sort((a, b) => (a.date + (a.time || "99")).localeCompare(b.date + (b.time || "99")));
+  const missed = (state.todos || []).filter((t) => !t.done && t.date < TODAY).sort((a, b) => a.date.localeCompare(b.date));
+  const dayName = key === TODAY ? "Today" : key === addDays(TODAY, 1) ? "Tomorrow" : prettyDate(key);
+  $("#view-todo").innerHTML = `
     <div class="card">
       <div class="row between">
-        <button class="btn sm" data-action="bring-day" data-delta="-1" aria-label="Previous day">‹</button>
-        <input type="date" value="${key}" data-action="bring-date" style="max-width:180px" aria-label="Date" data-testid="bring-date">
-        <button class="btn sm" data-action="bring-day" data-delta="1" aria-label="Next day">›</button>
+        <button class="btn sm" data-action="todo-day" data-delta="-1" aria-label="Previous day">‹</button>
+        <input type="date" value="${key}" data-action="todo-date" style="max-width:180px" aria-label="Date" data-testid="todo-date">
+        <button class="btn sm" data-action="todo-day" data-delta="1" aria-label="Next day">›</button>
       </div>
-      <p class="small muted" style="text-align:center;margin:6px 0">${esc(prettyDate(key))}${key === TODAY ? " · today" : ""} · ${isSchoolDay(key) ? "School day" : "No school"}</p>
-      <div class="row between"><strong data-testid="bring-progress">${packed} of ${items.length} packed</strong>
-        <label class="chk small" style="min-height:0"><input type="checkbox" data-action="baby-bag" ${day.useBabyBag ? "checked" : ""}> Baby going out</label></div>
-      ${items.length ? `<div class="progress" style="margin:6px 0"><div style="width:${Math.round((packed / items.length) * 100)}%"></div></div>` : ""}
-      <div class="bring-cols" data-testid="bring-list">
-        ${section("kid", "🎒 School bag (4 yr)")}
-        ${section("baby", "👶 Baby bag")}
-        ${section("family", "🧺 Other things")}
-      </div>
-      ${!items.length ? '<p class="empty-state">Nothing to bring for this day. Switch on "Baby going out" or add an item below.</p>' : ""}
-      <form data-form="bring-add" class="row" style="margin-top:10px">
-        <input type="text" name="text" class="grow" placeholder="Add something to bring (e.g. birthday gift, permission slip)" required data-testid="bring-input">
-        <select name="who" style="width:120px"><option value="family">Other</option><option value="kid">School bag</option><option value="baby">Baby bag</option></select>
-        <button class="btn primary">Add</button>
+      <div class="row between" style="margin-top:10px"><h2 style="margin:0">To do: ${esc(dayName)}</h2><span class="pill ${left ? "warn" : "ok"}" data-testid="todo-left">${left ? `${left} left` : list.length ? "All done" : "Nothing yet"}</span></div>
+      <div data-testid="todo-list" style="margin-top:6px">${list.length ? list.map((t) => todoRow(t)).join("") : '<p class="empty-state">Nothing planned for the kids on this day. Add something below or tap an idea.</p>'}</div>
+      <form data-form="todo-add" class="form-grid" style="margin-top:10px">
+        <label class="field full"><span>What needs doing</span><input type="text" name="text" required maxlength="120" placeholder="e.g. Buy dresses for the school function" data-testid="todo-input"></label>
+        <label class="field"><span>For</span><select name="who" data-testid="todo-who">${WHO_OPTIONS()}</select></label>
+        <label class="field"><span>Date</span><input type="date" name="date" value="${key}" required data-testid="todo-input-date"></label>
+        <label class="field"><span>Time (optional)</span><input type="time" name="time"></label>
+        <div class="field" style="justify-content:flex-end"><button class="btn primary" data-testid="todo-add">Add to do</button></div>
       </form>
+      <h3>Quick ideas for ${esc(dayName.toLowerCase() === "today" || dayName.toLowerCase() === "tomorrow" ? dayName.toLowerCase() : prettyDate(key))}</h3>
+      <div class="chips">${TODO_IDEAS.map((i) => `<button class="chip add" data-action="todo-idea" data-text="${esc(i.text)}" data-who="${i.who}" data-testid="todo-idea">+ ${esc(i.text)}</button>`).join("")}</div>
     </div>
-    <div class="card"><h2>Everyday lists</h2>
-      <p class="small muted">These items show up automatically: the school bag on school days, and the baby bag when the baby is going out.</p>
-      ${["kid", "baby"].map((who) => `<h3>${who === "kid" ? "School bag" : "Baby bag"}</h3>
-        <div class="chips">${tpl[who].map((t, i) => `<span class="chip">${esc(t)}<button data-action="tpl-del" data-who="${who}" data-i="${i}" aria-label="Remove ${esc(t)}">✕</button></span>`).join("")}</div>
-        <form data-form="tpl-add" data-who="${who}" class="row" style="margin-top:6px"><input type="text" name="text" class="grow" placeholder="Add to ${who === "kid" ? "school bag" : "baby bag"}" required><button class="btn sm">Add</button></form>`).join("")}
+    ${missed.length ? `<div class="card" data-testid="todo-missed"><h2>⚠️ Not done yet</h2>${missed.map((t) => todoRow(t, { showDate: true })).join("")}</div>` : ""}
+    <div class="card" data-testid="todo-upcoming"><h2>Coming up this week</h2>
+      ${soon.length ? soon.map((t) => todoRow(t, { showDate: true })).join("") : '<p class="small muted">Nothing else in the next 7 days.</p>'}
     </div>`;
 }
 
@@ -740,21 +819,35 @@ document.addEventListener("click", (e) => {
     case "clear-slot": { const d = day(); delete d.meals[el.dataset.slot]; markEdited(d); commit(); break; }
     case "view-recipe": { const r = findRecipe(el.dataset.id); if (r) recipeDialog(r); break; }
     case "autofill": {
-      const d = day();
-      let filled = 0;
-      for (const s of slotsFor(ui.selected)) {
-        if (d.meals[s.id]?.title) continue;
-        const used = new Set(Object.values(d.meals).map((m) => m?.recipeId));
-        const meal = s.id.split("_")[1];
-        const opt = { forWhom: s.who, schoolNutFree: nutFreeOn() };
-        const pick = suggestFromLibrary(state.pantry, { ...opt, mealType: meal, limit: 10 })
-          .concat(suggestFromLibrary(state.pantry, { ...opt, limit: 40 }))
-          .find((r) => (r.forWhom === s.who) && !used.has(r.id));
-        if (pick) { d.meals[s.id] = { recipeId: pick.id, title: pick.title, forWhom: pick.forWhom }; filled++; }
-      }
-      if (filled) markEdited(d);
+      const n = applySuggestions(ui.selected);
       commit();
-      toast(filled ? `Filled ${filled} meal${filled > 1 ? "s" : ""}. Review and approve.` : "All meals are already planned.");
+      toast(n ? `Added ${n} meal${n > 1 ? "s" : ""}. Approve the day when ready.` : "All meals are already planned.");
+      break;
+    }
+    case "suggest-approve": {
+      const n = applySuggestions(ui.selected);
+      const d = day();
+      if (Object.keys(slotIssues(ui.selected)).length) {
+        ui.confirmUnsafe = ui.selected;
+        commit();
+        toast("Meals added, but one needs a safety check before approving.");
+      } else {
+        approveDay(d);
+        commit();
+        toast(`${n} meal${n === 1 ? "" : "s"} added and the day is approved ✅`);
+      }
+      break;
+    }
+    case "suggest-shuffle": {
+      const e = ui.suggest[ui.selected];
+      if (e) { e.seed++; e.picks = null; }
+      render();
+      break;
+    }
+    case "suggest-swap": {
+      const e = ui.suggest[ui.selected];
+      if (e) { e.offsets[el.dataset.slot] = (e.offsets[el.dataset.slot] || 0) + 1; e.picks = null; }
+      render();
       break;
     }
     case "copy-prev": {
@@ -785,7 +878,7 @@ document.addEventListener("click", (e) => {
       commit();
       break;
     }
-    case "open-bring": ui.bringDate = el.dataset.date; setTab("bring"); break;
+    case "todo-del": state.todos = state.todos.filter((t) => t.id !== el.dataset.id); commit(); break;
     case "new-reminder": setTab("reminders"); renderReminders(el.dataset.date); $("[data-testid=rem-title]")?.focus(); break;
     case "export": {
       const blob = new Blob([exportJson(state)], { type: "application/json" });
@@ -830,14 +923,6 @@ document.addEventListener("click", (e) => {
       toast(added ? `Added ${added} ingredient${added > 1 ? "s" : ""} from the meal plan.` : "Everything for the next 7 days is already on the list.");
       break;
     }
-    case "bought-to-pantry": {
-      const bought = state.shopping.filter((i) => i.bought);
-      for (const b of bought) if (!state.pantry.some((p) => normName(p) === normName(b.name))) state.pantry.push(b.name);
-      state.shopping = state.shopping.filter((i) => !i.bought);
-      commit();
-      toast(bought.length ? `Moved ${bought.length} item${bought.length > 1 ? "s" : ""} to the kitchen.` : "Nothing marked as bought yet.");
-      break;
-    }
     case "clear-bought": state.shopping = state.shopping.filter((i) => !i.bought); commit(); break;
     case "copy-list": {
       const text = groupByAisle(state.shopping.filter((i) => !i.bought)).map(([aisle, list]) => `${aisle}\n${list.map((i) => `- ${i.name}${formatQty(i) ? " (" + formatQty(i) + ")" : ""}`).join("\n")}`).join("\n\n");
@@ -846,9 +931,16 @@ document.addEventListener("click", (e) => {
     }
     case "store-del": state.stores = state.stores.filter((s) => s !== el.dataset.store); if (ui.shopStore === el.dataset.store) ui.shopStore = "all"; commit(); break;
 
-    case "bring-day": ui.bringDate = addDays(ui.bringDate, Number(el.dataset.delta)); render(); break;
-    case "bring-del": { const d = ensureDay(ui.bringDate); d.extraBring = d.extraBring.filter((x) => x.id !== el.dataset.id); delete d.bring["extra:" + el.dataset.id]; commit(); break; }
-    case "tpl-del": state.bringTemplates[el.dataset.who].splice(Number(el.dataset.i), 1); commit(); break;
+    case "todo-day": ui.todoDate = addDays(ui.todoDate, Number(el.dataset.delta)); render(); break;
+    case "todo-idea": {
+      const date = ui.todoDate;
+      if (!state.todos.some((t) => t.date === date && t.text === el.dataset.text)) {
+        state.todos.push({ id: uid(), text: el.dataset.text, who: el.dataset.who, date, time: "", done: false });
+      }
+      commit();
+      toast(`Added for ${prettyDate(date)}.`);
+      break;
+    }
 
     case "rem-del": state.reminders = state.reminders.filter((r) => r.id !== el.dataset.id); commit(); break;
     case "notif": Notification.requestPermission().then(() => render()); break;
@@ -874,9 +966,9 @@ document.addEventListener("change", (e) => {
       commit();
       break;
     }
-    case "baby-bag": {
-      const key = ui.tab === "bring" ? ui.bringDate : ui.selected;
-      ensureDay(key).useBabyBag = el.checked;
+    case "todo-toggle": {
+      const t = state.todos.find((x) => x.id === el.dataset.id);
+      if (t) t.done = el.checked;
       commit();
       break;
     }
@@ -891,6 +983,12 @@ document.addEventListener("change", (e) => {
     case "shop-toggle": {
       const it = state.shopping.find((i) => i.id === el.dataset.id);
       if (it) it.bought = el.checked;
+      // Bought food goes straight into the kitchen, so meal suggestions can use it.
+      if (it && el.checked && aisleFor(it.name) !== "Baby care" && aisleFor(it.name) !== "School & household" && !state.pantry.some((p) => normName(p) === normName(it.name))) {
+        state.pantry.push(it.name);
+        clearCaches();
+        toast(`${it.name} added to your kitchen`);
+      }
       el.closest(".shop-item")?.classList.toggle("bought", el.checked);
       save(state);
       const left = state.shopping.filter((i) => !i.bought).length;
@@ -906,13 +1004,7 @@ document.addEventListener("change", (e) => {
       commit();
       toast(el.checked ? "Nut-free school: lunchbox nuts are blocked and kept off the shopping list." : "Nuts allowed in the lunchbox.");
       break;
-    case "bring-toggle": {
-      const d = ensureDay(ui.bringDate);
-      if (el.checked) d.bring[el.dataset.id] = true; else delete d.bring[el.dataset.id];
-      commit();
-      break;
-    }
-    case "bring-date": if (isDateKey(el.value)) { ui.bringDate = el.value; render(); } break;
+    case "todo-date": if (isDateKey(el.value)) { ui.todoDate = el.value; render(); } break;
     case "import": {
       const file = el.files?.[0];
       if (!file) return;
@@ -986,19 +1078,15 @@ document.addEventListener("submit", (e) => {
       commit();
       break;
     }
-    case "bring-add": {
+    case "todo-add":
+    case "todo-add-day": {
       const text = f.text.value.trim();
-      if (!text) return;
-      ensureDay(ui.bringDate).extraBring.push({ id: uid(), text, who: f.who.value });
+      const date = kind === "todo-add" ? f.date.value : ui.selected;
+      if (!text || !isDateKey(date)) return;
+      state.todos.push({ id: uid(), text, who: f.who.value, date, time: f.time?.value || "", done: false });
+      if (kind === "todo-add") ui.todoDate = date;
       commit();
-      $("[data-testid=bring-input]")?.focus();
-      break;
-    }
-    case "tpl-add": {
-      const text = f.text.value.trim();
-      const who = form.dataset.who;
-      if (text && !state.bringTemplates[who].includes(text)) state.bringTemplates[who].push(text);
-      commit();
+      $(kind === "todo-add" ? "[data-testid=todo-input]" : "[data-testid=day-todo-input]")?.focus();
       break;
     }
     case "rem-add": {
@@ -1013,6 +1101,13 @@ document.addEventListener("submit", (e) => {
   }
 });
 
+// Remember which meal sections are open so re-renders don't collapse them.
+document.addEventListener("toggle", (e) => {
+  const g = e.target?.dataset?.group;
+  if (!g) return;
+  if (e.target.open) ui.openGroups.add(g); else ui.openGroups.delete(g);
+}, true);
+
 window.addEventListener("pagehide", () => save(state, { now: true }));
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "hidden") save(state, { now: true });
@@ -1023,7 +1118,7 @@ window.addEventListener("offline", () => { ui.ai = "unreachable"; renderHeader()
 
 // ---------- start ----------
 const initialTab = location.hash.replace("#", "");
-setTab(["calendar", "recipes", "shopping", "bring", "reminders"].includes(initialTab) ? initialTab : "calendar");
+setTab(["calendar", "recipes", "shopping", "todo", "reminders"].includes(initialTab) ? initialTab : "calendar");
 checkAi();
 checkDueReminders();
 setInterval(() => { refreshToday(); checkDueReminders(); }, 30000);

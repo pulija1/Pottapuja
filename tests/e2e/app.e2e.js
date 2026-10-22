@@ -46,8 +46,14 @@ const tid = (page, id) => page.getByTestId(id);
 const cell = (page, date) => tid(page, `cal-day-${date}`);
 const pendingTypes = (page) => page.locator("[data-testid=day-pending] li").evaluateAll((els) => els.map((e) => e.dataset.type));
 
+async function openGroup(page, slot) {
+  const group = tid(page, `meal-group-${slot.split("_")[0]}`);
+  if (!(await group.evaluate((d) => d.open))) await group.locator("summary").click();
+}
+
 async function planSlot(page, date, slot, title) {
   await cell(page, date).click();
+  await openGroup(page, slot);
   const input = tid(page, `slot-${slot}`);
   await input.fill(title);
   await input.press("Tab");
@@ -87,12 +93,14 @@ test("E2E CAL-02/03/04 plan a day, approve it, edit it, re-approve", async () =>
   await ctx.close();
 });
 
-test("E2E CAL-05/06 clicking a date lists what is pending: plan, reminders, bring items", async () => {
+test("E2E CAL-05/06 clicking a date lists what is pending: plan and to-dos", async () => {
   const { page, ctx } = await open();
   await cell(page, TODAY).click();
+  await tid(page, "day-todo-input").fill("Check school schedule");
+  await tid(page, "day-todo-add").click();
   const t = await pendingTypes(page);
   assert.ok(t.includes("plan"), "no 'No meal plan yet'");
-  assert.ok(t.includes("bring"), "no bring items on a school day");
+  assert.ok(t.includes("todo"), "the new to-do is not pending");
   assert.ok(Number(await cell(page, TODAY).getAttribute("data-pending")) >= 2);
   await ctx.close();
 });
@@ -240,19 +248,34 @@ test("E2E SHOP-08 store mode at phone width: no sideways scrolling", async () =>
   await ctx.close();
 });
 
-test("E2E BRING-01/03/04 school bag on weekdays, packed state per date, nothing on Saturday", async () => {
+test("E2E TODO-01 the To do tab opens on tomorrow; ideas and ticks persist; the calendar shows them", async () => {
   const { page, ctx } = await open();
-  await tid(page, "tab-bring").click();
-  const texts = await tid(page, "bring-item").allInnerTexts();
-  assert.ok(texts.some((t) => /Lunchbox/.test(t)));
-  await tid(page, "bring-item").first().locator("input[type=checkbox]").check();
+  await tid(page, "tab-todo").click();
+  assert.equal(await tid(page, "todo-date").inputValue(), TOMORROW);
+  await tid(page, "todo-idea").filter({ hasText: "Buy dresses" }).click();
+  await tid(page, "todo-input").fill("Doctor's appointment");
+  await tid(page, "todo-who").selectOption("baby");
+  await tid(page, "todo-add").click();
+  assert.equal(await tid(page, "todo-item").count(), 2);
+  await tid(page, "todo-item").filter({ hasText: "Buy dresses" }).locator("input[type=checkbox]").check();
   await page.waitForTimeout(300);
   await page.reload();
-  await tid(page, "tab-bring").click();
-  assert.ok(await tid(page, "bring-item").first().locator("input[type=checkbox]").isChecked());
-  await tid(page, "bring-date").fill("2026-10-24");
-  await tid(page, "bring-date").dispatchEvent("change");
-  assert.ok(!(await tid(page, "bring-item").allInnerTexts()).some((t) => /Lunchbox/.test(t)));
+  await tid(page, "tab-todo").click();
+  assert.ok(await tid(page, "todo-item").filter({ hasText: "Buy dresses" }).locator("input[type=checkbox]").isChecked());
+  await tid(page, "tab-calendar").click();
+  await cell(page, TOMORROW).click();
+  const t = await page.locator("[data-testid=day-pending] li[data-type=todo]").allInnerTexts();
+  assert.deepEqual(t.map((x) => x.trim()), ["✅ Doctor's appointment"]);
+  await ctx.close();
+});
+
+test("E2E CAL-12 meal sections are collapsed until opened and stay open while editing", async () => {
+  const { page, ctx } = await open();
+  await cell(page, TOMORROW).click();
+  for (const g of ["kid", "baby", "family"]) assert.equal(await tid(page, `meal-group-${g}`).evaluate((d) => d.open), false, g);
+  await planSlot(page, TOMORROW, "kid_lunchbox", "Lemon rice (nimmakaya pulihora)");
+  assert.equal(await tid(page, "meal-group-kid").evaluate((d) => d.open), true);
+  assert.match(await tid(page, "meal-group-kid").locator("summary").innerText(), /1 of 3 planned/);
   await ctx.close();
 });
 
@@ -336,7 +359,7 @@ test("E2E UI-02 pending and approved are not shown by colour alone", async () =>
 
 test("E2E UI-03 every tab fits a phone screen without sideways scroll", async () => {
   const { page, ctx } = await open(mock, { viewport: { width: 375, height: 740 } });
-  for (const tab of ["calendar", "recipes", "shopping", "bring", "reminders"]) {
+  for (const tab of ["calendar", "recipes", "shopping", "todo", "reminders"]) {
     await tid(page, `tab-${tab}`).click();
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     assert.ok(overflow <= 0, `${tab} tab is ${overflow}px too wide`);

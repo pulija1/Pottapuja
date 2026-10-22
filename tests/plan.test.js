@@ -1,7 +1,7 @@
-// Calendar approval and pending states (CAL), items to bring (BRING), reminders (REM).
+// Calendar approval and pending states (CAL), to-dos for the kids (TODO), reminders (REM).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { emptyDay, approveDay, unapproveDay, markEdited, pendingFor, dayStatus, bringItemsFor, remindersOn, slotsFor, dayHasPlan } from "../public/shared/plan.js";
+import { emptyDay, approveDay, unapproveDay, markEdited, pendingFor, dayStatus, todosOn, migrateBringToTodos, MEAL_GROUPS, remindersOn, slotsFor, dayHasPlan } from "../public/shared/plan.js";
 import { occurrences, monthGrid, addDays, addMonths, isSchoolDay, isDateKey } from "../public/shared/dates.js";
 
 const TODAY = "2026-10-22"; // Thursday
@@ -54,11 +54,12 @@ test("CAL-05 days in the next week with no plan say 'no meal plan yet'; further 
   assert.ok(!types(pendingFor(st(), addDays(TODAY, 7), TODAY)).includes("plan"));
 });
 
-test("CAL-06 pending lists reminders and bring items for the date", () => {
-  const s = st({}, [{ id: "r1", title: "Soak urad dal", date: TODAY, time: "20:00", repeat: "none" }]);
-  const t = types(pendingFor(s, TODAY, TODAY));
-  assert.ok(t.includes("reminder"));
-  assert.ok(t.includes("bring")); // Thursday is a school day
+test("CAL-06 pending lists reminders and open to-dos for the date", () => {
+  const s = { ...st({}, [{ id: "r1", title: "Soak urad dal", date: TODAY, time: "20:00", repeat: "none" }]),
+    todos: [{ id: "t1", text: "Check school schedule", who: "kid", date: TODAY, done: false }, { id: "t2", text: "Buy dresses", who: "kid", date: TODAY, done: true }] };
+  const p = pendingFor(s, TODAY, TODAY);
+  assert.ok(types(p).includes("reminder"));
+  assert.deepEqual(p.filter((x) => x.type === "todo").map((x) => x.text), ["Check school schedule"]);
 });
 
 test("CAL-08 past days don't ask for approval but keep overdue reminders", () => {
@@ -92,27 +93,35 @@ test("CAL-11 date keys survive DST changes (US and India)", () => {
   assert.equal(addDays("2026-11-01", 1), "2026-11-02");
 });
 
-test("BRING-01 school days include the kid's school bag", () => {
-  const items = bringItemsFor(st(), TODAY).map((i) => i.text);
-  for (const x of ["Lunchbox", "Snack box", "Water bottle"]) assert.ok(items.includes(x), x);
+test("TODO-01 to-dos are per date, timed ones first", () => {
+  const s = { todos: [
+    { id: "a", text: "Buy dresses", who: "kid", date: TODAY, time: "" },
+    { id: "b", text: "Doctor's appointment", who: "baby", date: TODAY, time: "10:30" },
+    { id: "c", text: "Pay school fees", who: "kid", date: addDays(TODAY, 1), time: "" },
+  ] };
+  assert.deepEqual(todosOn(s, TODAY).map((t) => t.id), ["b", "a"]);
+  assert.deepEqual(todosOn(s, addDays(TODAY, 1)).map((t) => t.id), ["c"]);
+  assert.deepEqual(todosOn({}, TODAY), []);
 });
 
-test("BRING-02 baby bag only when switched on", () => {
-  assert.ok(!bringItemsFor(st(), TODAY).some((i) => i.who === "baby"));
-  const s = st({ [TODAY]: { ...emptyDay(), useBabyBag: true } });
-  assert.ok(bringItemsFor(s, TODAY).some((i) => i.text.startsWith("Diapers")));
+test("TODO-02 a missed to-do stays pending as overdue", () => {
+  const past = addDays(TODAY, -1);
+  const p = pendingFor({ todos: [{ id: "a", text: "Doctor's appointment", who: "baby", date: past, done: false }] }, past, TODAY);
+  assert.equal(p[0].type, "todo");
+  assert.equal(p[0].overdue, true);
 });
 
-test("BRING-03 packed state is per date", () => {
-  const s = st({ [TODAY]: { ...emptyDay(), bring: { "kid:Lunchbox": true } } });
-  assert.equal(bringItemsFor(s, TODAY).find((i) => i.text === "Lunchbox").packed, true);
-  assert.equal(bringItemsFor(s, addDays(TODAY, 1)).find((i) => i.text === "Lunchbox").packed, false);
+test("TODO-03 old 'to bring' extras become to-dos", () => {
+  const s = migrateBringToTodos({ days: { [TODAY]: { ...emptyDay(), extraBring: [{ id: "x", text: "Birthday gift", who: "kid" }], bring: {}, useBabyBag: true } }, bringTemplates: {} });
+  assert.deepEqual(s.todos.map((t) => [t.text, t.date, t.who]), [["Birthday gift", TODAY, "kid"]]);
+  assert.equal(s.bringTemplates, undefined);
+  assert.equal(s.days[TODAY].extraBring, undefined);
 });
 
-test("BRING-04 weekends have no school bag and no lunchbox slot", () => {
+test("TODO-04 meal sections: 4-year-old, baby, family; weekends have no lunchbox slot", () => {
+  assert.deepEqual(MEAL_GROUPS.map((g) => g.who), ["kid", "baby", "family"]);
   const sat = "2026-10-24";
   assert.equal(isSchoolDay(sat), false);
-  assert.ok(!bringItemsFor(st(), sat).some((i) => i.who === "kid"));
   assert.ok(!slotsFor(sat).some((s) => s.id === "kid_lunchbox"));
   assert.ok(slotsFor(TODAY).some((s) => s.id === "kid_lunchbox"));
 });

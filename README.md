@@ -2,10 +2,10 @@
 
 A browser app for a South Indian family with an 8-month-old and a 4-year-old who goes to school.
 
-- **Calendar**: plan each day's meals (baby, school lunchbox, family dinner) and schedule, then **approve** the day. Each date shows whether it is approved, waiting for approval, or has nothing planned, plus a count of what is still pending (unapproved plan, reminders not done, items not packed). Editing an approved day sends it back to "waiting for approval".
+- **Calendar**: tap a date to see its meals in collapsible sections for the 4-year-old, the 8-month-old and the family, plus the day's schedule and to-dos. Each empty day shows **suggested meals** picked from what is in the kitchen (safety-checked for each child); shuffle or swap them, then **Approve these meals** to put them into that day's plan and approve it. Each date shows whether it is approved, waiting for approval, or has nothing planned, plus a count of what is still pending (unapproved plan, reminders not done, to-dos not ticked). Editing an approved day sends it back to "waiting for approval".
 - **Recipes**: list what's in the kitchen and get recipes made from it. With the AI on, Claude writes the recipes; every recipe is then checked in code for age safety (no honey, salt, sugar or whole nuts for the baby, soft textures only, nut-free school lunchboxes). Recipes that fail are dropped. Saved recipes work offline.
-- **Shopping**: one list, grouped by aisle, with store filters and a big-checkbox "I'm at the store" mode. Pull missing ingredients from the next 7 days of meals; quantities merge (500 g + 1 kg toor dal = 1.5 kg) and Indian names match (sooji = rava, tuvar = toor).
-- **To bring**: school bag on school days, diaper bag when the baby goes out, plus one-off items per date.
+- **Shopping**: one list, grouped by aisle, with store filters and a big-checkbox "I'm at the store" mode. Ticking an item as bought adds it to the kitchen, so the next suggestions use it. Pull missing ingredients from the next 7 days of meals; quantities merge (500 g + 1 kg toor dal = 1.5 kg) and Indian names match (sooji = rava, tuvar = toor).
+- **To do**: things to do for the kids (buy dresses, check the school schedule, doctor's appointment), defaulting to tomorrow, with one-tap ideas, a "not done yet" list and the coming week.
 - **Reminders**: school events, vaccines, birthdays, with repeats, a "missed" list, and alerts while the app is open.
 
 All data lives in the browser (localStorage). There is a backup download and restore.
@@ -32,12 +32,12 @@ npm run test:e2e                            # browser tests (Playwright, Chromiu
 
 ### When the AI or the server is down
 
-The app never depends on the AI. If `/api/recipes` fails, times out (50 s in the browser and 40 s on the server, with a Cancel button), or the server can't be reached at all (for example when the `public/` folder is opened from GitHub Pages), the Recipes tab shows the best matches from the built-in recipe book and says why. The calendar, shopping list, bring list and reminders are fully local and keep working offline.
+The app never depends on the AI. If `/api/recipes` fails, times out (50 s in the browser and 40 s on the server, with a Cancel button), or the server can't be reached at all (for example when the `public/` folder is opened from GitHub Pages), the Recipes tab shows the best matches from the built-in recipe book and says why. The calendar, shopping list, to-dos and reminders are fully local and keep working offline.
 
 ## For testers
 
 - `?today=YYYY-MM-DD` in the URL pins "today", e.g. `http://localhost:3000/?today=2026-10-22`.
-- Key elements carry `data-testid` attributes (`approve-day`, `day-status` with `data-status`, `cal-day-YYYY-MM-DD` with `data-status` and `data-pending`, `generate-recipes`, `recipe-card` with `data-safe`, `shop-item`, `store-mode`, `bring-item`, `rem-add`, …).
+- Key elements carry `data-testid` attributes (`approve-day`, `day-status` with `data-status`, `cal-day-YYYY-MM-DD` with `data-status` and `data-pending`, `generate-recipes`, `recipe-card` with `data-safe`, `shop-item`, `store-mode`, `todo-item`, `meal-group-kid`, `day-suggestions`, `suggest-approve`, `rem-add`, …).
 - `window.__mealPlanner` exposes the live state in the browser console.
 - Pure logic is in `public/shared/` and can be unit tested directly:
   - `safety.js`: `checkRecipe(recipe, { age: "baby" | "kid", lunchbox })`, `checkForAudience(recipe)`
