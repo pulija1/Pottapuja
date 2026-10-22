@@ -1,9 +1,10 @@
-import { load, save, exportJson, importJson } from "./store.js";
+import { load, save, exportJson, importJson, onChange } from "./store.js";
+import { getSync, setSync, signOut, syncReady, cleanRepo, cleanFolder, verify, checkIn, loadLatest, githubReachable } from "./sync.js";
 import { todayKey, addDays, addMonths, monthGrid, monthLabel, prettyDate, fromKey, isDateKey, isSchoolDay, occurrences } from "./shared/dates.js";
 import { checkRecipe, checkForAudience, isNutIngredient, isSchoolFood } from "./shared/safety.js";
 import { LIBRARY, suggestFromLibrary } from "./shared/recipes.js";
 import { mergeItems, groupByAisle, formatQty, missingFromPantry, normName, normUnit, aisleFor } from "./shared/shopping.js";
-import { SLOTS, emptyDay, getDay, dayHasPlan, markEdited, approveDay, unapproveDay, slotsFor, todosOn, MEAL_GROUPS, TODO_IDEAS, remindersOn, pendingFor, dayStatus } from "./shared/plan.js";
+import { SLOTS, emptyDay, getDay, dayHasPlan, markEdited, approveDay, unapproveDay, slotsFor, todosOn, MEAL_GROUPS, whoLabel, slotLabel, TODO_IDEAS, remindersOn, pendingFor, dayStatus } from "./shared/plan.js";
 
 const state = load();
 let TODAY = todayKey();
@@ -28,6 +29,7 @@ const ui = {
   savedFilter: "",
   gen: { forWhom: "both", mealType: "", notes: "" },
   confirmUnsafe: null,    // date whose unsafe plan the parent was warned about
+  syncBusy: false,        // a check-in or load is talking to GitHub
   // recipe form values survive re-renders
 };
 
@@ -36,7 +38,6 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
 const ESC = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ESC[c]);
-const WHO_LABEL = { baby: "Baby (8 mo)", kid: "4 yr old", family: "Family", both: "Both kids" };
 
 function toast(msg) {
   const t = $("#toast");
@@ -142,14 +143,14 @@ function slotIssues(key) {
     if (res.errors.length) {
       const msgs = res.errors.map((e) => e.message);
       if (forBaby && linked && linked.forWhom !== "baby") msgs.push("This is not a baby recipe: take out a plain, mashed portion before salt and spice.");
-      out[s.id] = { label: s.label, messages: [...new Set(msgs)] };
+      out[s.id] = { label: slotLabel(s, state.settings), messages: [...new Set(msgs)] };
     }
   }
   return out;
 }
 
 function whoPill(who) {
-  return `<span class="pill ${esc(who)}">${esc(WHO_LABEL[who] || who)}</span>`;
+  return `<span class="pill ${esc(who)}">${esc(whoLabel(who, state.settings, { age: true }))}</span>`;
 }
 
 // ---------- AI status ----------
@@ -180,6 +181,256 @@ function renderHeader() {
   const label = { live: "AI recipes on", mock: "AI: test mode", off: "AI off: using saved recipes", unreachable: "Offline: using saved recipes", unknown: "AI: checking…" }[ui.ai];
   chip.textContent = label;
   chip.className = "ai-chip " + (aiOnline() ? "on" : ui.ai === "unknown" ? "" : "off");
+  renderSyncButtons();
+}
+
+// ---------- sign-in, profile & check-in ----------
+// Changes made since the last check-in or load on this device.
+function unsynced(sync = getSync()) {
+  return !!state.updatedAt && (!sync.lastAt || state.updatedAt > sync.lastAt);
+}
+
+function renderSyncButtons() {
+  const sync = getSync();
+  const btn = $("#checkin");
+  btn.disabled = ui.syncBusy;
+  btn.textContent = ui.syncBusy ? "Syncing…" : "⬆ Check in";
+  btn.classList.toggle("dirty", syncReady(sync) && unsynced(sync));
+  btn.title = !syncReady(sync) ? "Sign in to check in to GitHub" : sync.lastAt ? `Last synced ${new Date(sync.lastAt).toLocaleString()}${unsynced(sync) ? ". Changes since then are not checked in." : ""}` : "Not checked in yet";
+  const prof = $("#profile");
+  const who = sync.name || sync.login;
+  prof.innerHTML = syncReady(sync) && sync.avatar ? `<img src="${esc(sync.avatar)}" alt="" width="32" height="32">` : who ? esc(who.trim().charAt(0).toUpperCase()) : "👤";
+  prof.setAttribute("aria-label", syncReady(sync) ? `Signed in as ${who}. Profile and check-in` : "Sign in");
+}
+
+function setStatus(text) {
+  for (const el of document.querySelectorAll("[data-testid=sync-status]")) el.textContent = text;
+}
+
+function syncError(err) {
+  ui.syncBusy = false;
+  if (err?.kind === "expired") {
+    // An expired or revoked token can't do anything: forget it and ask for a new one.
+    setSync({ token: "" });
+    renderSyncButtons();
+    $("dialog[data-testid=profile-dialog]")?.close();
+    showLogin(err.message);
+    return;
+  }
+  renderSyncButtons();
+  const msg = err?.message || "Something went wrong talking to GitHub.";
+  setStatus("⚠️ " + msg);
+  toast(msg);
+}
+
+async function doCheckIn({ force = false } = {}) {
+  if (ui.syncBusy) return;
+  if (!syncReady()) return showLogin("Sign in to check in your data to GitHub.");
+  ui.syncBusy = true;
+  renderSyncButtons();
+  try {
+    save(state, { now: true });
+    const res = await checkIn(state, { force, today: TODAY });
+    ui.syncBusy = false;
+    renderSyncButtons();
+    if (res.conflict) return conflictDialog();
+    setStatus("✅ Checked in just now.");
+    toast("Checked in to GitHub ✅");
+  } catch (err) {
+    syncError(err);
+  }
+}
+
+async function doLoadLatest() {
+  if (ui.syncBusy) return;
+  if (!syncReady()) return showLogin("Sign in to load your data from GitHub.");
+  ui.syncBusy = true;
+  renderSyncButtons();
+  try {
+    const data = await loadLatest();
+    ui.syncBusy = false;
+    if (!data) { renderSyncButtons(); setStatus("Nothing checked in yet."); toast("Nothing has been checked in yet. Tap Check in to save this device's data."); return; }
+    const next = importJson(JSON.stringify(data));
+    for (const k of Object.keys(state)) delete state[k];
+    Object.assign(state, next);
+    save(state, { now: true });
+    clearCaches();
+    render();
+    setStatus("✅ Loaded the latest check-in.");
+    toast("Loaded the latest check-in ✅");
+  } catch (err) {
+    syncError(err);
+  }
+}
+
+function modal(testid, html, onClick) {
+  $(`dialog[data-testid=${testid}]`)?.close();
+  const dlg = document.createElement("dialog");
+  dlg.dataset.testid = testid;
+  dlg.innerHTML = html;
+  dlg.addEventListener("click", (e) => { const b = e.target.closest("button[data-sync]"); if (b) onClick(b.dataset.sync, dlg, b); });
+  dlg.addEventListener("submit", (e) => e.preventDefault());
+  document.body.appendChild(dlg);
+  dlg.addEventListener("close", () => dlg.remove());
+  dlg.showModal();
+  return dlg;
+}
+
+function conflictDialog() {
+  modal("sync-conflict", `<div class="stack">
+    <h2>Another device checked in</h2>
+    <p>Someone checked in from another phone or browser since this one last synced. Choose which data to keep.</p>
+    <button class="btn primary" data-sync="load" data-testid="conflict-load">Load theirs (replaces this device's data)</button>
+    <button class="btn" data-sync="force" data-testid="conflict-force">Keep mine (replaces what's in GitHub)</button>
+    <button class="btn ghost" data-sync="cancel">Cancel</button>
+  </div>`, (act, dlg) => {
+    dlg.close();
+    if (act === "load") doLoadLatest(); else if (act === "force") doCheckIn({ force: true });
+  });
+}
+
+// Full-screen sign-in. Shown on first launch; "Use on this device only" skips it for good.
+function showLogin(note = "") {
+  const s = getSync();
+  const el = $("#login");
+  el.innerHTML = `<form class="card login-card" data-testid="login-form" novalidate>
+    <div class="brand"><span class="logo" aria-hidden="true">🍛</span><h1>Family Meal Planner</h1></div>
+    <h2>Sign in</h2>
+    <p class="small muted">Sign in with GitHub to check in your meal plans, lists, to-dos and reminders as Markdown files in your family's private repository, and to load them on other phones.</p>
+    ${note ? `<p class="small" style="color:var(--warn)">${esc(note)}</p>` : ""}
+    <label class="field"><span>Your name</span><input name="name" value="${esc(s.name)}" maxlength="40" placeholder="e.g. Ram" autocomplete="name" data-testid="login-name"></label>
+    <label class="field"><span>Private data repository</span><input name="repo" value="${esc(s.repo)}" placeholder="owner/name, e.g. pulija1/Pottapuja-data" autocapitalize="off" spellcheck="false" data-testid="login-repo"></label>
+    <label class="field"><span>GitHub access token</span><input name="token" type="password" placeholder="github_pat_…" autocomplete="current-password" data-testid="login-token"></label>
+    <p class="small muted">GitHub doesn't let apps sign in with your password. Create a <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">fine-grained token</a> for only the data repository with <b>Contents: Read and write</b> and an expiry such as 90 days, and paste it here. It stays in this browser and is never checked in.</p>
+    <label class="row small"><input type="checkbox" name="remember" ${s.remember === false ? "" : "checked"} data-testid="login-remember"> Remember me on this device (untick on a shared phone or computer)</label>
+    <p class="small sync-status" data-testid="login-status" role="status"></p>
+    <button class="btn primary" data-testid="login-submit">Sign in</button>
+    <button type="button" class="btn ghost" data-login="skip" data-testid="login-skip">Use on this device only, without signing in</button>
+  </form>`;
+  el.hidden = false;
+  document.body.classList.add("locked");
+  el.querySelector(s.repo ? "[name=token]" : "[name=name]").focus();
+}
+
+function hideLogin() {
+  $("#login").hidden = true;
+  $("#login").innerHTML = "";
+  document.body.classList.remove("locked");
+}
+
+$("#login").addEventListener("click", (e) => {
+  if (e.target.closest("[data-login=skip]")) { setSync({ skipped: true }); hideLogin(); renderSyncButtons(); }
+});
+
+$("#login").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const f = e.target.elements;
+  const status = $("[data-testid=login-status]");
+  const btn = $("[data-testid=login-submit]");
+  btn.disabled = true;
+  status.textContent = "Checking with GitHub…";
+  try {
+    const repo = cleanRepo(f.repo.value);
+    const token = f.token.value.trim();
+    const user = await verify({ token, repo });
+    const old = getSync();
+    const sameRepo = old.repo === repo;
+    setSync({ name: f.name.value.trim() || user.name, login: user.login, avatar: user.avatar, repo, token, remember: f.remember.checked, branch: sameRepo ? old.branch : user.branch, skipped: false, ...(sameRepo ? {} : { lastSha: "", lastAt: "", lastSummary: null }) });
+    hideLogin();
+    renderSyncButtons();
+    toast(`Signed in as ${user.login}`);
+    // A fresh device picks up the family's data; a device with its own data checks in,
+    // which asks what to keep if another device already checked in.
+    if (state.updatedAt) doCheckIn(); else doLoadLatest();
+  } catch (err) {
+    btn.disabled = false;
+    // GitHub can't be reached at all: don't hold the family up, open the app and sign in later.
+    if (err?.kind === "network") { hideLogin(); renderSyncButtons(); toast("Couldn't reach GitHub, so you're using the app on this device. Sign in later from the 👤 button."); return; }
+    status.textContent = "⚠️ " + (err?.message || "Couldn't sign in.");
+  }
+});
+
+// First launch: offer sign-in, but only when GitHub can be reached; otherwise just open the app.
+async function maybeShowLogin() {
+  const s = getSync();
+  if (syncReady(s) || s.skipped || !navigator.onLine) return;
+  if (await githubReachable()) showLogin();
+}
+
+function profileDialog() {
+  const s = getSync();
+  const signedIn = syncReady(s);
+  const family = `<details ${state.settings.kidName ? "" : "open"} data-testid="family-names"><summary class="small">Children's names</summary>
+      <p class="small muted">Saved with your data (and checked in to your private repository), not in the app's public code.</p>
+      <label class="field"><span>4-year-old</span><input name="kidName" value="${esc(state.settings.kidName || "")}" maxlength="30" data-testid="kid-name"></label>
+      <label class="field"><span>8-month-old</span><input name="babyName" value="${esc(state.settings.babyName || "")}" maxlength="30" data-testid="baby-name"></label>
+      <button type="button" class="btn sm" data-sync="names" data-testid="save-names">Save names</button>
+    </details>`;
+  const onNames = (dlg) => {
+    const f = dlg.querySelector("form").elements;
+    state.settings = { ...state.settings, kidName: f.kidName.value.trim(), babyName: f.babyName.value.trim() };
+    commit();
+    toast("Names saved.");
+  };
+  if (!signedIn) {
+    modal("profile-dialog", `<form class="stack">
+      <h2>Profile</h2>
+      <p class="small muted">Not signed in. Your data is saved on this device only.</p>
+      <button type="button" class="btn primary" data-sync="signin" data-testid="profile-signin">Sign in to check in to GitHub</button>
+      ${family}
+      <button type="button" class="btn ghost sm" data-sync="close">Close</button>
+    </form>`, (act, dlg) => {
+      if (act === "signin") { dlg.close(); showLogin(); }
+      else if (act === "names") onNames(dlg);
+      else if (act === "close") dlg.close();
+    });
+    return;
+  }
+  modal("profile-dialog", `<form class="stack">
+    <div class="row">${s.avatar ? `<img class="avatar-img" src="${esc(s.avatar)}" alt="" width="40" height="40">` : ""}<div class="grow"><strong data-testid="profile-name">${esc(s.name || s.login)}</strong><div class="small muted">Signed in as ${esc(s.login)} · ${esc(s.repo)}</div></div></div>
+    <p class="small sync-status" data-testid="sync-status">${s.lastAt ? `Last synced ${esc(new Date(s.lastAt).toLocaleString())}.${unsynced(s) ? " This device has changes that aren't checked in." : " Everything is checked in."}` : "Not synced yet."}</p>
+    <div class="row">
+      <button type="button" class="btn ok" data-sync="checkin" data-testid="sync-checkin">⬆ Check in</button>
+      <button type="button" class="btn" data-sync="load" data-testid="sync-load">⬇ Load latest</button>
+    </div>
+    <p class="small"><a href="https://github.com/${esc(s.repo)}/tree/${esc(s.branch)}/${esc(s.folder)}" target="_blank" rel="noopener">Open the Markdown files on GitHub</a></p>
+    ${family}
+    <details><summary class="small">More settings</summary>
+      <label class="field"><span>Your name</span><input name="name" value="${esc(s.name)}" maxlength="40" data-testid="sync-name"></label>
+      <label class="field"><span>Branch</span><input name="branch" value="${esc(s.branch)}" data-testid="sync-branch"></label>
+      <label class="field"><span>Folder</span><input name="folder" value="${esc(s.folder)}" data-testid="sync-folder"></label>
+      <button type="button" class="btn sm" data-sync="save">Save settings</button>
+    </details>
+    <div class="row between">
+      <button type="button" class="btn ghost sm" data-sync="signout" data-testid="sync-signout">Sign out of this device</button>
+      <button type="button" class="btn ghost sm" data-sync="close">Close</button>
+    </div>
+  </form>`, (act, dlg, b) => {
+    switch (act) {
+      case "checkin": doCheckIn(); break;
+      case "load":
+        if (unsynced() && !b.dataset.armed) {
+          b.dataset.armed = "1";
+          setStatus("⚠️ This device has changes that aren't checked in. Loading will replace them. Tap Load latest again to go ahead.");
+          break;
+        }
+        doLoadLatest();
+        break;
+      case "save": {
+        const f = dlg.querySelector("form").elements;
+        const patch = { name: f.name.value.trim(), branch: f.branch.value.trim() || "main", folder: cleanFolder(f.folder.value) };
+        const old = getSync();
+        if (patch.branch !== old.branch || patch.folder !== old.folder) Object.assign(patch, { lastSha: "", lastAt: "", lastSummary: null });
+        setSync(patch);
+        renderSyncButtons();
+        toast("Settings saved.");
+        break;
+      }
+      case "names": onNames(dlg); break;
+      case "signout": signOut(); dlg.close(); renderSyncButtons(); showLogin("Signed out. Your data is still on this device."); break;
+      case "close": dlg.close(); break;
+    }
+  });
 }
 
 function setTab(tab) {
@@ -343,9 +594,9 @@ function renderSuggestions(key) {
       const r = findRecipe(picks[s.id]);
       const need = shoppingNeeds(r);
       return `<div class="suggest-row" data-testid="suggestion" data-slot="${s.id}">
-        <span class="small muted">${esc(s.label)}</span>
+        <span class="small muted">${esc(slotLabel(s, state.settings))}</span>
         <span class="grow">${esc(r.title)}${r.familyFavorite ? " ⭐" : ""}${need.length ? ` <span class="small" style="color:var(--warn)">· need ${esc(need.map((i) => i.name).join(", "))}</span>` : ' <span class="small" style="color:var(--ok)">· all in the kitchen</span>'}</span>
-        <button type="button" class="iconbtn" data-action="suggest-swap" data-slot="${s.id}" title="Another idea" aria-label="Another idea for ${esc(s.label)}">🔀</button>
+        <button type="button" class="iconbtn" data-action="suggest-swap" data-slot="${s.id}" title="Another idea" aria-label="Another idea for ${esc(slotLabel(s, state.settings))}">🔀</button>
       </div>`;
     }).join("")}
     <div class="row" style="margin-top:8px">
@@ -359,11 +610,11 @@ function slotRow(s, day, issues) {
   const m = day.meals?.[s.id];
   const r = m?.recipeId ? findRecipe(m.recipeId) : null;
   return `<div class="slot">
-    <span class="slot-label">${esc(s.label)}</span>
+    <span class="slot-label">${esc(slotLabel(s, state.settings))}</span>
     <div class="slot-row">
-      <input type="text" list="dl-${s.who}" value="${esc(m?.title || "")}" placeholder="Pick a recipe or type a dish" data-action="slot" data-slot="${s.id}" data-who="${s.who}" data-testid="slot-${s.id}" aria-label="${esc(s.label)}">
+      <input type="text" list="dl-${s.who}" value="${esc(m?.title || "")}" placeholder="Pick a recipe or type a dish" data-action="slot" data-slot="${s.id}" data-who="${s.who}" data-testid="slot-${s.id}" aria-label="${esc(slotLabel(s, state.settings))}">
       ${r ? `<button class="iconbtn" data-action="view-recipe" data-id="${esc(r.id)}" title="View recipe" aria-label="View recipe">📖</button>` : ""}
-      ${m?.title ? `<button class="iconbtn" data-action="clear-slot" data-slot="${s.id}" title="Clear" aria-label="Clear ${esc(s.label)}">✕</button>` : ""}
+      ${m?.title ? `<button class="iconbtn" data-action="clear-slot" data-slot="${s.id}" title="Clear" aria-label="Clear ${esc(slotLabel(s, state.settings))}">✕</button>` : ""}
     </div>
     ${issues[s.id] ? `<span class="small" style="color:var(--bad)" data-testid="slot-warning">⛔ ${esc(issues[s.id].messages[0])}</span>` : ""}
   </div>`;
@@ -378,8 +629,8 @@ function todoRow(t, { showDate = false } = {}) {
   </div>`;
 }
 
-const WHO_OPTIONS = (sel = "kid") => [["kid", "4-year-old"], ["baby", "Baby"], ["family", "Family"]]
-  .map(([v, l]) => `<option value="${v}" ${v === sel ? "selected" : ""}>${l}</option>`).join("");
+const WHO_OPTIONS = (sel = "kid") => ["kid", "baby", "family"].map((v) => [v, whoLabel(v, state.settings)])
+  .map(([v, l]) => `<option value="${v}" ${v === sel ? "selected" : ""}>${esc(l)}</option>`).join("");
 
 function renderDayPanel(key) {
   const day = getDay(state, key) || emptyDay();
@@ -421,7 +672,7 @@ function renderDayPanel(key) {
       const hasIssue = groupSlots.some((s) => issues[s.id]);
       const open = ui.openGroups.has(g.who) || hasIssue;
       return `<details class="meal-group" data-group="${g.who}" data-testid="meal-group-${g.who}" ${open ? "open" : ""}>
-        <summary><span class="grow"><strong>${g.icon} ${esc(g.label)}</strong></span>
+        <summary><span class="grow"><strong>${g.icon} ${esc(whoLabel(g.who, state.settings, { age: true }))}</strong></span>
           <span class="small ${hasIssue ? "" : "muted"}" ${hasIssue ? 'style="color:var(--bad)"' : ""}>${hasIssue ? "⛔ check safety · " : ""}${planned} of ${groupSlots.length} planned</span></summary>
         ${groupSlots.map((s) => slotRow(s, day, issues)).join("")}
       </details>`;
@@ -487,7 +738,7 @@ function renderRecipes() {
       <form data-form="generate" class="form-grid">
         <label class="field"><span>For</span>
           <select name="forWhom" data-testid="gen-for" data-action="gen-field">
-            ${[["both", "Both kids"], ["baby", "Baby (8 months)"], ["kid", "4-year-old"], ["family", "Whole family"]].map(([v, l]) => `<option value="${v}" ${ui.gen.forWhom === v ? "selected" : ""}>${l}</option>`).join("")}
+            ${[["both", whoLabel("both", state.settings)], ["baby", whoLabel("baby", state.settings, { age: true })], ["kid", whoLabel("kid", state.settings, { age: true })], ["family", "Whole family"]].map(([v, l]) => `<option value="${v}" ${ui.gen.forWhom === v ? "selected" : ""}>${esc(l)}</option>`).join("")}
           </select></label>
         <label class="field"><span>Meal</span>
           <select name="mealType" data-testid="gen-meal" data-action="gen-field">
@@ -615,7 +866,7 @@ function planDialog(recipe) {
   dlg.innerHTML = `<form method="dialog" class="stack">
     <h2>Plan “${esc(recipe.title)}”</h2>
     <label class="field"><span>Date</span><input type="date" name="date" value="${ui.selected >= TODAY ? ui.selected : TODAY}" required data-testid="plan-date"></label>
-    <label class="field"><span>Meal</span><select name="slot" data-testid="plan-slot">${slots.map((s) => `<option value="${s.id}">${esc(s.label)}</option>`).join("")}</select></label>
+    <label class="field"><span>Meal</span><select name="slot" data-testid="plan-slot">${slots.map((s) => `<option value="${s.id}">${esc(slotLabel(s, state.settings))}</option>`).join("")}</select></label>
     <div class="row"><button class="btn primary" value="ok" data-testid="plan-confirm">Add to plan</button><button class="btn" value="cancel" formnovalidate>Cancel</button></div>
   </form>`;
   document.body.appendChild(dlg);
@@ -823,6 +1074,8 @@ document.addEventListener("click", (e) => {
   const tab = e.target.closest(".tabs button");
   if (tab) return setTab(tab.dataset.tab);
   if (e.target.closest("#ai-chip")) { ui.ai = "unknown"; renderHeader(); return checkAi(); }
+  if (e.target.closest("#checkin")) return doCheckIn();
+  if (e.target.closest("#profile")) return profileDialog();
   const el = e.target.closest("[data-action]");
   if (!el || el.tagName === "INPUT" && el.type !== "button") return;
   const a = el.dataset.action;
@@ -1190,6 +1443,8 @@ window.addEventListener("offline", () => { ui.ai = "unreachable"; renderHeader()
 // ---------- start ----------
 const initialTab = location.hash.replace("#", "");
 setTab(["calendar", "recipes", "shopping", "todo", "reminders"].includes(initialTab) ? initialTab : "calendar");
+onChange(() => renderSyncButtons());
+maybeShowLogin();
 checkAi();
 checkDueReminders();
 setInterval(() => { refreshToday(); checkDueReminders(); }, 30000);
