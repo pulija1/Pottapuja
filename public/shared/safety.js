@@ -24,6 +24,11 @@ function findWholeNut(text) {
     const after = text.slice(m.index + m[0].length, m.index + m[0].length + 12);
     const before = text.slice(Math.max(0, m.index - 30), m.index);
     if (GROUND_AFTER.test(after) || GROUND_BEFORE.test(before)) continue;
+    // "groundnut oil", "nut-free"
+    if (/^\s*(oil\b|-?\s*free\b)/i.test(after)) continue;
+    // Ground at home in the same sentence: "cashews ground to a fine paste", "soak almonds, grind to a powder".
+    const sentence = text.slice(m.index + m[0].length).split(/[.;]/)[0].split(/\s+/).slice(0, 8).join(" ");
+    if (/\b(ground|grind|grinded|powder(ed)?|paste|blend(ed)?)\b/i.test(sentence)) continue;
     return m;
   }
   return null;
