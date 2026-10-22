@@ -307,17 +307,18 @@ test("E2E REM-05 a reminder dated in the past is rejected or shown overdue", asy
 });
 
 test("E2E DATA-02 corrupt saved data does not white-screen the app", async () => {
-  const { page, ctx } = await open();
-  await page.evaluate(() => localStorage.setItem("familyMealPlanner.v1", "{broken"));
-  await page.reload();
-  await tid(page, "cal-grid").waitFor({ timeout: 3000 });
-  await page.evaluate(() => localStorage.setItem("familyMealPlanner.v1", JSON.stringify({ version: 1, days: "oops", reminders: null, shopping: 5, pantry: null })));
-  const errors = [];
-  page.on("pageerror", (e) => errors.push(e.message));
-  await page.reload();
-  await page.waitForTimeout(500);
-  assert.ok(await tid(page, "cal-grid").isVisible(), "calendar did not render: " + errors.join("; "));
-  await ctx.close();
+  // Seed storage before the app loads; writing it on a running page loses to the pagehide save.
+  for (const raw of ["{broken", JSON.stringify({ version: 1, days: "oops", reminders: null, shopping: 5, pantry: null, todos: "x", settings: 7 })]) {
+    const ctx = await browser.newContext();
+    await ctx.addInitScript((r) => { if (!sessionStorage.getItem("seeded")) { sessionStorage.setItem("seeded", "1"); localStorage.setItem("familyMealPlanner.v1", r); } }, raw);
+    const page = await ctx.newPage();
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(e.message));
+    await page.goto(`${mock.url}?today=${TODAY}`);
+    await page.waitForTimeout(500);
+    assert.ok(await tid(page, "cal-grid").isVisible(), `calendar did not render for ${raw.slice(0, 30)}: ${errors.join("; ")}`);
+    await ctx.close();
+  }
 });
 
 test("E2E DATA-04 HTML typed into fields is shown as text, never run", async () => {
@@ -442,5 +443,84 @@ test("E2E OFF-06 AI off still shows family favorites from the recipe book", asyn
   await tid(page, "generate-recipes").click();
   await tid(page, "ai-notice").waitFor({ timeout: 5000 });
   assert.ok((await tid(page, "recipe-card").count()) > 0);
+  await ctx.close();
+});
+
+test("E2E SUG-01 approving suggestions fills the empty slots, approves the day and hides the suggestions", async () => {
+  const { page, ctx, errors } = await open();
+  await cell(page, "2026-10-26").click();
+  assert.ok((await tid(page, "suggestion").count()) > 0);
+  await tid(page, "suggest-approve").click();
+  assert.equal(await cell(page, "2026-10-26").getAttribute("data-status"), "approved");
+  assert.equal(await tid(page, "suggestion").count(), 0);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test("E2E SUG-02 suggestions never overwrite a meal you already typed", async () => {
+  const { page, ctx } = await open();
+  await planSlot(page, "2026-10-26", "family_dinner", "Amma's sambar");
+  await tid(page, "suggest-approve").click();
+  await openGroup(page, "family_dinner");
+  assert.equal(await tid(page, "slot-family_dinner").inputValue(), "Amma's sambar");
+  await ctx.close();
+});
+
+test("E2E SUG-03 suggestions are not offered for past days", async () => {
+  const { page, ctx } = await open();
+  await cell(page, "2026-10-20").click();
+  assert.equal(await tid(page, "day-suggestions").count(), 0);
+  await ctx.close();
+});
+
+test("E2E SHOP-13 ticking food as bought adds it to the kitchen; diapers and napkins don't", async () => {
+  const { page, ctx } = await open();
+  await tid(page, "tab-shopping").click();
+  for (const n of ["Drumstick", "Diapers", "Napkins"]) { await tid(page, "shop-name").fill(n); await tid(page, "shop-add").click(); }
+  for (const n of ["drumstick", "diapers", "napkins"]) await page.locator(`[data-testid=shop-item][data-name="${n}"] input[type=checkbox]`).check();
+  await page.waitForTimeout(300);
+  const pantry = await page.evaluate(() => JSON.parse(localStorage.getItem("familyMealPlanner.v1")).pantry.map((x) => x.toLowerCase()));
+  assert.ok(pantry.includes("drumstick"));
+  assert.ok(!pantry.some((x) => /diaper|napkin/.test(x)), JSON.stringify(pantry));
+  await ctx.close();
+});
+
+test("E2E TODO-03 blank to-dos are ignored and HTML is shown as text", async () => {
+  const { page, ctx } = await open();
+  await tid(page, "tab-todo").click();
+  const before = await tid(page, "todo-item").count();
+  await tid(page, "todo-input").fill("   ");
+  await tid(page, "todo-add").click();
+  assert.equal(await tid(page, "todo-item").count(), before);
+  await tid(page, "todo-input").fill(`<img src=x onerror="window.__xss=1">`);
+  await tid(page, "todo-add").click();
+  await page.waitForTimeout(100);
+  assert.equal(await page.evaluate(() => window.__xss), undefined);
+  await ctx.close();
+});
+
+test("E2E TODO-04 saved data from the old 'To bring' version loads and keeps extra items as to-dos", async () => {
+  // Seed storage before the app's first load (writing it on a running page loses to the pagehide save).
+  const ctx = await browser.newContext();
+  await ctx.addInitScript(() => {
+    if (sessionStorage.getItem("seeded")) return;
+    sessionStorage.setItem("seeded", "1");
+    localStorage.setItem("familyMealPlanner.v1", JSON.stringify({ version: 1, pantry: ["rice"], reminders: [], shopping: [],
+      bringTemplates: { kid: ["Lunchbox"], baby: [] },
+      days: { "2026-10-23": { meals: {}, schedule: [], status: "pending", extraBring: [{ id: "e1", text: "Permission slip", who: "kid" }], bring: { "kid:Lunchbox": true }, useBabyBag: true } } }));
+  });
+  const page = await ctx.newPage();
+  const errors = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await page.goto(`${mock.url}?today=${TODAY}`);
+  await tid(page, "cal-grid").waitFor();
+  await cell(page, TOMORROW).click();
+  assert.match(await tid(page, "day-pending").innerText(), /Permission slip/);
+  await page.reload();
+  await tid(page, "cal-grid").waitFor();
+  await page.waitForTimeout(300);
+  const todos = await page.evaluate(() => JSON.parse(localStorage.getItem("familyMealPlanner.v1")).todos);
+  assert.equal(todos.filter((t) => t.text === "Permission slip").length, 1, "migrated twice");
+  assert.deepEqual(errors, []);
   await ctx.close();
 });
