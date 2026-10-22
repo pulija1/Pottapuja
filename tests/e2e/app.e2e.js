@@ -444,3 +444,60 @@ test("E2E OFF-06 AI off still shows family favorites from the recipe book", asyn
   assert.ok((await tid(page, "recipe-card").count()) > 0);
   await ctx.close();
 });
+
+test("E2E TODO-05 old missed to-dos are folded behind 'Show N older'; ticking updates in place", async () => {
+  const todos = [];
+  for (let i = 1; i <= 40; i++) {
+    const d = new Date(Date.UTC(2026, 9, 22 - i)).toISOString().slice(0, 10);
+    todos.push({ id: "t" + i, text: "Old task " + i, who: "kid", date: d, time: "", done: false });
+  }
+  todos.push({ id: "tm", text: "Buy shoes", who: "kid", date: TOMORROW, time: "", done: false });
+  // Seed before the app loads (a reload would save the app's own state over it on pagehide).
+  const ctx = await browser.newContext();
+  await ctx.addInitScript((t) => { if (!localStorage.getItem("familyMealPlanner.v1")) localStorage.setItem("familyMealPlanner.v1", JSON.stringify({ version: 1, todos: t })); }, todos);
+  const page = await ctx.newPage();
+  const errors = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await page.goto(`${mock.url}?today=${TODAY}`);
+  await tid(page, "tab-todo").click();
+  assert.equal(await tid(page, "todo-missed").getByTestId("todo-item").count(), 14);
+  await tid(page, "todo-older").click();
+  assert.equal(await tid(page, "todo-missed").getByTestId("todo-item").count(), 40);
+  await tid(page, "todo-list").locator("input[type=checkbox]").check();
+  assert.equal(await tid(page, "todo-left").innerText(), "All done");
+  assert.match(await tid(page, "todo-list").getByTestId("todo-item").getAttribute("class"), /done/);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test("E2E SHOP-09 unticking a bought item takes back only what the tick added to the kitchen", async () => {
+  const { page, ctx } = await open();
+  await tid(page, "tab-recipes").click();
+  await tid(page, "pantry-input").fill("rice");
+  await page.locator("[data-form=pantry-add] button").click();
+  await tid(page, "tab-shopping").click();
+  for (const n of ["paneer", "rice"]) { await tid(page, "shop-name").fill(n); await tid(page, "shop-add").click(); }
+  const box = (n) => tid(page, "shop-item").filter({ hasText: n }).locator("input[type=checkbox]");
+  for (const n of ["paneer", "rice"]) await box(n).check();
+  for (const n of ["paneer", "rice"]) await box(n).uncheck();
+  await tid(page, "tab-recipes").click();
+  const pantry = await tid(page, "pantry-list").innerText();
+  assert.ok(!pantry.includes("paneer"), pantry);
+  assert.ok(pantry.includes("rice"), pantry);
+  await ctx.close();
+});
+
+test("E2E CAL-13 day actions refresh the cell and panel without rebuilding the month", async () => {
+  const { page, ctx } = await open();
+  await cell(page, TOMORROW).click();
+  await page.evaluate(() => { document.querySelector("[data-testid=cal-grid]").dataset.marker = "1"; });
+  await tid(page, "suggest-approve").click();
+  assert.equal(await tid(page, "day-status").getAttribute("data-status"), "approved");
+  assert.equal(await cell(page, TOMORROW).getAttribute("data-status"), "approved");
+  assert.equal(await page.evaluate(() => document.querySelector("[data-testid=cal-grid]").dataset.marker), "1");
+  await cell(page, TODAY).click();
+  assert.match(await cell(page, TODAY).getAttribute("class"), /sel/);
+  assert.doesNotMatch(await cell(page, TOMORROW).getAttribute("class"), /sel/);
+  assert.equal(await tid(page, "day-panel").getAttribute("data-date"), TODAY);
+  await ctx.close();
+});

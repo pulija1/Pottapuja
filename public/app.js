@@ -55,6 +55,16 @@ function commit() {
 // The calendar asks for pending items and reminders of 42 days on every render; cache them until data changes.
 const pendCache = new Map();
 const remCache = new Map();
+// A change that only touches one date (its meals, schedule, to-dos or reminder ticks):
+// drop that date's cached pending list and refresh just its part of the calendar.
+function commitDay(key = ui.selected) {
+  save(state);
+  pendCache.delete(key);
+  remCache.delete(key);
+  for (const e of Object.values(ui.suggest)) e.picks = null;
+  renderDay(key);
+}
+
 function clearCaches() {
   pendCache.clear();
   remCache.clear();
@@ -188,20 +198,33 @@ function render() {
 }
 
 // ---------- calendar ----------
+function calCell(c) {
+  const st = dayStatus(state, c.key);
+  const pending = pend(c.key);
+  const rems = remsOn(c.key).length;
+  const cls = ["cal-cell", c.inMonth ? "" : "out", c.key === TODAY ? "today" : "", c.key === ui.selected ? "sel" : ""].join(" ");
+  const label = `${prettyDate(c.key)}: ${st === "approved" ? "approved" : st === "pending" ? "waiting for approval" : "no plan"}${pending.length ? ", " + pending.length + " pending" : ""}`;
+  return `<button type="button" class="${cls}" data-action="select-day" data-date="${c.key}" data-testid="cal-day-${c.key}" data-status="${st}" data-pending="${pending.length}" aria-label="${esc(label)}">
+    <span class="d">${c.day}</span>
+    <span class="marks"><span class="dot ${st}"></span>${pending.length ? `<span class="badge" title="Pending">${pending.length}</span>` : ""}${rems ? `<span class="badge rem" title="Reminders">⏰${rems}</span>` : ""}</span>
+  </button>`;
+}
+
+// Re-render only what one date can change: its cell, the pending card and the day panel.
+// Rebuilding the whole month on every tick is slow on a phone with a year of data.
+function renderDay(key = ui.selected) {
+  if (ui.tab !== "calendar" || !$("#cal-day")) return render();
+  renderHeader();
+  const cell = $(`[data-testid=cal-day-${key}]`);
+  if (cell) cell.outerHTML = calCell({ key, day: Number(key.slice(8)), inMonth: key.slice(0, 7) === ui.month.slice(0, 7) });
+  $("#cal-upcoming").innerHTML = renderUpcomingPending();
+  $("#cal-day").innerHTML = renderDayPanel(ui.selected);
+}
+
 function renderCalendar() {
   const cells = monthGrid(ui.month);
   const dows = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-  const grid = cells.map((c) => {
-    const st = dayStatus(state, c.key);
-    const pending = pend(c.key);
-    const rems = remsOn(c.key).length;
-    const cls = ["cal-cell", c.inMonth ? "" : "out", c.key === TODAY ? "today" : "", c.key === ui.selected ? "sel" : ""].join(" ");
-    const label = `${prettyDate(c.key)}: ${st === "approved" ? "approved" : st === "pending" ? "waiting for approval" : "no plan"}${pending.length ? ", " + pending.length + " pending" : ""}`;
-    return `<button type="button" class="${cls}" data-action="select-day" data-date="${c.key}" data-testid="cal-day-${c.key}" data-status="${st}" data-pending="${pending.length}" aria-label="${esc(label)}">
-      <span class="d">${c.day}</span>
-      <span class="marks"><span class="dot ${st}"></span>${pending.length ? `<span class="badge" title="Pending">${pending.length}</span>` : ""}${rems ? `<span class="badge rem" title="Reminders">⏰${rems}</span>` : ""}</span>
-    </button>`;
-  }).join("");
+  const grid = cells.map(calCell).join("");
 
   $("#view-calendar").innerHTML = `
     <div class="cal-layout">
@@ -226,10 +249,10 @@ function renderCalendar() {
             <span><b class="badge">2</b>Pending items</span>
           </div>
         </div>
-        ${renderUpcomingPending()}
+        <div id="cal-upcoming">${renderUpcomingPending()}</div>
         ${renderBackupCard()}
       </div>
-      <div>${renderDayPanel(ui.selected)}</div>
+      <div id="cal-day">${renderDayPanel(ui.selected)}</div>
     </div>`;
 }
 
@@ -694,7 +717,10 @@ function renderTodo() {
   const soon = (state.todos || [])
     .filter((t) => !t.done && t.date >= TODAY && t.date <= addDays(TODAY, 7) && t.date !== key)
     .sort((a, b) => (a.date + (a.time || "99")).localeCompare(b.date + (b.time || "99")));
-  const missed = (state.todos || []).filter((t) => !t.done && t.date < TODAY).sort((a, b) => a.date.localeCompare(b.date));
+  // Newest missed first; only the last two weeks unless asked, since a long list is slow and unread.
+  const allMissed = (state.todos || []).filter((t) => !t.done && t.date < TODAY).sort((a, b) => b.date.localeCompare(a.date));
+  const missed = ui.showOlderMissed ? allMissed : allMissed.filter((t) => t.date >= addDays(TODAY, -14));
+  const older = allMissed.length - missed.length;
   const dayName = key === TODAY ? "Today" : key === addDays(TODAY, 1) ? "Tomorrow" : prettyDate(key);
   $("#view-todo").innerHTML = `
     <div class="card">
@@ -715,7 +741,8 @@ function renderTodo() {
       <h3>Quick ideas for ${esc(dayName.toLowerCase() === "today" || dayName.toLowerCase() === "tomorrow" ? dayName.toLowerCase() : prettyDate(key))}</h3>
       <div class="chips">${TODO_IDEAS.map((i) => `<button class="chip add" data-action="todo-idea" data-text="${esc(i.text)}" data-who="${i.who}" data-testid="todo-idea">+ ${esc(i.text)}</button>`).join("")}</div>
     </div>
-    ${missed.length ? `<div class="card" data-testid="todo-missed"><h2>⚠️ Not done yet</h2>${missed.map((t) => todoRow(t, { showDate: true })).join("")}</div>` : ""}
+    ${allMissed.length ? `<div class="card" data-testid="todo-missed"><h2>⚠️ Not done yet</h2>${missed.map((t) => todoRow(t, { showDate: true })).join("")}
+      ${older ? `<button class="btn ghost sm" data-action="todo-older" data-testid="todo-older">Show ${older} older</button>` : ""}</div>` : ""}
     <div class="card" data-testid="todo-upcoming"><h2>Coming up this week</h2>
       ${soon.length ? soon.map((t) => todoRow(t, { showDate: true })).join("") : '<p class="small muted">Nothing else in the next 7 days.</p>'}
     </div>`;
@@ -801,39 +828,52 @@ document.addEventListener("click", (e) => {
   const a = el.dataset.action;
   const day = () => ensureDay(ui.selected);
   switch (a) {
-    case "select-day": ui.selected = el.dataset.date; ui.month = el.dataset.date; if (ui.tab !== "calendar") setTab("calendar"); else render(); break;
+    case "select-day": {
+      const prev = ui.selected;
+      const sameMonth = el.dataset.date.slice(0, 7) === ui.month.slice(0, 7);
+      ui.selected = el.dataset.date;
+      ui.month = el.dataset.date;
+      if (ui.tab !== "calendar") setTab("calendar");
+      else if (!sameMonth || !$("#cal-day")) render();
+      else {
+        $(`[data-testid=cal-day-${prev}]`)?.classList.remove("sel");
+        $(`[data-testid=cal-day-${ui.selected}]`)?.classList.add("sel");
+        $("#cal-day").innerHTML = renderDayPanel(ui.selected);
+      }
+      break;
+    }
     case "month": ui.month = addMonths(ui.month, Number(el.dataset.delta)); render(); break;
     case "goto-today": ui.month = TODAY; ui.selected = TODAY; render(); break;
     case "approve":
       if (Object.keys(slotIssues(ui.selected)).length && ui.confirmUnsafe !== ui.selected) {
         ui.confirmUnsafe = ui.selected;
-        render();
+        renderDay();
         $("[data-testid=day-safety]")?.scrollIntoView({ block: "center", behavior: "smooth" });
         break;
       }
-      approveDay(day()); ui.confirmUnsafe = null; commit(); toast("Day approved ✅");
+      approveDay(day()); ui.confirmUnsafe = null; commitDay(); toast("Day approved ✅");
       break;
-    case "approve-anyway": approveDay(day()); ui.confirmUnsafe = null; commit(); toast("Day approved ✅"); break;
-    case "cancel-approve": ui.confirmUnsafe = null; render(); break;
-    case "unapprove": unapproveDay(day()); commit(); break;
-    case "clear-slot": { const d = day(); delete d.meals[el.dataset.slot]; markEdited(d); commit(); break; }
+    case "approve-anyway": approveDay(day()); ui.confirmUnsafe = null; commitDay(); toast("Day approved ✅"); break;
+    case "cancel-approve": ui.confirmUnsafe = null; renderDay(); break;
+    case "unapprove": unapproveDay(day()); commitDay(); break;
+    case "clear-slot": { const d = day(); delete d.meals[el.dataset.slot]; markEdited(d); commitDay(); break; }
     case "view-recipe": { const r = findRecipe(el.dataset.id); if (r) recipeDialog(r); break; }
     case "autofill": {
       const n = applySuggestions(ui.selected);
-      commit();
+      commitDay();
       toast(n ? `Added ${n} meal${n > 1 ? "s" : ""}. Approve the day when ready.` : "All meals are already planned.");
       break;
     }
     case "suggest-approve": {
       const n = applySuggestions(ui.selected);
-      const d = day();
+      if (!n) { commitDay(); toast("All meals are already planned. Use Approve below when ready."); break; }
       if (Object.keys(slotIssues(ui.selected)).length) {
         ui.confirmUnsafe = ui.selected;
-        commit();
+        commitDay();
         toast("Meals added, but one needs a safety check before approving.");
       } else {
-        approveDay(d);
-        commit();
+        approveDay(day());
+        commitDay();
         toast(`${n} meal${n === 1 ? "" : "s"} added and the day is approved ✅`);
       }
       break;
@@ -841,13 +881,13 @@ document.addEventListener("click", (e) => {
     case "suggest-shuffle": {
       const e = ui.suggest[ui.selected];
       if (e) { e.seed++; e.picks = null; }
-      render();
+      renderDay();
       break;
     }
     case "suggest-swap": {
       const e = ui.suggest[ui.selected];
       if (e) { e.offsets[el.dataset.slot] = (e.offsets[el.dataset.slot] || 0) + 1; e.picks = null; }
-      render();
+      renderDay();
       break;
     }
     case "copy-prev": {
@@ -857,7 +897,7 @@ document.addEventListener("click", (e) => {
       d.meals = structuredClone(prev.meals);
       d.schedule = prev.schedule.map((s) => ({ ...s, id: uid() }));
       markEdited(d);
-      commit();
+      commitDay();
       toast("Copied. Review and approve.");
       break;
     }
@@ -869,16 +909,21 @@ document.addEventListener("click", (e) => {
       toast(added ? `Added ${added} item${added > 1 ? "s" : ""} to the shopping list.` : "Already on the shopping list.");
       break;
     }
-    case "del-sched": { const d = day(); d.schedule = d.schedule.filter((s) => s.id !== el.dataset.id); markEdited(d); commit(); break; }
+    case "del-sched": { const d = day(); d.schedule = d.schedule.filter((s) => s.id !== el.dataset.id); markEdited(d); commitDay(); break; }
     case "school-schedule": {
       const d = day();
       const add = [["07:30", "Breakfast and get ready"], ["08:15", "School drop-off"], ["12:30", "Baby nap"], ["15:15", "School pick-up"], ["19:30", "Dinner"]];
       for (const [time, text] of add) if (!d.schedule.some((s) => s.text === text)) d.schedule.push({ id: uid(), time, text });
       markEdited(d);
-      commit();
+      commitDay();
       break;
     }
-    case "todo-del": state.todos = state.todos.filter((t) => t.id !== el.dataset.id); commit(); break;
+    case "todo-del": {
+      const t = state.todos.find((x) => x.id === el.dataset.id);
+      state.todos = state.todos.filter((x) => x !== t);
+      if (t && ui.tab === "calendar") commitDay(t.date); else commit();
+      break;
+    }
     case "new-reminder": setTab("reminders"); renderReminders(el.dataset.date); $("[data-testid=rem-title]")?.focus(); break;
     case "export": {
       const blob = new Blob([exportJson(state)], { type: "application/json" });
@@ -931,6 +976,7 @@ document.addEventListener("click", (e) => {
     }
     case "store-del": state.stores = state.stores.filter((s) => s !== el.dataset.store); if (ui.shopStore === el.dataset.store) ui.shopStore = "all"; commit(); break;
 
+    case "todo-older": ui.showOlderMissed = true; render(); break;
     case "todo-day": ui.todoDate = addDays(ui.todoDate, Number(el.dataset.delta)); render(); break;
     case "todo-idea": {
       const date = ui.todoDate;
@@ -963,13 +1009,23 @@ document.addEventListener("change", (e) => {
         d.meals[el.dataset.slot] = { recipeId: r?.id || null, title, forWhom: el.dataset.who };
       }
       markEdited(d);
-      commit();
+      commitDay();
       break;
     }
     case "todo-toggle": {
       const t = state.todos.find((x) => x.id === el.dataset.id);
-      if (t) t.done = el.checked;
-      commit();
+      if (!t) return;
+      t.done = el.checked;
+      if (ui.tab === "calendar") { commitDay(t.date); break; }
+      if (ui.tab !== "todo") { commit(); break; }
+      // On the To do tab, tick the row in place instead of rebuilding a long list.
+      save(state);
+      pendCache.delete(t.date);
+      el.closest(".chk")?.classList.toggle("done", t.done);
+      const list = todosOn(state, ui.todoDate);
+      const left = list.filter((x) => !x.done).length;
+      const pill = $("[data-testid=todo-left]");
+      if (pill) { pill.textContent = left ? `${left} left` : "All done"; pill.className = `pill ${left ? "warn" : "ok"}`; }
       break;
     }
     case "rem-done": {
@@ -977,7 +1033,7 @@ document.addEventListener("change", (e) => {
       if (!r) return;
       r.done = r.done || {};
       if (el.checked) r.done[el.dataset.date] = true; else delete r.done[el.dataset.date];
-      commit();
+      if (ui.tab === "calendar") commitDay(el.dataset.date); else commit();
       break;
     }
     case "shop-toggle": {
@@ -986,8 +1042,15 @@ document.addEventListener("change", (e) => {
       // Bought food goes straight into the kitchen, so meal suggestions can use it.
       if (it && el.checked && aisleFor(it.name) !== "Baby care" && aisleFor(it.name) !== "School & household" && !state.pantry.some((p) => normName(p) === normName(it.name))) {
         state.pantry.push(it.name);
+        it.addedToPantry = true;
         clearCaches();
         toast(`${it.name} added to your kitchen`);
+      } else if (it && !el.checked && it.addedToPantry) {
+        // Unticked by mistake: take back only what this tick added, not food already in the kitchen.
+        state.pantry = state.pantry.filter((p) => normName(p) !== normName(it.name));
+        delete it.addedToPantry;
+        clearCaches();
+        toast(`${it.name} taken out of your kitchen`);
       }
       el.closest(".shop-item")?.classList.toggle("bought", el.checked);
       save(state);
@@ -1051,7 +1114,7 @@ document.addEventListener("submit", (e) => {
       const d = ensureDay(ui.selected);
       d.schedule.push({ id: uid(), time: f.time.value, text });
       markEdited(d);
-      commit();
+      commitDay();
       $("[data-testid=sched-text]")?.focus();
       break;
     }
@@ -1085,7 +1148,7 @@ document.addEventListener("submit", (e) => {
       if (!text || !isDateKey(date)) return;
       state.todos.push({ id: uid(), text, who: f.who.value, date, time: f.time?.value || "", done: false });
       if (kind === "todo-add") ui.todoDate = date;
-      commit();
+      if (kind === "todo-add-day") commitDay(date); else commit();
       $(kind === "todo-add" ? "[data-testid=todo-input]" : "[data-testid=day-todo-input]")?.focus();
       break;
     }
