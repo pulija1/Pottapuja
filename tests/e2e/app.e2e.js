@@ -896,13 +896,13 @@ test("E2E KIDS-01 the kids' names come from the profile (not the public code) an
   await cell(page, TOMORROW).click();
   assert.match(await tid(page, "day-panel").innerText(), /4-year-old[\s\S]*8-month-old/);
   await tid(page, "profile").click();
-  await tid(page, "kid-name").fill("Dhari");
-  await tid(page, "baby-name").fill("Maya");
+  await tid(page, "kid-name").fill("Kiran");
+  await tid(page, "baby-name").fill("Tara");
   await tid(page, "save-names").click();
   await page.keyboard.press("Escape");
   const text = await tid(page, "day-panel").innerText();
-  assert.match(text, /Dhari/);
-  assert.match(text, /Maya/);
+  assert.match(text, /Kiran/);
+  assert.match(text, /Tara/);
   await ctx.close();
 });
 

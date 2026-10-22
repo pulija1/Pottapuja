@@ -13,7 +13,7 @@ function sample() {
   s.days["2026-10-23"] = { meals: { kid_lunchbox: { title: "Lemon rice", forWhom: "kid" }, baby_lunch: { title: "Moong dal khichdi (soft)", forWhom: "baby" } }, schedule: [{ id: "a", time: "08:15", text: "School drop-off" }], status: "approved", approvedAt: "x", changedAfterApproval: false };
   s.shopping = [{ id: "s1", name: "toor dal", quantity: 1, unit: "kg", bought: false }, { id: "s2", name: "paneer", quantity: null, unit: "", bought: true }];
   s.todos = [{ id: "t1", text: "Buy dresses | <b>party</b> -->", who: "kid", date: "2026-10-23", time: "", done: false }];
-  s.reminders = [{ id: "r1", title: "Maya vaccine", date: "2026-10-30", time: "10:00", category: "health", repeat: "none", notes: "", done: {} }];
+  s.reminders = [{ id: "r1", title: "Tara vaccine", date: "2026-10-30", time: "10:00", category: "health", repeat: "none", notes: "", done: {} }];
   s.savedRecipes = [{ id: "x", title: "Ragi dosa", forWhom: "kid", ingredients: [{ name: "ragi flour", quantity: 1, unit: "cup" }], steps: ["Mix.", "Cook."] }];
   return s;
 }
@@ -33,7 +33,7 @@ test("SYNC-02 the files are readable Markdown with names, and '-->' in text can'
   assert.match(files["meal-plan.md"], /\| School lunchbox \| Lemon rice \|/);
   assert.match(files["shopping-list.md"], /- \[x\] paneer/);
   assert.match(files["todo.md"], /- \[ \] Buy dresses \\\| <b>party<\/b> --> · Asha/);
-  assert.match(files["reminders.md"], /Maya vaccine/);
+  assert.match(files["reminders.md"], /Tara vaccine/);
   assert.match(files["meal-plan.md"], /\| Nila lunch \| Moong dal khichdi/);
   assert.match(files["recipes.md"], /## Ragi dosa[\s\S]*1\. Mix\./);
   assert.equal(readDataBlock(files["todo.md"]).todos[0].text, "Buy dresses | <b>party</b> -->");
