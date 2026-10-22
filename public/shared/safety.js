@@ -27,8 +27,12 @@ function findWholeNut(text) {
     // "groundnut oil", "nut-free"
     if (/^\s*(oil\b|-?\s*free\b)/i.test(after)) continue;
     // Ground at home in the same sentence: "cashews ground to a fine paste", "soak almonds, grind to a powder".
-    const sentence = text.slice(m.index + m[0].length).split(/[.;]/)[0].split(/\s+/).slice(0, 8).join(" ");
-    if (/\b(ground|grind|grinded|powder(ed)?|paste|blend(ed)?)\b/i.test(sentence)) continue;
+    // "whole cashews", "chopped almonds", "roasted peanuts" are never ground.
+    if (/\b(whole|chopped|halved|roasted|fried|toasted|slivered|sliced|crushed)\s+(\w+\s+)?$/i.test(before)) return m;
+    // The grinding must apply to this nut: stop at the end of the sentence or a new step ("then", "serve", "top").
+    const clause = text.slice(m.index + m[0].length).split(/[.;]|\b(?:then|serve|top|garnish|sprinkle)\b/i)[0];
+    const near = clause.split(/\s+/).slice(0, 9).join(" ");
+    if (/\b(ground|grind|grinded|powder(ed)?|paste|blend(ed)?)\b/i.test(near)) continue;
     return m;
   }
   return null;
