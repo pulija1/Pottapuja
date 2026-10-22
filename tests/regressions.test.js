@@ -58,3 +58,15 @@ test("AGE-21 'whole' nuts are never treated as ground, even with a blend word la
 test("AGE-22 a garnish of nuts after the blending step is still caught", () => {
   assert.equal(baby(["rice"], ["Blend the khichdi smooth, then sprinkle chopped cashews on top."]).safe, false);
 });
+
+test("AGE-23 a grinding word about something else in the same clause does not make the nut safe", () => {
+  for (const s of ["Add cashews, and blend the rice.", "Add a few cashews to the bowl and mix with the paste.", "Add almonds whole and blend the dal."]) {
+    assert.equal(baby(["rice"], [s]).safe, false, s);
+  }
+});
+
+test("AGE-24 grinding that is clearly about the nut is allowed", () => {
+  for (const s of ["Soak cashews and blend to a smooth paste.", "Grind almonds to a fine powder.", "Blend the soaked cashews until smooth."]) {
+    assert.equal(baby(["rice"], [s]).safe, true, s);
+  }
+});
