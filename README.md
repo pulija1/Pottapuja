@@ -19,6 +19,10 @@ On first launch the app offers a sign-in page (skipped automatically when GitHub
 - If another device checked in since this one last synced, Check in asks whether to load theirs or keep yours instead of overwriting.
 - Public repositories are refused, so the family's data can't end up readable by everyone.
 
+### AI recipes on GitHub Pages (your own Claude API key)
+
+GitHub Pages has no server, so the site can't hold an API key. Instead, tap the AI chip or 👤 → **Claude API key**, and paste a key from [console.anthropic.com](https://console.anthropic.com) → API Keys. The key is kept only in that browser (never in check-ins or backups), and the browser calls Claude directly with the same prompt, answer schema and age-safety screening as the server (`public/shared/ai-prompt.js`). Set a monthly spend limit in the Console. When the site has its own AI server, that is used first.
+
 ## Run it
 
 ```bash

@@ -1,5 +1,6 @@
 import { load, save, exportJson, importJson, onChange } from "./store.js";
 import { getSync, setSync, signOut, syncReady, cleanRepo, cleanFolder, verify, checkIn, loadLatest, githubReachable } from "./sync.js";
+import { getAiKey, setAiKey, looksLikeKey, browserRecipes } from "./ai-browser.js";
 import { todayKey, addDays, addMonths, monthGrid, monthLabel, prettyDate, fromKey, isDateKey, isSchoolDay, occurrences } from "./shared/dates.js";
 import { checkRecipe, checkForAudience, isNutIngredient, isSchoolFood } from "./shared/safety.js";
 import { LIBRARY, suggestFromLibrary } from "./shared/recipes.js";
@@ -166,19 +167,22 @@ async function checkAi() {
   } catch {
     ui.ai = "unreachable";
   }
+  // No AI on this site (GitHub Pages has no server): use the family's own key from this browser.
+  if (!aiOnline() && getAiKey()) ui.ai = "key";
   renderHeader();
   if (ui.tab === "recipes") render();
 }
 
 function aiOnline() {
-  return ui.ai === "live" || ui.ai === "mock";
+  return ui.ai === "live" || ui.ai === "mock" || ui.ai === "key";
 }
 
 // ---------- header & tabs ----------
 function renderHeader() {
   $("#today-label").textContent = "Today: " + fromKey(TODAY).toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" });
   const chip = $("#ai-chip");
-  const label = { live: "AI recipes on", mock: "AI: test mode", off: "AI off: using saved recipes", unreachable: "Offline: using saved recipes", unknown: "AI: checking…" }[ui.ai];
+  const label = { live: "AI recipes on", key: "AI recipes on (your key)", mock: "AI: test mode", off: "AI off: tap to add a key", unreachable: "AI off: tap to add a key", unknown: "AI: checking…" }[ui.ai];
+  chip.title = aiOnline() ? "Tap to check the recipe AI again" : "Recipes come from the built-in recipe book. Tap to add a Claude API key for AI recipes.";
   chip.textContent = label;
   chip.className = "ai-chip " + (aiOnline() ? "on" : ui.ai === "unknown" ? "" : "off");
   renderSyncButtons();
@@ -357,9 +361,38 @@ async function maybeShowLogin() {
   if (await githubReachable()) showLogin();
 }
 
-function profileDialog() {
+function profileDialog({ focusKey = false } = {}) {
   const s = getSync();
   const signedIn = syncReady(s);
+  const hasKey = !!getAiKey();
+  const aiKey = `<details ${focusKey ? "open" : ""} data-testid="ai-key-section"><summary class="small">Claude API key (AI recipes)${hasKey ? " · added" : ""}</summary>
+      <p class="small muted">Kept only in this browser. It is never checked in to GitHub or put in backups. Get a key at console.anthropic.com under API Keys, and set a monthly spend limit there.</p>
+      <label class="field"><span>API key</span><input name="aiKey" type="password" autocomplete="off" spellcheck="false" placeholder="${hasKey ? "Saved. Paste a new key to replace it" : "sk-ant-…"}" data-testid="ai-key"></label>
+      <p class="small" data-testid="ai-key-status" role="status"></p>
+      <div class="row"><button type="button" class="btn sm" data-sync="aikey-save" data-testid="ai-key-save">Save key</button>${hasKey ? '<button type="button" class="btn sm ghost" data-sync="aikey-remove" data-testid="ai-key-remove">Remove key</button>' : ""}</div>
+    </details>`;
+  // Handles the parts both variants share. Returns true when it handled the action.
+  const onShared = (act, dlg) => {
+    if (act === "names") { onNames(dlg); return true; }
+    if (act === "aikey-save") {
+      const k = dlg.querySelector("form").elements.aiKey.value.trim();
+      const status = dlg.querySelector("[data-testid=ai-key-status]");
+      if (!looksLikeKey(k)) { status.textContent = "⚠️ That doesn't look like a Claude API key. It starts with sk-ant-."; return true; }
+      setAiKey(k);
+      dlg.close();
+      toast("API key saved on this device.");
+      ui.ai = "unknown"; renderHeader(); checkAi();
+      return true;
+    }
+    if (act === "aikey-remove") {
+      setAiKey("");
+      dlg.close();
+      toast("API key removed from this device.");
+      ui.ai = "unknown"; renderHeader(); checkAi();
+      return true;
+    }
+    return false;
+  };
   const family = `<details ${state.settings.kidName ? "" : "open"} data-testid="family-names"><summary class="small">Children's names</summary>
       <p class="small muted">Saved with your data (and checked in to your private repository), not in the app's public code.</p>
       <label class="field"><span>4-year-old</span><input name="kidName" value="${esc(state.settings.kidName || "")}" maxlength="30" data-testid="kid-name"></label>
@@ -378,10 +411,11 @@ function profileDialog() {
       <p class="small muted">Not signed in. Your data is saved on this device only.</p>
       <button type="button" class="btn primary" data-sync="signin" data-testid="profile-signin">Sign in to check in to GitHub</button>
       ${family}
+      ${aiKey}
       <button type="button" class="btn ghost sm" data-sync="close">Close</button>
     </form>`, (act, dlg) => {
+      if (onShared(act, dlg)) return;
       if (act === "signin") { dlg.close(); showLogin(); }
-      else if (act === "names") onNames(dlg);
       else if (act === "close") dlg.close();
     });
     return;
@@ -395,6 +429,7 @@ function profileDialog() {
     </div>
     <p class="small"><a href="https://github.com/${esc(s.repo)}/tree/${esc(s.branch)}/${esc(s.folder)}" target="_blank" rel="noopener">Open the Markdown files on GitHub</a></p>
     ${family}
+    ${aiKey}
     <details><summary class="small">More settings</summary>
       <label class="field"><span>Your name</span><input name="name" value="${esc(s.name)}" maxlength="40" data-testid="sync-name"></label>
       <label class="field"><span>Branch</span><input name="branch" value="${esc(s.branch)}" data-testid="sync-branch"></label>
@@ -406,6 +441,7 @@ function profileDialog() {
       <button type="button" class="btn ghost sm" data-sync="close">Close</button>
     </div>
   </form>`, (act, dlg, b) => {
+    if (onShared(act, dlg)) return;
     switch (act) {
       case "checkin": doCheckIn(); break;
       case "load":
@@ -426,7 +462,6 @@ function profileDialog() {
         toast("Settings saved.");
         break;
       }
-      case "names": onNames(dlg); break;
       case "signout": signOut(); dlg.close(); renderSyncButtons(); showLogin("Signed out. Your data is still on this device."); break;
       case "close": dlg.close(); break;
     }
@@ -811,7 +846,7 @@ async function generate(form) {
     ui.aiNotice = `${why} Showing recipes from the built-in family recipe book that best match your kitchen.`;
   };
   if (!aiOnline()) {
-    fallback(ui.ai === "off" ? "The recipe AI is turned off." : "The recipe AI can't be reached right now.");
+    fallback(ui.ai === "unknown" ? "The recipe AI is still being checked." : "AI recipes are off. To turn them on, add a Claude API key in 👤 Profile.");
     render();
     return;
   }
@@ -821,13 +856,25 @@ async function generate(form) {
   render();
   const started = performance.now();
   try {
-    const res = await fetch("api/recipes", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-      signal: ui.aiController.signal,
-    });
-    const data = await res.json().catch(() => ({}));
+    let res, data;
+    if (ui.ai === "key") {
+      try {
+        data = await browserRecipes(body, { signal: ui.aiController.signal });
+        res = { ok: true };
+      } catch (err) {
+        if (ui.aiController?.signal.aborted) throw err;
+        res = { ok: false };
+        data = { error: err.message };
+      }
+    } else {
+      res = await fetch("api/recipes", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+        signal: ui.aiController.signal,
+      });
+      data = await res.json().catch(() => ({}));
+    }
     if (!res.ok) {
       fallback((data.error || "The recipe AI is unavailable.") + "");
     } else {
@@ -1073,7 +1120,10 @@ function checkDueReminders() {
 document.addEventListener("click", (e) => {
   const tab = e.target.closest(".tabs button");
   if (tab) return setTab(tab.dataset.tab);
-  if (e.target.closest("#ai-chip")) { ui.ai = "unknown"; renderHeader(); return checkAi(); }
+  if (e.target.closest("#ai-chip")) {
+    if (ui.ai === "off" || ui.ai === "unreachable") return profileDialog({ focusKey: true });
+    ui.ai = "unknown"; renderHeader(); return checkAi();
+  }
   if (e.target.closest("#checkin")) return doCheckIn();
   if (e.target.closest("#profile")) return profileDialog();
   const el = e.target.closest("[data-action]");
