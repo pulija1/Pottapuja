@@ -723,7 +723,190 @@ test("E2E SYNC-03 sign-in refuses a public repository; GitHub unreachable skips 
   await ctx.close();
 });
 
-test("E2E SYNC-04 unchanged files aren't re-uploaded; an expired token goes back to sign-in; names live in the data", async () => {
+// ---- Round 8: sign-in and check-in failure cases ----
+const toastHas = (page, text, timeout = 5000) => page.waitForFunction((t) => document.querySelector("#toast")?.textContent.includes(t), text, { timeout });
+const statusText = (page) => page.evaluate(() => [...document.querySelectorAll("[data-testid=login-status],[data-testid=sync-status],#toast")].map((e) => e.textContent).join(" | "));
+
+test("E2E SYNC-04 a bad or expired token keeps the sign-in page open with a clear message", async () => {
+  const gh = fakeGitHub();
+  const a = await device(gh);
+  await a.ctx.route("https://api.github.com/user", (r) => r.fulfill({ status: 401, contentType: "application/json", headers: { "access-control-allow-origin": "*" }, body: '{"message":"Bad credentials"}' }));
+  await signIn(a.page);
+  await a.page.waitForFunction(() => /token/i.test(document.querySelector("[data-testid=login-status]").textContent));
+  assert.ok(await tid(a.page, "login").isVisible());
+  assert.equal(await a.page.evaluate(() => JSON.parse(localStorage.getItem("familyMealPlanner.sync") || "{}").token || ""), "", "a rejected token was saved");
+  await a.ctx.close();
+});
+
+test("E2E SYNC-05 GitHub rate limiting is reported as 'try again later', not as a token permission problem", async () => {
+  const gh = fakeGitHub();
+  const a = await device(gh);
+  await a.ctx.route("https://api.github.com/user", (r) => r.fulfill({ status: 403, contentType: "application/json",
+    headers: { "access-control-allow-origin": "*", "x-ratelimit-remaining": "0", "access-control-expose-headers": "x-ratelimit-remaining" },
+    body: '{"message":"API rate limit exceeded"}' }));
+  await signIn(a.page);
+  await a.page.waitForFunction(() => document.querySelector("[data-testid=login-status]").textContent.includes("⚠️"));
+  const msg = await tid(a.page, "login-status").innerText();
+  assert.match(msg, /later|limit|busy|wait/i, msg);
+  await a.ctx.close();
+});
+
+test("E2E SYNC-06 a token for the wrong repository says so", async () => {
+  const gh = fakeGitHub();
+  const a = await device(gh);
+  await signIn(a.page, "fam/other");
+  await a.page.waitForFunction(() => document.querySelector("[data-testid=login-status]").textContent.includes("⚠️"));
+  assert.match(await tid(a.page, "login-status").innerText(), /can't find fam\/other/i);
+  await a.ctx.close();
+});
+
+test("E2E SYNC-07 checking in while offline fails cleanly; the data stays and a later check-in works", async () => {
+  const gh = fakeGitHub();
+  const a = await device(gh);
+  await signIn(a.page);
+  await tid(a.page, "login").waitFor({ state: "hidden" });
+  await tid(a.page, "suggest-approve").click();
+  // Playwright's offline mode doesn't cut routed requests, so cut GitHub off with a route.
+  let offline = true;
+  await a.ctx.route("https://api.github.com/**", (r) => offline ? r.abort("internetdisconnected") : r.fallback());
+  await tid(a.page, "checkin").click();
+  await toastHas(a.page, "reach GitHub");
+  assert.equal(await tid(a.page, "checkin").isDisabled(), false, "check-in button stuck");
+  assert.equal(await cell(a.page, TODAY).getAttribute("data-status"), "approved");
+  offline = false;
+  await tid(a.page, "checkin").click();
+  await toastHas(a.page, "Checked in");
+  assert.ok(gh.files()["output/meal-plan.md"].includes("✅ Approved"));
+  await a.ctx.close();
+});
+
+test("E2E SYNC-08 if GitHub stops answering mid check-in, the app gives up with a message instead of 'Syncing…' forever", async () => {
+  const gh = fakeGitHub();
+  const a = await device(gh);
+  await signIn(a.page);
+  await tid(a.page, "login").waitFor({ state: "hidden" });
+  await a.ctx.route("https://api.github.com/repos/fam/data/git/trees", () => { /* never answer */ });
+  await tid(a.page, "tab-todo").click();
+  await tid(a.page, "todo-idea").first().click();
+  await tid(a.page, "checkin").click();
+  await a.page.waitForFunction(() => !document.querySelector("#checkin").disabled, null, { timeout: 40000 })
+    .catch(() => assert.fail("still 'Syncing…' after 40 s with no way to cancel"));
+  await a.ctx.close();
+});
+
+test("E2E SYNC-09 a failure half way through a check-in leaves GitHub unchanged, and retrying works", async () => {
+  const gh = fakeGitHub();
+  const a = await device(gh);
+  await signIn(a.page);
+  await tid(a.page, "login").waitFor({ state: "hidden" });
+  await tid(a.page, "checkin").click();
+  await toastHas(a.page, "Checked in");
+  const before = gh.head;
+  let fail = true;
+  await a.ctx.route("https://api.github.com/repos/fam/data/git/refs/heads/main", (r) => fail ? r.abort() : r.fallback());
+  await tid(a.page, "tab-todo").click();
+  await tid(a.page, "todo-idea").first().click();
+  await tid(a.page, "checkin").click();
+  await toastHas(a.page, "reach GitHub");
+  assert.equal(gh.head, before);
+  fail = false;
+  await tid(a.page, "checkin").click();
+  await toastHas(a.page, "Checked in");
+  assert.notEqual(gh.head, before);
+  await a.ctx.close();
+});
+
+test("E2E SYNC-10 'Keep mine' in a conflict replaces GitHub's copy; the other device then sees it", async () => {
+  const gh = fakeGitHub();
+  const a = await device(gh);
+  await signIn(a.page);
+  await tid(a.page, "login").waitFor({ state: "hidden" });
+  await tid(a.page, "checkin").click();
+  await toastHas(a.page, "Checked in");
+  const b = await device(gh);
+  await signIn(b.page);
+  await toastHas(b.page, "Loaded");
+  await tid(b.page, "tab-todo").click();
+  await tid(b.page, "todo-input").fill("From B");
+  await tid(b.page, "todo-add").click();
+  await tid(b.page, "checkin").click();
+  await toastHas(b.page, "Checked in");
+  await tid(a.page, "tab-todo").click();
+  await tid(a.page, "todo-input").fill("From A");
+  await tid(a.page, "todo-add").click();
+  await tid(a.page, "checkin").click();
+  await tid(a.page, "sync-conflict").waitFor();
+  await tid(a.page, "conflict-force").click();
+  for (let i = 0; i < 50 && !gh.files()["output/todo.md"].includes("From A"); i++) await a.page.waitForTimeout(100);
+  const todo = gh.files()["output/todo.md"];
+  assert.ok(todo.includes("From A") && !todo.includes("From B"));
+  await a.ctx.close(); await b.ctx.close();
+});
+
+test("E2E SYNC-11 signing in on a device that already has its own data asks before replacing anything", async () => {
+  const gh = fakeGitHub();
+  const a = await device(gh);
+  await signIn(a.page);
+  await tid(a.page, "login").waitFor({ state: "hidden" });
+  await tid(a.page, "checkin").click();
+  await toastHas(a.page, "Checked in");
+  // Device B used the app offline first, then signs in.
+  const b = await device(gh);
+  await tid(b.page, "login-skip").click();
+  await tid(b.page, "tab-todo").click();
+  await tid(b.page, "todo-input").fill("Made on B before signing in");
+  await tid(b.page, "todo-add").click();
+  await b.page.locator("#profile").click();
+  await tid(b.page, "profile-signin").click();          // signed out, the profile offers sign-in and the names
+  await signIn(b.page);
+  await tid(b.page, "sync-conflict").waitFor();
+  assert.ok(!gh.files()["output/todo.md"].includes("Made on B"), "B overwrote GitHub without asking");
+  await a.ctx.close(); await b.ctx.close();
+});
+
+test("E2E SYNC-12 the token is never written into the check-in files or the backup export", async () => {
+  const gh = fakeGitHub();
+  const a = await device(gh);
+  await signIn(a.page);
+  await tid(a.page, "login").waitFor({ state: "hidden" });
+  await tid(a.page, "checkin").click();
+  await toastHas(a.page, "Checked in");
+  for (const [p, text] of Object.entries(gh.files())) assert.ok(!text.includes("github_pat_test"), p);
+  const exported = await a.page.evaluate(async () => (await import("./store.js")).exportJson(JSON.parse(localStorage.getItem("familyMealPlanner.v1"))));
+  assert.ok(!exported.includes("github_pat_test"));
+  await a.ctx.close();
+});
+
+test("E2E SYNC-13 a bad folder name in settings gives a clear message, not 'someone else checked in'", async () => {
+  const gh = fakeGitHub();
+  const a = await device(gh);
+  await a.ctx.route("https://api.github.com/repos/fam/data/git/trees", (r) => r.fulfill({ status: 422, contentType: "application/json", headers: { "access-control-allow-origin": "*" }, body: '{"message":"tree.path contains a malformed path component"}' }));
+  await signIn(a.page);
+  await tid(a.page, "login").waitFor({ state: "hidden" });
+  await tid(a.page, "checkin").click();
+  await a.page.waitForFunction(() => document.querySelector("#toast").textContent.length > 0);
+  await a.page.waitForTimeout(300);
+  const msg = await statusText(a.page);
+  assert.ok(!/someone else checked in/i.test(msg), msg);
+  await a.ctx.close();
+});
+
+test("E2E KIDS-01 the kids' names come from the profile (not the public code) and are used across the app", async () => {
+  const { page, ctx } = await open();
+  await cell(page, TOMORROW).click();
+  assert.match(await tid(page, "day-panel").innerText(), /4-year-old[\s\S]*8-month-old/);
+  await tid(page, "profile").click();
+  await tid(page, "kid-name").fill("Dhari");
+  await tid(page, "baby-name").fill("Maya");
+  await tid(page, "save-names").click();
+  await page.keyboard.press("Escape");
+  const text = await tid(page, "day-panel").innerText();
+  assert.match(text, /Dhari/);
+  assert.match(text, /Maya/);
+  await ctx.close();
+});
+
+test("E2E SYNC-20 unchanged files aren't re-uploaded; an expired token goes back to sign-in; names live in the data", async () => {
   const gh = fakeGitHub();
   const a = await device(gh);
   await signIn(a.page);
