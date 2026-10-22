@@ -70,3 +70,18 @@ test("AGE-24 grinding that is clearly about the nut is allowed", () => {
     assert.equal(baby(["rice"], [s]).safe, true, s);
   }
 });
+
+test("AGE-25 coarse crushing or pulsing nuts for a topping is blocked", () => {
+  for (const s of ["Lightly crush the cashews and sprinkle on top.", "Pulse the almonds twice and add as a crunchy topping."]) {
+    assert.equal(baby(["rice"], [s]).safe, false, s);
+  }
+  assert.equal(baby(["rice"], ["Pulse the almonds to a fine powder."]).safe, true);
+});
+
+test("AGE-26 common 'no salt or sugar' phrasings are not flagged", () => {
+  for (const s of ["Do not add salt or sugar.", "No salt or sugar for the baby.", "Without salt, sugar or honey."]) {
+    assert.equal(baby(["rice"], [s]).safe, true, s);
+  }
+  assert.equal(baby(["rice"], ["Skip the sugar and add honey."]).safe, false);
+  assert.equal(baby(["rice"], ["Avoid salt; add a little jaggery."]).safe, false);
+});
