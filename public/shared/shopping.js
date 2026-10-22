@@ -1,5 +1,7 @@
 // Shopping list helpers: name normalising, unit conversion, merging, and aisle grouping.
 
+import { DATASET_ITEMS } from "./dataset.js";
+
 const UNIT_ALIASES = {
   g: "g", gm: "g", gms: "g", gram: "g", grams: "g",
   kg: "kg", kgs: "kg", kilo: "kg", kilos: "kg", kilogram: "kg", kilograms: "kg",
@@ -43,10 +45,26 @@ const SYNONYMS = {
   "sweet potato": "sweet potato", "sweet potatoes": "sweet potato",
   "idli batter": "idli/dosa batter", "dosa batter": "idli/dosa batter", "idli dosa batter": "idli/dosa batter",
   "vermicelli": "vermicelli", "semiya": "vermicelli", "semia": "vermicelli",
+  "sona masoori rice": "rice", "ponni rice": "rice", "biyyam": "rice", "arisi": "rice", "akki": "rice",
+  "turmeric powder": "turmeric", "haldi": "turmeric", "pasupu": "turmeric", "manjal": "turmeric",
+  "cumin": "jeera", "cumin seeds": "jeera", "jeelakarra": "jeera", "seeragam": "jeera",
+  "asafoetida": "hing", "inguva": "hing", "perungayam": "hing",
+  "green peas": "peas", "french beans": "beans", "whole wheat flour": "atta", "wheat flour": "atta",
+  "plain yogurt": "curd", "pumpkin": "pumpkin", "tomato puree": "tomato puree",
 };
 
+// Regional names from the grocery dataset (Hindi, Tamil, Telugu, Kannada, Malayalam) map to the English name.
+for (const item of DATASET_ITEMS) {
+  const english = item.name.toLowerCase().replace(/\s*\(.*?\)\s*/g, " ").trim();
+  for (const alias of Object.values(item.names || {})) {
+    const a = String(alias).toLowerCase().trim();
+    if (a && !SYNONYMS[a]) SYNONYMS[a] = SYNONYMS[english] || english;
+  }
+}
+
 export function normName(name) {
-  const k = String(name || "").trim().toLowerCase().replace(/\s+/g, " ");
+  // "ragi flour (finger millet)" -> "ragi flour"
+  const k = String(name || "").toLowerCase().replace(/\s*\(.*?\)\s*/g, " ").trim().replace(/\s+/g, " ");
   if (SYNONYMS[k]) return SYNONYMS[k];
   // simple plural -> singular
   if (k.endsWith("es") && SYNONYMS[k.slice(0, -2)]) return SYNONYMS[k.slice(0, -2)];

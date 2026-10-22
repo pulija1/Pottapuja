@@ -2,6 +2,7 @@
 // Every baby recipe here must pass checkRecipe(..., { age: "baby" }); the tests enforce that.
 
 import { normName } from "./shopping.js";
+import { DATASET_RECIPES } from "./dataset.js";
 
 const r = (id, title, forWhom, mealType, texture, prepMinutes, ingredients, steps, notes = "") => ({
   id: "lib-" + id, title, forWhom, mealType, texture, prepMinutes,
@@ -105,6 +106,19 @@ export const LIBRARY = [
      "Before adding salt and sambar powder, set aside plain rice, dal and vegetables for the baby and mash them."],
     "Not checked for the baby as written: take the baby's portion out before salt and spice."),
 ];
+
+// Add recipes from the research dataset that we don't already have (by title word overlap).
+const STOP = new Set(["and", "with", "the", "of", "soft", "mild", "style", "water"]);
+const words = (t) => new Set(t.toLowerCase().replace(/\(.*?\)/g, "").replace(/[^a-z ]/g, " ").split(/\s+/).map((w) => w.replace(/(ed|s)$/, "")).filter((w) => w && !STOP.has(w)));
+const similar = (a, b) => {
+  const A = words(a), B = words(b);
+  const common = [...A].filter((w) => B.has(w)).length;
+  return common / Math.min(A.size, B.size) >= 0.66;
+};
+const builtIn = LIBRARY.slice();
+for (const d of DATASET_RECIPES) {
+  if (!builtIn.some((x) => similar(x.title, d.title))) LIBRARY.push(d);
+}
 
 export function libraryById(id) {
   return LIBRARY.find((x) => x.id === id) || null;

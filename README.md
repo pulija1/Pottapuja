@@ -56,5 +56,7 @@ meal-planner/
     app.js            UI
     store.js          localStorage persistence
     shared/           pure logic shared by server, browser and tests
+      dataset.js      generated from the grocery/recipe research dataset (83 items with regional names, 20 recipes)
+  scripts/import-dataset.mjs   regenerate dataset.js: node scripts/import-dataset.mjs path/to/indian-groceries-recipes.json
   tests/              node:test unit tests
 ```
