@@ -72,15 +72,18 @@ export function normName(name) {
   return k;
 }
 
+// Word lists per aisle. Plurals ("small onions", "cherry tomatoes") match too. Order matters: first match wins.
+const words = (list) => new RegExp(`\\b(?:${list.join("|")})(?:s|es)?\\b`);
 const AISLES = [
-  ["Vegetables", /\b(tomato|onion|potato|carrot|beans|brinjal|okra|bhindi|drumstick|spinach|palak|gourd|cabbage|cauliflower|peas|capsicum|chill?i|ginger|garlic|curry leaves|coriander leaves|mint|pumpkin|sweet potato|beetroot|cucumber|lemon|plantain|raw banana|yam|colocasia)\b/],
-  ["Fruits", /\b(banana|apple|pear|papaya|mango|chikoo|sapota|grape|pomegranate|orange|avocado|guava|watermelon|melon|berries|strawberr)/],
-  ["Rice, dals & flours", /\b(rice|dal|ragi|rava|flour|atta|poha|aval|vermicelli|millet|oats|besan|maida|sabudana|batter)\b/],
-  ["Dairy & eggs", /\b(milk|curd|ghee|butter|paneer|cheese|egg|cream)\b/],
-  ["Spices & tempering", /\b(salt|turmeric|cumin|jeera|mustard|hing|asafoetida|pepper|chill?i powder|sambar powder|rasam powder|cardamom|elaichi|cinnamon|clove|tamarind|jaggery|sugar|seeds|masala|methi)\b/],
-  ["Oil, nuts & dry fruits", /\b(oil|cashew|almond|peanut|groundnut|walnut|raisin|dates|coconut)\b/],
-  ["Baby care", /\b(diaper|wipes|formula|cerelac|baby|sipper|bib)\b/],
-  ["School & household", /\b(tissue|napkin|foil|lunch ?box|bottle|soap|detergent|bag)\b/],
+  ["Spices & tempering", /\b(powder|masala)\b/],
+  ["Vegetables", words(["tomato", "onion", "shallot", "potato", "carrot", "beans?", "brinjal", "eggplant", "okra", "bhindi", "drumstick", "spinach", "palak", "gourd", "cabbage", "cauliflower", "peas", "capsicum", "bell pepper", "chill?i", "chillie", "ginger", "garlic", "curry leaves", "coriander leaves", "mint", "methi leaves", "pumpkin", "sweet potato", "beetroot", "beet", "cucumber", "lemon", "lime", "plantain", "raw banana", "yam", "colocasia", "baby corn", "corn", "sweet corn", "radish", "mushroom", "zucchini", "broccoli", "leaves"])],
+  ["Fruits", words(["banana", "apple", "pear", "papaya", "mango", "chikoo", "sapota", "grape", "pomegranate", "orange", "avocado", "guava", "watermelon", "melon", "berry", "berries", "strawberry", "plum", "kiwi", "pineapple"])],
+  ["Rice, dals & flours", /\b(rice|dal|ragi|rava|flour|atta|poha|aval|vermicelli|millet|bajra|jowar|oats|besan|maida|sabudana|batter|bread|tortilla|chana|rajma|lentils?)\b/],
+  ["Dairy & eggs", /\b(milk|curd|ghee|butter|paneer|cheese|eggs?|cream|yogurt)\b/],
+  ["Spices & tempering", /\b(salt|turmeric|cumin|jeera|mustard|hing|asafoetida|pepper|cardamom|elaichi|cinnamon|cloves?|tamarind|jaggery|sugar|seeds|methi|fenugreek|podi|baking)\b/],
+  ["Oil, nuts & dry fruits", words(["oil", "cashew", "almond", "peanut", "groundnut", "walnut", "pistachio", "raisin", "dates", "coconut", "nut", "mixed nuts", "jam"])],
+  ["Baby care", /\b(diapers?|wipes|formula|cerelac|sipper|bib|baby (lotion|soap|oil|shampoo|food))\b/],
+  ["School & household", /\b(tissues?|napkins?|foil|lunch ?box|bottle|soap|detergent|bags?)\b/],
 ];
 
 export function aisleFor(name) {
@@ -89,7 +92,7 @@ export function aisleFor(name) {
   return "Other";
 }
 
-export const AISLE_ORDER = [...AISLES.map((a) => a[0]), "Other"];
+export const AISLE_ORDER = [...new Set(AISLES.map((a) => a[0]))].concat("Other");
 
 function toBase(qty, unit) {
   const b = BASE[unit];
@@ -144,7 +147,7 @@ export function mergeItems(items) {
   }
   return [...out.values()].map((e) => {
     const { _base, ...rest } = e;
-    if (_base && rest.quantity != null) Object.assign(rest, fromBase(rest.quantity, rest.unit));
+    if ((_base || rest.unit === "g" || rest.unit === "ml") && rest.quantity != null) Object.assign(rest, fromBase(rest.quantity, rest.unit));
     return rest;
   });
 }

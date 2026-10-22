@@ -26,7 +26,9 @@ const TYPES = {
 
 function sendJson(res, status, data) {
   const body = JSON.stringify(data);
-  res.writeHead(status, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
+  const headers = { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" };
+  if (status === 413) headers.connection = "close";
+  res.writeHead(status, headers);
   res.end(body);
 }
 
@@ -37,8 +39,10 @@ function readBody(req) {
     req.on("data", (c) => {
       size += c.length;
       if (size > MAX_BODY) {
+        // Stop collecting but keep draining, so the 413 answer reaches the client.
+        req.removeAllListeners("data");
+        req.resume();
         reject(Object.assign(new Error("Request too large"), { status: 413 }));
-        req.destroy();
         return;
       }
       chunks.push(c);
@@ -55,7 +59,13 @@ function readBody(req) {
 }
 
 async function serveStatic(req, res, pathname) {
-  let rel = decodeURIComponent(pathname);
+  let rel;
+  try {
+    rel = decodeURIComponent(pathname);
+  } catch {
+    res.writeHead(400, { "content-type": "text/plain" }).end("Bad URL");
+    return;
+  }
   if (rel.endsWith("/")) rel += "index.html";
   const file = normalize(join(ROOT, rel));
   if (file !== ROOT && !file.startsWith(ROOT + sep)) {
@@ -103,7 +113,7 @@ export function createServer() {
       }
       if (url.pathname.startsWith("/api/")) return sendJson(res, 404, { error: "Unknown API route" });
       if (req.method !== "GET" && req.method !== "HEAD") return sendJson(res, 405, { error: "Method not allowed" });
-      return serveStatic(req, res, url.pathname);
+      return await serveStatic(req, res, url.pathname);
     } catch (err) {
       const status = err.status || 500;
       if (status === 500) console.error(err);

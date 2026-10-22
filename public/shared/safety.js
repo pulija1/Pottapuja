@@ -10,11 +10,28 @@ const NEGATION = /\b(no|without|skip|omit|avoid|don'?t add|do not add|never add|
 const NOT_NUTS = /\b(coconut|nutmeg|butternut|doughnut|donut|nutrition|nutritious|nutrient|nutrients)\b/gi;
 
 const WHOLE_NUT = /\b(peanuts?|groundnuts?|cashews?|almonds?|walnuts?|pistachios?|hazelnuts?|pecans?|nuts?|kaju|badam|moongphali|pista)\b/i;
-const GROUND_FORM = /\b(powder|powdered|ground|paste|butter|flour|meal|finely ground|milk)\b/i;
+// A nut counts as ground only when the ground word sits right next to it:
+// "cashew powder", "peanut butter", "almond milk", "ground almonds", "powdered cashews".
+const GROUND_AFTER = /^\s*(powder|paste|butter|flour|meal|milk)\b/i;
+const GROUND_BEFORE = /\b(ground|powdered|finely ground)\s+(\w+\s+)?$/i;
+
+// True if any nut in the text is not in a ground form.
+function findWholeNut(text) {
+  const re = new RegExp(WHOLE_NUT.source, "gi");
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    if (isNegated(text, m.index)) continue;
+    const after = text.slice(m.index + m[0].length, m.index + m[0].length + 12);
+    const before = text.slice(Math.max(0, m.index - 30), m.index);
+    if (GROUND_AFTER.test(after) || GROUND_BEFORE.test(before)) continue;
+    return m;
+  }
+  return null;
+}
 
 const RULES = {
   baby: [
-    { rule: "honey", level: "error", re: /\bhoney\b/i,
+    { rule: "honey", level: "error", re: /\b(honey|thene|then(?= \(honey\))|tene|jenu|madhu|shahad)\b/i,
       message: "Honey is not safe under 12 months (infant botulism risk)." },
     { rule: "added-salt", level: "error",
       re: /\b(salt|salted|namak|uppu|rock salt|sea salt|black salt|kala namak)\b/i,
@@ -75,7 +92,8 @@ function findMatch(re, text) {
   const global = new RegExp(re.source, re.flags.includes("g") ? re.flags : re.flags + "g");
   let m;
   while ((m = global.exec(text)) !== null) {
-    if (!isNegated(text, m.index)) return m;
+    const after = text.slice(m.index + m[0].length, m.index + m[0].length + 8);
+    if (!isNegated(text, m.index) && !/^[- ]?free\b/i.test(after)) return m;
     if (m[0].length === 0) global.lastIndex++;
   }
   return null;
@@ -115,8 +133,8 @@ export function checkRecipe(recipe, opts = {}) {
   // Whole nuts for babies: error unless the nut is clearly ground or a paste.
   if (age === "baby") {
     for (const piece of pieces) {
-      const m = findMatch(WHOLE_NUT, piece);
-      if (m && !GROUND_FORM.test(piece)) {
+      const m = findWholeNut(piece);
+      if (m) {
         add("error", "whole-nuts", "Whole or chopped nuts are a choking hazard for babies. Only finely ground nut powder is OK.", m[0]);
         break;
       }
@@ -129,8 +147,8 @@ export function checkRecipe(recipe, opts = {}) {
 
   if (age === "kid") {
     for (const piece of pieces) {
-      const m = findMatch(WHOLE_NUT, piece);
-      if (m && !GROUND_FORM.test(piece)) {
+      const m = findWholeNut(piece);
+      if (m) {
         add("warning", "whole-nuts", "Whole nuts are a choking risk under 5. Use chopped or powdered.", m[0]);
         break;
       }

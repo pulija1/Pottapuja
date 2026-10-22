@@ -1,6 +1,6 @@
 import { load, save, exportJson, importJson } from "./store.js";
 import { todayKey, addDays, addMonths, monthGrid, monthLabel, prettyDate, fromKey, isDateKey, isSchoolDay, occurrences } from "./shared/dates.js";
-import { checkForAudience, isNutIngredient, isSchoolFood } from "./shared/safety.js";
+import { checkRecipe, checkForAudience, isNutIngredient, isSchoolFood } from "./shared/safety.js";
 import { LIBRARY, suggestFromLibrary } from "./shared/recipes.js";
 import { mergeItems, groupByAisle, formatQty, missingFromPantry, normName, normUnit, aisleFor } from "./shared/shopping.js";
 import { SLOTS, emptyDay, getDay, dayHasPlan, markEdited, approveDay, unapproveDay, slotsFor, bringItemsFor, remindersOn, pendingFor, dayStatus } from "./shared/plan.js";
@@ -24,7 +24,9 @@ const ui = {
   hideBought: false,
   bringDate: nextSchoolDayFrom(TODAY),
   savedFilter: "",
-  gen: { forWhom: "both", mealType: "", notes: "" },  // recipe form values survive re-renders
+  gen: { forWhom: "both", mealType: "", notes: "" },
+  confirmUnsafe: null,    // date whose unsafe plan the parent was warned about
+  // recipe form values survive re-renders
 };
 
 // ---------- helpers ----------
@@ -82,6 +84,32 @@ const nutFreeOn = () => !!state.settings?.schoolNutFree;
 function shoppingNeeds(recipe) {
   const need = missingFromPantry(recipe, state.pantry);
   return nutFreeOn() && isSchoolFood(recipe) ? need.filter((i) => !isNutIngredient(i.name)) : need;
+}
+
+// Safety problems for each planned meal on a date, including dishes typed in by hand.
+function slotIssues(key) {
+  const day = getDay(state, key);
+  const out = {};
+  if (!day) return out;
+  for (const s of slotsFor(key)) {
+    const m = day.meals?.[s.id];
+    if (!m?.title || s.who === "family") continue;
+    const linked = m.recipeId ? findRecipe(m.recipeId) : null;
+    const r = linked || { title: m.title, ingredients: [], steps: [] };
+    const forBaby = s.who === "baby";
+    const res = checkRecipe({ ...r, title: m.title }, {
+      age: forBaby ? "baby" : "kid",
+      lunchbox: s.id === "kid_lunchbox" || s.id === "kid_snack",
+      schoolNutFree: nutFreeOn(),
+      nutFreeSwap: r.nutFreeSwap,
+    });
+    if (res.errors.length) {
+      const msgs = res.errors.map((e) => e.message);
+      if (forBaby && linked && linked.forWhom !== "baby") msgs.push("This is not a baby recipe: take out a plain, mashed portion before salt and spice.");
+      out[s.id] = { label: s.label, messages: [...new Set(msgs)] };
+    }
+  }
+  return out;
 }
 
 function whoPill(who) {
@@ -219,6 +247,13 @@ function renderDayPanel(key) {
   const bring = bringItemsFor(state, key);
   const packed = bring.filter((b) => b.packed).length;
   const rems = remindersOn(state, key);
+  const issues = slotIssues(key);
+  const issueList = Object.values(issues);
+
+  const safetyBox = issueList.length && st !== "approved" ? `<div class="notice" data-testid="day-safety" style="margin-top:8px">
+      ⛔ <strong>Safety check:</strong> ${issueList.map((i) => `${esc(i.label)}: ${esc(i.messages.join(" "))}`).join("<br>")}
+      ${ui.confirmUnsafe === key ? `<div class="row" style="margin-top:8px"><button class="btn sm" data-action="approve-anyway" data-testid="approve-anyway">Approve anyway</button><button class="btn sm ghost" data-action="cancel-approve">Go back and change it</button></div>` : ""}
+    </div>` : "";
 
   const banner = st === "approved"
     ? `<div class="status-banner approved" data-testid="day-status" data-status="approved"><span>✅ Approved${day.approvedAt ? " " + esc(new Date(day.approvedAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })) : ""}</span>
@@ -232,6 +267,7 @@ function renderDayPanel(key) {
     <div class="row between"><h2>${esc(fromKey(key).toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" }))}${key === TODAY ? " · Today" : ""}</h2>
       ${isSchoolDay(key) ? '<span class="pill kid">School day</span>' : '<span class="pill">Weekend</span>'}</div>
     ${banner}
+    ${safetyBox}
     ${pend.length ? `<h3>Pending for this date</h3><ul class="pending-list" data-testid="day-pending">${pend.map((p) => `<li data-type="${p.type}">${{ approval: "⏳", plan: "📝", reminder: "⏰", bring: "🎒" }[p.type]} ${esc(p.text)}${p.overdue ? ' <span class="pill bad">overdue</span>' : ""}</li>`).join("")}</ul>` : `<p class="small muted" data-testid="day-pending-none">Nothing pending for this date.</p>`}
 
     <h3>Meals</h3>
@@ -246,6 +282,7 @@ function renderDayPanel(key) {
           ${r ? `<button class="iconbtn" data-action="view-recipe" data-id="${esc(r.id)}" title="View recipe" aria-label="View recipe">📖</button>` : ""}
           ${m?.title ? `<button class="iconbtn" data-action="clear-slot" data-slot="${s.id}" title="Clear" aria-label="Clear ${esc(s.label)}">✕</button>` : ""}
         </div>
+        ${issues[s.id] ? `<span class="small" style="color:var(--bad)" data-testid="slot-warning">⛔ ${esc(issues[s.id].messages[0])}</span>` : ""}
       </div>`;
     }).join("")}
     </div>
@@ -583,7 +620,7 @@ function renderReminders(prefillDate) {
   const row = (o) => `<div class="rem ${o.done ? "done" : ""} ${o.d < TODAY && !o.done ? "overdue" : ""}" data-testid="reminder-item">
       <input type="checkbox" data-action="rem-done" data-id="${esc(o.r.id)}" data-date="${o.d}" ${o.done ? "checked" : ""} aria-label="Done" style="width:22px;height:22px">
       <span class="when">${esc(prettyDate(o.d))}${o.r.time ? "<br>" + esc(o.r.time) : ""}</span>
-      <span class="grow"><span class="title">${esc(o.r.title)}</span><br><span class="small muted">${esc(CATS[o.r.category] || "")}${o.r.repeat && o.r.repeat !== "none" ? " · repeats " + esc(o.r.repeat) : ""}${o.r.notes ? " · " + esc(o.r.notes) : ""}</span></span>
+      <span class="grow"><span class="title">${esc(o.r.title)}</span><br><span class="small muted">${esc(CATS[o.r.category] || "")}${o.r.repeat && o.r.repeat !== "none" ? " · repeats " + esc(o.r.repeat === "weekdays" ? "on school days" : o.r.repeat) : ""}${o.r.notes ? " · " + esc(o.r.notes) : ""}</span></span>
       <button class="iconbtn" data-action="rem-del" data-id="${esc(o.r.id)}" aria-label="Delete reminder">🗑</button>
     </div>`;
   const notifState = typeof Notification === "undefined" ? "unsupported" : Notification.permission;
@@ -595,7 +632,7 @@ function renderReminders(prefillDate) {
         <label class="field"><span>Date</span><input type="date" name="date" required value="${esc(prefillDate || TODAY)}" data-testid="rem-date"></label>
         <label class="field"><span>Time</span><input type="time" name="time" data-testid="rem-time"></label>
         <label class="field"><span>Type</span><select name="category">${Object.entries(CATS).map(([k, v]) => `<option value="${k}">${v}</option>`).join("")}</select></label>
-        <label class="field"><span>Repeat</span><select name="repeat" data-testid="rem-repeat"><option value="none">Does not repeat</option><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option></select></label>
+        <label class="field"><span>Repeat</span><select name="repeat" data-testid="rem-repeat"><option value="none">Does not repeat</option><option value="daily">Daily</option><option value="weekdays">School days (Mon to Fri)</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option></select></label>
         <label class="field full"><span>Notes</span><input type="text" name="notes" maxlength="200" placeholder="Optional"></label>
         <div class="full"><button class="btn primary" data-testid="rem-add">Add reminder</button></div>
       </form>
@@ -641,7 +678,17 @@ document.addEventListener("click", (e) => {
     case "select-day": ui.selected = el.dataset.date; ui.month = el.dataset.date; if (ui.tab !== "calendar") setTab("calendar"); else render(); break;
     case "month": ui.month = addMonths(ui.month, Number(el.dataset.delta)); render(); break;
     case "goto-today": ui.month = TODAY; ui.selected = TODAY; render(); break;
-    case "approve": approveDay(day()); commit(); toast("Day approved ✅"); break;
+    case "approve":
+      if (Object.keys(slotIssues(ui.selected)).length && ui.confirmUnsafe !== ui.selected) {
+        ui.confirmUnsafe = ui.selected;
+        render();
+        $("[data-testid=day-safety]")?.scrollIntoView({ block: "center", behavior: "smooth" });
+        break;
+      }
+      approveDay(day()); ui.confirmUnsafe = null; commit(); toast("Day approved ✅");
+      break;
+    case "approve-anyway": approveDay(day()); ui.confirmUnsafe = null; commit(); toast("Day approved ✅"); break;
+    case "cancel-approve": ui.confirmUnsafe = null; render(); break;
     case "unapprove": unapproveDay(day()); commit(); break;
     case "clear-slot": { const d = day(); delete d.meals[el.dataset.slot]; markEdited(d); commit(); break; }
     case "view-recipe": { const r = findRecipe(el.dataset.id); if (r) recipeDialog(r); break; }
@@ -775,7 +822,6 @@ document.addEventListener("change", (e) => {
       else {
         const r = findRecipeByTitle(title, el.dataset.who);
         d.meals[el.dataset.slot] = { recipeId: r?.id || null, title, forWhom: el.dataset.who };
-        if (r && el.dataset.who === "baby" && !checkForAudience({ ...r, forWhom: "baby" }).safe && r.forWhom !== "baby") toast("Heads up: this dish isn't checked as baby-safe. Take out a plain portion.");
       }
       markEdited(d);
       commit();
