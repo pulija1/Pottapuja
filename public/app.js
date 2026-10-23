@@ -2,7 +2,8 @@ import { load, save, exportJson, importJson, onChange } from "./store.js";
 import { getSync, setSync, signOut, syncReady, cleanRepo, cleanFolder, verify, checkIn, loadLatest, githubReachable } from "./sync.js";
 import { todayKey, addDays, addMonths, monthGrid, monthLabel, prettyDate, fromKey, isDateKey, isSchoolDay, occurrences } from "./shared/dates.js";
 import { checkRecipe, checkForAudience, isNutIngredient, isSchoolFood } from "./shared/safety.js";
-import { LIBRARY, suggestFromLibrary } from "./shared/recipes.js";
+import { LIBRARY, suggestFromLibrary, readyToCook, RECIPE_BOOK_STATUS } from "./shared/recipes.js";
+import { nutritionTags, TAG_LABELS } from "./shared/recipe-book.js";
 import { mergeItems, groupByAisle, formatQty, missingFromPantry, normName, normUnit, aisleFor } from "./shared/shopping.js";
 import { SLOTS, emptyDay, getDay, dayHasPlan, markEdited, approveDay, unapproveDay, slotsFor, todosOn, MEAL_GROUPS, whoLabel, slotLabel, TODO_IDEAS, remindersOn, pendingFor, dayStatus } from "./shared/plan.js";
 
@@ -148,6 +149,42 @@ function slotIssues(key) {
   }
   return out;
 }
+
+// The family's daily goal for the 4-year-old: an egg, a milk/dairy food and some nuts.
+// Counts the kid's meals and the family dinner; a dish typed by hand is judged by its name.
+const GOALS = ["egg", "dairy", "nuts"];
+const GOAL_LABELS = { egg: "🥚 Egg", dairy: "🥛 Milk", nuts: "🥜 Nuts" };
+function mealTags(m) {
+  const r = m?.recipeId ? findRecipe(m.recipeId) : null;
+  return r ? (r.tags || nutritionTags(r)) : nutritionTags({ ingredients: [{ name: m?.title || "" }] });
+}
+
+function kidGoals(key, extra = {}) {
+  const day = getDay(state, key) || emptyDay();
+  const out = Object.fromEntries(GOALS.map((g) => [g, null]));
+  for (const s of slotsFor(key).filter((x) => x.who === "kid" || x.who === "family")) {
+    const m = day.meals?.[s.id]?.title ? day.meals[s.id] : extra[s.id] ? { recipeId: extra[s.id] } : null;
+    if (!m) continue;
+    for (const t of mealTags(m)) if (out[t] === null) out[t] = { slot: s, title: m.title || findRecipe(m.recipeId)?.title || "", planned: !!day.meals?.[s.id]?.title };
+  }
+  return out;
+}
+
+function renderKidGoals(key) {
+  const goals = kidGoals(key);
+  const sugg = key >= TODAY ? kidGoals(key, suggestionsFor(key)) : goals;
+  return `<div class="goals" data-testid="kid-goals" aria-label="Daily goals for ${esc(whoLabel("kid", state.settings))}">
+    ${GOALS.map((g) => {
+      const hit = goals[g];
+      const idea = !hit && sugg[g];
+      const how = hit ? `${slotLabel(hit.slot, state.settings)}: ${hit.title}` : idea ? `Suggested: ${idea.title}` : "Not planned yet";
+      return `<div class="goal ${hit ? "done" : idea ? "idea" : "todo"}" data-testid="kid-goal" data-goal="${g}" data-done="${!!hit}" title="${esc(how)}">
+        <span class="goal-label">${GOAL_LABELS[g]} ${hit ? "✓" : ""}</span><span class="goal-how">${esc(how)}</span></div>`;
+    }).join("")}
+  </div>`;
+}
+
+const tagIcons = (r) => (r?.tags || []).map((t) => TAG_LABELS[t].split(" ")[0]).join("");
 
 function whoPill(who) {
   return `<span class="pill ${esc(who)}">${esc(whoLabel(who, state.settings, { age: true }))}</span>`;
@@ -557,7 +594,16 @@ function suggestionsFor(key) {
       .concat(suggestFromLibrary(state.pantry, opt))
       .filter((r) => r.forWhom === s.who && !seen.has(r.id) && seen.add(r.id))
       .filter((r) => checkRecipe(r, { age: s.who === "baby" ? "baby" : "kid", lunchbox: s.id === "kid_lunchbox" || s.id === "kid_snack", schoolNutFree: nutFreeOn() }).safe);
-    const fresh = candidates.filter((r) => !used.has(r.id) && !avoid.has(r.id));
+    let fresh = candidates.filter((r) => !used.has(r.id) && !avoid.has(r.id));
+    // Steer the 4-year-old's empty slots toward the daily goal: an egg at breakfast, milk in the lunchbox, nuts in the snack.
+    if (s.who === "kid") {
+      const want = { kid_breakfast: "egg", kid_lunchbox: "dairy", kid_snack: "nuts" }[s.id];
+      const goals = kidGoals(key, picks);
+      const missing = GOALS.filter((g) => !goals[g]);
+      const goal = missing.includes(want) ? want : missing.find((g) => candidates.some((r) => r.tags?.includes(g)));
+      const withGoal = (list) => list.filter((r) => r.tags?.includes(goal));
+      if (goal && withGoal(candidates).length) fresh = withGoal(fresh).length ? withGoal(fresh) : withGoal(candidates);
+    }
     const pool = (fresh.length ? fresh : candidates).slice(0, 6);
     if (!pool.length) continue;
     const r = pool[(entry.seed + (entry.offsets[s.id] || 0)) % pool.length];
@@ -595,7 +641,7 @@ function renderSuggestions(key) {
       const need = shoppingNeeds(r);
       return `<div class="suggest-row" data-testid="suggestion" data-slot="${s.id}">
         <span class="small muted">${esc(slotLabel(s, state.settings))}</span>
-        <span class="grow">${esc(r.title)}${r.familyFavorite ? " ⭐" : ""}${need.length ? ` <span class="small" style="color:var(--warn)">· need ${esc(need.map((i) => i.name).join(", "))}</span>` : ' <span class="small" style="color:var(--ok)">· all in the kitchen</span>'}</span>
+        <span class="grow">${esc(r.title)}${r.familyFavorite ? " ⭐" : ""}${tagIcons(r) ? ` <span aria-hidden="true">${tagIcons(r)}</span>` : ""}${need.length ? ` <span class="small" style="color:var(--warn)">· need ${esc(need.map((i) => i.name).join(", "))}</span>` : ' <span class="small" style="color:var(--ok)">· all in the kitchen</span>'}</span>
         <button type="button" class="iconbtn" data-action="suggest-swap" data-slot="${s.id}" title="Another idea" aria-label="Another idea for ${esc(slotLabel(s, state.settings))}">🔀</button>
       </div>`;
     }).join("")}
@@ -664,6 +710,7 @@ function renderDayPanel(key) {
     ${pendList.length ? `<h3>Pending for this date</h3><ul class="pending-list" data-testid="day-pending">${pendList.map((p) => `<li data-type="${p.type}">${{ approval: "⏳", plan: "📝", reminder: "⏰", todo: "✅" }[p.type]} ${esc(p.text)}${p.overdue ? ' <span class="pill bad">overdue</span>' : ""}</li>`).join("")}</ul>` : `<p class="small muted" data-testid="day-pending-none">Nothing pending for this date.</p>`}
 
     <h3>Meals</h3>
+    ${renderKidGoals(key)}
     ${renderSuggestions(key)}
     <div data-testid="day-meals">
     ${MEAL_GROUPS.map((g) => {
@@ -712,7 +759,8 @@ function renderDayPanel(key) {
 }
 
 // ---------- recipes ----------
-const STAPLES = ["rice", "moong dal", "toor dal", "urad dal", "ragi flour", "rava", "curd", "ghee", "milk", "egg", "banana", "apple", "carrot", "potato", "sweet potato", "tomato", "onion", "beans", "peas", "pumpkin", "spinach", "lemon", "idli/dosa batter", "vermicelli", "atta", "coconut", "curry leaves", "mustard seeds", "jeera", "turmeric", "tamarind"];
+const STAPLES = ["rice", "moong dal", "toor dal", "urad dal", "ragi flour", "rava", "curd", "ghee", "milk", "egg", "banana", "apple", "carrot", "potato", "sweet potato", "tomato", "onion", "beans", "peas", "pumpkin", "spinach", "lemon", "idli/dosa batter", "vermicelli", "atta", "coconut", "curry leaves", "mustard seeds", "jeera", "turmeric", "tamarind",
+  "paneer", "cheddar cheese", "butter", "bread", "flour tortilla", "corn tortilla", "black beans", "avocado", "rolled oats", "peanut butter", "almond powder"];
 
 function renderRecipes() {
   const pantrySet = new Set(state.pantry.map(normName));
@@ -732,6 +780,8 @@ function renderRecipes() {
       </form>
       ${suggestions.length ? `<details style="margin-top:8px"><summary>Quick add common items</summary><div class="chips" style="margin-top:8px">${suggestions.map((s) => `<button class="chip add" data-action="pantry-quick" data-name="${esc(s)}">+ ${esc(s)}</button>`).join("")}</div></details>` : ""}
     </div>
+
+    ${renderReadyToCook()}
 
     <div class="card">
       <h2>Make recipes from these ingredients</h2>
@@ -768,6 +818,29 @@ function renderRecipes() {
     </div>`;
 }
 
+// Recipes from the Markdown recipe book that the pantry can make now, or with one item to buy.
+function renderReadyToCook() {
+  const book = RECIPE_BOOK_STATUS;
+  const trouble = book.failed.length || book.problems.length ? `<div class="notice info small" data-testid="recipe-book-problems">
+      ${book.failed.length ? `Couldn't read ${book.failed.map((f) => esc(f.file)).join(", ")} from the recipe book. ` : ""}
+      ${book.problems.length ? `${book.problems.length} recipe${book.problems.length > 1 ? "s" : ""} in the recipe book need fixing: ${book.problems.slice(0, 5).map((p) => `${esc(p.file)}${p.line ? " line " + p.line : ""} “${esc(p.title)}”: ${esc(p.message)}`).join("; ")}` : ""}
+    </div>` : "";
+  const opt = { schoolNutFree: nutFreeOn() };
+  const now = readyToCook(state.pantry, { ...opt, limit: 8 });
+  const nearly = readyToCook(state.pantry, { ...opt, maxMissing: 1, limit: 30 }).filter((x) => x.missing.length === 1).slice(0, 8);
+  const row = (x) => `<button type="button" class="ready-item" data-action="view-recipe" data-id="${esc(x.recipe.id)}" data-testid="ready-recipe">
+      <span class="grow"><strong>${esc(x.recipe.title)}</strong>${x.recipe.familyFavorite ? " ⭐" : ""} <span aria-hidden="true">${tagIcons(x.recipe)}</span>
+        <span class="small muted">${esc(whoLabel(x.recipe.forWhom, state.settings))} · ${esc(x.recipe.cuisine || x.recipe.mealType)}${x.missing.length ? ` · need ${esc(x.missing.join(", "))}` : ""}</span></span>
+      <span aria-hidden="true">›</span></button>`;
+  return `<div class="card" data-testid="ready-to-cook">
+    <h2>Ready to cook from your kitchen</h2>
+    ${trouble}
+    ${now.length ? `<div class="ready-list">${now.map(row).join("")}</div>` : `<p class="small muted">${state.pantry.length ? "Nothing in the recipe book can be made with only what's in the kitchen yet." : "Add what you have above and recipes you can make right away show up here."}</p>`}
+    ${nearly.length ? `<h3>Just one thing to buy</h3><div class="ready-list" data-testid="nearly-ready">${nearly.map(row).join("")}</div>` : ""}
+    <p class="small muted" style="margin-top:8px">${LIBRARY.length} recipes in the family recipe book (the <code>recipes/</code> folder in the repository).</p>
+  </div>`;
+}
+
 function recipeCard(r, { saved = false } = {}) {
   const safety = checkForAudience(r, { schoolNutFree: nutFreeOn() });
   const missing = new Set(shoppingNeeds(r).map((i) => normName(i.name)));
@@ -777,7 +850,8 @@ function recipeCard(r, { saved = false } = {}) {
   return `<article class="card recipe" data-testid="recipe-card" data-recipe-id="${esc(r.id)}" data-safe="${safety.safe}">
     <div class="row between"><h3>${esc(r.title)}</h3><span>${r.familyFavorite ? '<span class="pill warn" data-testid="family-favorite">⭐ Family favorite</span> ' : ""}${whoPill(r.forWhom)}</span></div>
     ${hasNuts && !nutFreeOn() ? `<div class="small muted" data-testid="contains-nuts">🥜 Contains nuts${r.nutFreeSwap ? ". Nut-free swap: " + esc(r.nutFreeSwap) : ""}</div>` : ""}
-    <div class="small muted">${esc(r.mealType || "")}${r.prepMinutes ? " · " + esc(r.prepMinutes) + " min" : ""}${r.texture ? " · " + esc(r.texture) : ""}${r.source === "ai" ? " · ✨ AI" : r.source === "library" ? " · Family recipe book" : ""}</div>
+    <div class="small muted">${r.cuisine ? esc(r.cuisine) + " · " : ""}${esc(r.mealType || "")}${r.prepMinutes ? " · " + esc(r.prepMinutes) + " min" : ""}${r.texture ? " · " + esc(r.texture) : ""}${r.source === "ai" ? " · ✨ AI" : r.source === "library" ? " · Family recipe book" : ""}</div>
+    ${r.tags?.length ? `<div class="small" data-testid="recipe-tags">${r.tags.map((t) => esc(TAG_LABELS[t])).join(" · ")}</div>` : ""}
     <div class="safety ${safety.safe && !safety.warnings.length ? "ok" : safety.safe ? "warn" : "warn"}" data-testid="safety-badge">
       ${safety.safe ? (safety.warnings.length ? "⚠️ Safe with care" : "✅ Age-safe") : "⛔ Not safe as written"}
       ${issues.length ? `<ul>${issues.map((i) => `<li>${esc(i.message)}</li>`).join("")}</ul>` : ""}
@@ -875,7 +949,7 @@ function planDialog(recipe) {
       const f = dlg.querySelector("form");
       const date = f.date.value;
       if (isDateKey(date)) {
-        if (!state.savedRecipes.some((s) => s.id === recipe.id) && !recipe.id.startsWith("lib-")) state.savedRecipes.push(recipe);
+        if (!state.savedRecipes.some((s) => s.id === recipe.id) && recipe.source !== "library") state.savedRecipes.push(recipe);
         const day = ensureDay(date);
         day.meals[f.slot.value] = { recipeId: recipe.id, title: recipe.title, forWhom: recipe.forWhom };
         markEdited(day);

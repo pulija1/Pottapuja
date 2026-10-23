@@ -2,8 +2,10 @@
 
 A browser app for a South Indian family with an 8-month-old and a 4-year-old who goes to school.
 
-- **Calendar**: tap a date to see its meals in collapsible sections for the 4-year-old, the 8-month-old and the family, plus the day's schedule and to-dos. Each empty day shows **suggested meals** picked from what is in the kitchen (safety-checked for each child); shuffle or swap them, then **Approve these meals** to put them into that day's plan and approve it. Each date shows whether it is approved, waiting for approval, or has nothing planned, plus a count of what is still pending (unapproved plan, reminders not done, to-dos not ticked). Editing an approved day sends it back to "waiting for approval".
-- **Recipes**: list what's in the kitchen and get recipes made from it. With the AI on, Claude writes the recipes; every recipe is then checked in code for age safety (no honey, salt, sugar or whole nuts for the baby, soft textures only, nut-free school lunchboxes). Recipes that fail are dropped. Saved recipes work offline.
+The recipes live in plain Markdown in [`recipes/`](recipes/README.md), readable on GitHub without the app or AI: 120+ recipes across South and North Indian, Indian American, Mexican American, American and other cuisines, with an egg breakfast for every day plus milk and nut options for the 4-year-old, and baby-safe purees and mashes.
+
+- **Calendar**: tap a date to see its meals in collapsible sections for the 4-year-old, the 8-month-old and the family, plus the day's schedule and to-dos. Three chips show whether the 4-year-old's day has an **egg**, a **milk/dairy** food and **nuts**, filled in from the planned meals. Each empty day shows **suggested meals** picked from the recipe book by what is in the kitchen (safety-checked for each child, and steered toward an egg at breakfast, dairy in the lunchbox and nuts in the snack); shuffle or swap them, then **Approve these meals** to put them into that day's plan and approve it. Each date shows whether it is approved, waiting for approval, or has nothing planned, plus a count of what is still pending (unapproved plan, reminders not done, to-dos not ticked). Editing an approved day sends it back to "waiting for approval".
+- **Recipes**: list what's in the kitchen and see **Ready to cook**: recipe-book recipes you can make right now, and the ones just one item short. You can also get recipes made from it. With the AI on, Claude writes the recipes; every recipe is then checked in code for age safety (no honey, salt, sugar or whole nuts for the baby, soft textures only, nut-free school lunchboxes). Recipes that fail are dropped. Saved recipes work offline.
 - **Shopping**: one list, grouped by aisle, with store filters and a big-checkbox "I'm at the store" mode. Ticking an item as bought adds it to the kitchen, so the next suggestions use it. Pull missing ingredients from the next 7 days of meals; quantities merge (500 g + 1 kg toor dal = 1.5 kg) and Indian names match (sooji = rava, tuvar = toor).
 - **To do**: things to do for the kids (buy dresses, check the school schedule, doctor's appointment), defaulting to tomorrow, with one-tap ideas, a "not done yet" list and the coming week.
 - **Reminders**: school events, vaccines, birthdays, with repeats, a "missed" list, and alerts while the app is open.
@@ -24,7 +26,7 @@ On first launch the app offers a sign-in page (skipped automatically when GitHub
 ```bash
 npm install
 ANTHROPIC_API_KEY=sk-ant-... npm start      # AI recipes on, http://localhost:3000
-npm run start:mock                          # no key needed: AI answers come from the built-in recipe book
+npm run start:mock                          # no key needed: AI answers come from the recipe book in recipes/
 npm test                                    # unit and API tests (node:test)
 npm run test:e2e                            # browser tests (Playwright, Chromium)
 ```
@@ -41,31 +43,37 @@ npm run test:e2e                            # browser tests (Playwright, Chromiu
 
 ### When the AI or the server is down
 
-The app never depends on the AI. If `/api/recipes` fails, times out (50 s in the browser and 40 s on the server, with a Cancel button), or the server can't be reached at all (for example when the `public/` folder is opened from GitHub Pages), the Recipes tab shows the best matches from the built-in recipe book and says why. The calendar, shopping list, to-dos and reminders are fully local and keep working offline.
+The app never depends on the AI. If `/api/recipes` fails, times out (50 s in the browser and 40 s on the server, with a Cancel button), or the server can't be reached at all (for example when the `public/` folder is opened from GitHub Pages), the Recipes tab shows the best matches from the recipe book (`recipes/*.md`) and says why. The calendar, shopping list, to-dos and reminders are fully local and keep working offline.
 
 ## For testers
 
 - `?today=YYYY-MM-DD` in the URL pins "today", e.g. `http://localhost:3000/?today=2026-10-22`.
 - Key elements carry `data-testid` attributes (`approve-day`, `day-status` with `data-status`, `cal-day-YYYY-MM-DD` with `data-status` and `data-pending`, `generate-recipes`, `recipe-card` with `data-safe`, `shop-item`, `store-mode`, `todo-item`, `meal-group-kid`, `day-suggestions`, `suggest-approve`, `rem-add`, …).
 - `window.__mealPlanner` exposes the live state in the browser console.
+- The recipe book can be checked with `npm test`: every recipe in `recipes/*.md` must parse and pass the age-safety rules (`tests/recipe-book.test.js`).
 - Pure logic is in `public/shared/` and can be unit tested directly:
   - `safety.js`: `checkRecipe(recipe, { age: "baby" | "kid", lunchbox })`, `checkForAudience(recipe)`
   - `plan.js`: `pendingFor(state, date, today)`, `dayStatus`, `approveDay`, `markEdited`
   - `shopping.js`: `mergeItems`, `normName`, `aisleFor`, `missingFromPantry`
   - `dates.js`: local date keys (no UTC conversions), `monthGrid`, `occurrences`
+  - `recipe-book.js`: `parseRecipeMarkdown(markdown, file)`, `parseIngredient(line)`, `nutritionTags(recipe)`
+  - `recipes.js`: `LIBRARY` (loaded from `recipes/*.md`), `readyToCook(pantry, { maxMissing })`, `suggestFromLibrary`
 - API: `GET /api/health` → `{ ok, ai, model }`; `POST /api/recipes` with `{ ingredients: string[], forWhom: "baby"|"kid"|"family"|"both", mealType, notes, count }` → `{ recipes, rejected, mode, ms }`, or 503 `{ error }` when the AI is unavailable.
 
 ## Layout
 
 ```
 ./
-  server.js           static files + /api routes (Node, no framework)
+  recipes/            the family recipe book, plain Markdown (see recipes/README.md)
+  server.js           static files + /api routes (Node, no framework); serves recipes/ at /recipes/
   lib/ai.js           Claude call with structured output, mock/off modes, safety screening
   public/             the browser app (plain ES modules, no build step)
     app.js            UI
     store.js          localStorage persistence
     shared/           pure logic shared by server, browser and tests
-      dataset.js      generated from the grocery/recipe research dataset (83 items with regional names, 20 recipes)
+      recipe-book.js  reads the Markdown recipe book
+      recipes.js      loads the book (from disk in Node, over HTTP in the browser) and matches it to the pantry
+      dataset.js      grocery items with regional names, generated from the research dataset
   scripts/import-dataset.mjs   regenerate dataset.js: node scripts/import-dataset.mjs path/to/indian-groceries-recipes.json
   tests/              node:test unit tests
 ```
