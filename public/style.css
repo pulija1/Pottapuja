@@ -378,3 +378,5 @@ dialog details > * + * { margin-top: 8px; }
 /* The main button of a sheet stays in reach while the fields above it scroll */
 .sheet form > .btn.primary.big { position: sticky; bottom: 0; box-shadow: 0 -10px 12px var(--card), 0 30px 0 18px var(--card); }
 .shop-extra > summary { display: flex; align-items: center; min-height: 44px; }
+/* While the toast strip shows in store mode, the add button rises above it */
+body.in-store:has(.toast.show) .fab { bottom: calc(92px + env(safe-area-inset-bottom)); transition: bottom .2s; }
