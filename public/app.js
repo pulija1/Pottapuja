@@ -22,7 +22,7 @@ const ui = {
   rejected: [],
   shopStore: "all",
   storeMode: false,
-  hideBought: false,
+  cartOpen: false,       // the "In the cart" section on the shopping list is expanded
   todoDate: addDays(TODAY, 1),   // the To do tab opens on tomorrow
   openGroups: new Set(),          // meal sections the parent has expanded in the day panel
   suggest: {},                    // date -> { seed, picks: { slotId: recipeId } } meal suggestions shown in the day panel
@@ -39,12 +39,61 @@ const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(
 const ESC = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ESC[c]);
 
-function toast(msg) {
+// With an undo function the toast carries an Undo button and stays up longer.
+function toast(msg, undo = null) {
   const t = $("#toast");
-  t.textContent = msg;
+  t.innerHTML = esc(msg) + (undo ? ' <button type="button" class="toast-undo" data-testid="toast-undo">Undo</button>' : "");
+  t.classList.toggle("has-undo", !!undo);
   t.classList.add("show");
+  toast.undo = undo;
   clearTimeout(toast.timer);
-  toast.timer = setTimeout(() => t.classList.remove("show"), 2600);
+  toast.timer = setTimeout(() => { t.classList.remove("show"); toast.undo = null; }, undo ? 5000 : 2600);
+}
+
+// A bottom sheet: slides up from the bottom, closes on Escape, a tap on the dimmed
+// backdrop, the ✕, or dragging the handle down. Forms inside use the global submit handler.
+function sheet(testid, html) {
+  $(`dialog[data-testid=${testid}]`)?.close();
+  const dlg = document.createElement("dialog");
+  dlg.className = "sheet";
+  dlg.dataset.testid = testid;
+  dlg.innerHTML = `<div class="sheet-grip" aria-hidden="true"></div>${html}`;
+  document.body.appendChild(dlg);
+  dlg.addEventListener("click", (e) => {
+    if (e.target === dlg || e.target.closest("[data-sheet-close]")) dlg.close();
+  });
+  dlg.addEventListener("close", () => dlg.remove());
+  let startY = null;
+  const grip = dlg.querySelector(".sheet-grip");
+  grip.addEventListener("pointerdown", (e) => { startY = e.clientY; grip.setPointerCapture(e.pointerId); dlg.style.transition = "none"; });
+  grip.addEventListener("pointermove", (e) => { if (startY != null) dlg.style.transform = `translateY(${Math.max(0, e.clientY - startY)}px)`; });
+  grip.addEventListener("pointerup", (e) => {
+    const dy = e.clientY - (startY ?? e.clientY);
+    startY = null;
+    dlg.style.transition = "";
+    dlg.style.transform = "";
+    if (dy > 80) dlg.close();
+  });
+  dlg.showModal();
+  return dlg;
+}
+
+// Radio buttons drawn as big chips, for picking a unit, store or person with one tap.
+function chipRadios(name, options, selected, testid) {
+  return `<div class="seg radio-chips" role="radiogroup" data-testid="${testid}">${options.map(([v, label]) =>
+    `<label><input type="radio" name="${name}" value="${esc(v)}" ${v === selected ? "checked" : ""}><span>${esc(label)}</span></label>`).join("")}</div>`;
+}
+
+// A list row that can be ticked by a tap anywhere on it or a swipe to the right, and
+// deleted with a swipe to the left. `check` is the checkbox, `more` the details button.
+function swipeRow({ testid, cls = "", data = "", check, body, more, leftLabel, rightLabel = "Delete" }) {
+  return `<div class="swipe ${cls}" data-testid="${testid}" ${data}>
+    <div class="swipe-bg" aria-hidden="true"><span class="swipe-l">✓ ${esc(leftLabel)}</span><span class="swipe-r">${esc(rightLabel)} 🗑</span></div>
+    <div class="swipe-fg">
+      <label class="tap-main">${check}<span class="tap-text">${body}</span></label>
+      ${more || ""}
+    </div>
+  </div>`;
 }
 
 function commit() {
@@ -435,6 +484,7 @@ function profileDialog() {
 
 function setTab(tab) {
   ui.tab = tab;
+  if (tab !== "shopping") document.body.classList.remove("in-store");
   for (const b of document.querySelectorAll(".tabs button")) b.setAttribute("aria-selected", String(b.dataset.tab === tab));
   for (const v of document.querySelectorAll(".view")) v.hidden = v.id !== "view-" + tab;
   try { history.replaceState(null, "", location.pathname + location.search + "#" + tab); } catch {}
@@ -621,12 +671,34 @@ function slotRow(s, day, issues) {
 }
 
 function todoRow(t, { showDate = false } = {}) {
-  return `<div class="chk todo ${t.done ? "done" : ""}" data-testid="todo-item">
-    <input type="checkbox" data-action="todo-toggle" data-id="${esc(t.id)}" ${t.done ? "checked" : ""} aria-label="Done: ${esc(t.text)}">
-    <span class="txt grow">${t.time ? `<strong>${esc(t.time)}</strong> ` : ""}${esc(t.text)}${showDate ? ` <span class="small muted">· ${esc(prettyDate(t.date))}</span>` : ""}</span>
-    ${whoPill(t.who)}
-    <button type="button" class="iconbtn" data-action="todo-del" data-id="${esc(t.id)}" aria-label="Delete ${esc(t.text)}">✕</button>
-  </div>`;
+  const meta = [t.time ? `🕒 ${esc(t.time)}` : "", showDate ? esc(prettyDate(t.date)) : ""].filter(Boolean).join(" · ");
+  return swipeRow({
+    testid: "todo-item",
+    cls: `todo ${t.done ? "done" : ""}`,
+    data: `data-kind="todo" data-id="${esc(t.id)}"`,
+    leftLabel: t.done ? "Not done" : "Done",
+    check: `<input type="checkbox" class="big-check" data-action="todo-toggle" data-id="${esc(t.id)}" ${t.done ? "checked" : ""} aria-label="Done: ${esc(t.text)}">`,
+    body: `<span class="txt name">${esc(t.text)}</span><span class="meta">${whoPill(t.who)}${meta ? ` <span>${meta}</span>` : ""}</span>`,
+    more: `<button type="button" class="iconbtn lg" data-action="todo-more" data-id="${esc(t.id)}" aria-label="Edit ${esc(t.text)}" data-testid="todo-more">⋯</button>`,
+  });
+}
+
+function todoSheet(t = null) {
+  const date = t?.date || ui.todoDate;
+  const quick = [[TODAY, "Today"], [addDays(TODAY, 1), "Tomorrow"]];
+  sheet(t ? "todo-edit-sheet" : "todo-sheet", `<form data-form="${t ? "todo-edit" : "todo-add"}" class="stack" ${t ? `data-id="${esc(t.id)}"` : ""}>
+    <div class="row between"><h2>${t ? "Edit to do" : "Add a to do"}</h2><button type="button" class="iconbtn lg" data-sheet-close aria-label="Close">✕</button></div>
+    <label class="field"><span>What needs doing</span><input type="text" name="text" required maxlength="120" value="${esc(t?.text || "")}" placeholder="e.g. Pack the water bottle" data-testid="todo-input" enterkeyhint="done"></label>
+    <div class="field"><span>For</span>${chipRadios("who", ["kid", "baby", "family"].map((v) => [v, whoLabel(v, state.settings, { age: true })]), t?.who || "kid", "todo-who")}</div>
+    <div class="field"><span>When</span>
+      <div class="row">${quick.map(([k, l]) => `<button type="button" class="btn sm ${k === date ? "primary" : ""}" data-action="todo-sheet-date" data-date="${k}">${l}</button>`).join("")}
+        <input type="date" name="date" value="${esc(date)}" required data-testid="todo-input-date" class="grow" aria-label="Date"></div>
+    </div>
+    <label class="field"><span>Time (optional)</span><input type="time" name="time" value="${esc(t?.time || "")}"></label>
+    <button class="btn primary big" data-testid="${t ? "todo-save" : "todo-add"}">${t ? "Save" : "Add to do"}</button>
+    ${t ? `<button type="button" class="btn danger big" data-action="todo-del" data-id="${esc(t.id)}" data-testid="todo-delete">Delete</button>` : ""}
+  </form>`);
+  if (!t) $("[data-testid=todo-input]")?.focus();
 }
 
 const WHO_OPTIONS = (sel = "kid") => ["kid", "baby", "family"].map((v) => [v, whoLabel(v, state.settings)])
@@ -855,7 +927,7 @@ function addToShopping(items, source) {
   const onList = new Set(state.shopping.filter((i) => !i.bought).flatMap((i) => i.keys || []));
   const fresh = items
     .filter((i) => !i.key || !onList.has(i.key))
-    .map((i) => ({ id: uid(), name: i.name, quantity: i.quantity ?? null, unit: normUnit(i.unit), store: i.store || "", bought: false, source: i.source || source, keys: i.key ? [i.key] : [] }));
+    .map((i) => ({ id: uid(), name: i.name, label: String(i.name).trim(), quantity: i.quantity ?? null, unit: normUnit(i.unit), store: i.store || "", bought: false, source: i.source || source, keys: i.key ? [i.key] : [] }));
   state.shopping = mergeItems([...state.shopping, ...fresh]).map((i) => ({ ...i, id: i.id || uid() }));
   return fresh.length;
 }
@@ -897,53 +969,199 @@ function recipeDialog(r) {
 }
 
 // ---------- shopping ----------
-function renderShopping() {
-  const items = state.shopping.filter((i) => (ui.shopStore === "all" || (i.store || "") === ui.shopStore || (ui.shopStore === "" && !i.store)) && (!ui.hideBought || !i.bought));
-  const groups = groupByAisle(items);
-  const left = state.shopping.filter((i) => !i.bought).length;
+const AISLE_ICONS = {
+  "Vegetables": "🥬", "Fruits": "🍎", "Rice, dals & flours": "🌾", "Dairy & eggs": "🥚", "Spices & tempering": "🧂",
+  "Oil, nuts & dry fruits": "🥜", "Baby care": "🍼", "School & household": "🧻", "Other": "🛍️",
+};
+const UNITS = ["pcs", "g", "kg", "ml", "l", "packet", "bunch", "dozen"];
+// One-tap items offered in the add sheet when they aren't already on the list.
+const SHOP_STAPLES = ["milk", "egg", "curd", "banana", "bread", "paneer", "spinach", "tomato", "onion", "almond", "diapers", "wipes"];
 
+// Quantity as people say it: "4" not "4 pcs", and nothing for a single piece.
+function shopQty(i) {
+  if (i.unit === "pcs" || !i.unit) return i.quantity == null || i.quantity === 1 ? "" : `× ${i.quantity}`;
+  return formatQty(i);
+}
+
+function shopRow(i) {
+  const meta = [shopQty(i), i.store].filter(Boolean).map(esc).join(" · ");
+  return swipeRow({
+    testid: "shop-item",
+    cls: `shop-item ${i.bought ? "bought" : ""}`,
+    data: `data-kind="shop" data-id="${esc(i.id)}" data-name="${esc(i.name)}"`,
+    leftLabel: i.bought ? "Put back" : "Got it",
+    check: `<input type="checkbox" class="big-check" data-action="shop-toggle" data-id="${esc(i.id)}" ${i.bought ? "checked" : ""} aria-label="Got ${esc(i.name)}">`,
+    body: `<span class="name">${esc(i.label || i.name)}</span>${meta ? `<span class="meta" data-testid="shop-qty-label">${meta}</span>` : ""}`,
+    more: `<button type="button" class="iconbtn lg" data-action="shop-more" data-id="${esc(i.id)}" aria-label="Details for ${esc(i.name)}" data-testid="shop-more">⋯</button>`,
+  });
+}
+
+function renderShopping() {
+  const inStore = (i) => ui.shopStore === "all" || (i.store || "") === ui.shopStore;
+  const items = state.shopping.filter(inStore);
+  const toBuy = items.filter((i) => !i.bought);
+  const inCart = items.filter((i) => i.bought);
+  const groups = groupByAisle(toBuy);
+  const left = state.shopping.filter((i) => !i.bought).length;
+  const pct = items.length ? Math.round((inCart.length / items.length) * 100) : 0;
+
+  document.body.classList.toggle("in-store", ui.storeMode);
   $("#view-shopping").innerHTML = `
-    <div class="card ${ui.storeMode ? "store-mode" : ""}">
+    <div class="card shop-head ${ui.storeMode ? "store-mode" : ""}">
       <div class="row between">
-        <h2>Shopping list <span class="pill" data-testid="shop-left">${left} to buy</span></h2>
-        <button class="btn sm ${ui.storeMode ? "primary" : ""}" data-action="store-mode" aria-pressed="${ui.storeMode}" data-testid="store-mode">${ui.storeMode ? "🛒 In store mode" : "🛒 I'm at the store"}</button>
+        <h2>${ui.storeMode ? "At the store" : "Shopping list"} <span class="pill" data-testid="shop-left">${left} to buy</span></h2>
+        <button class="btn ${ui.storeMode ? "primary" : ""}" data-action="store-mode" aria-pressed="${ui.storeMode}" data-testid="store-mode">${ui.storeMode ? "✓ Done shopping" : "🛒 I'm at the store"}</button>
       </div>
-      ${ui.storeMode ? "" : `<form data-form="shop-add" class="row" style="margin:10px 0">
-        <input type="text" name="name" class="grow" placeholder="Item (e.g. toor dal)" required aria-label="Item" data-testid="shop-name">
-        <input type="number" name="qty" min="0" step="any" placeholder="Qty" style="width:80px" aria-label="Quantity" data-testid="shop-qty">
-        <select name="unit" style="width:90px" aria-label="Unit" data-testid="shop-unit"><option value="">unit</option>${["g", "kg", "ml", "l", "pcs", "packet", "bunch", "dozen"].map((u) => `<option>${u}</option>`).join("")}</select>
-        <select name="store" style="width:150px" aria-label="Store" data-testid="shop-store"><option value="">Any store</option>${state.stores.map((s) => `<option>${esc(s)}</option>`).join("")}</select>
-        <button class="btn primary" data-testid="shop-add">Add</button>
-      </form>`}
-      <div class="row" style="margin:8px 0">
-        <div class="seg" role="group" aria-label="Store filter" data-testid="store-filter">
-          <button data-action="shop-store" data-store="all" aria-pressed="${ui.shopStore === "all"}">All</button>
-          ${state.stores.map((s) => `<button data-action="shop-store" data-store="${esc(s)}" aria-pressed="${ui.shopStore === s}">${esc(s)}</button>`).join("")}
-        </div>
-        <label class="chk small" style="min-height:0"><input type="checkbox" data-action="hide-bought" ${ui.hideBought ? "checked" : ""} data-testid="hide-bought"> Hide bought</label>
+      ${items.length ? `<div class="progress big" aria-hidden="true"><div style="width:${pct}%"></div></div>
+      <p class="small muted" style="margin:4px 0 0" data-testid="shop-progress">${inCart.length} of ${items.length} in the cart${ui.storeMode ? " · tap an item when it's in the cart" : ""}</p>` : ""}
+      <div class="seg scroll-x" role="group" aria-label="Store filter" data-testid="store-filter">
+        <button data-action="shop-store" data-store="all" aria-pressed="${ui.shopStore === "all"}">All stores</button>
+        ${state.stores.map((s) => `<button data-action="shop-store" data-store="${esc(s)}" aria-pressed="${ui.shopStore === s}">${esc(s)}</button>`).join("")}
       </div>
-      <div data-testid="shop-list">
-      ${groups.length ? groups.map(([aisle, list]) => `<div class="aisle"><h3>${esc(aisle)}</h3>${list.map((i) => `
-        <div class="shop-item ${i.bought ? "bought" : ""}" data-testid="shop-item" data-name="${esc(i.name)}">
-          <label><input type="checkbox" data-action="shop-toggle" data-id="${esc(i.id)}" ${i.bought ? "checked" : ""}><span class="name">${esc(i.name)}</span></label>
-          <span class="qty" data-testid="shop-qty-label">${esc(formatQty(i))}</span>
-          ${i.store ? `<span class="pill store">${esc(i.store)}</span>` : ""}
-          ${ui.storeMode ? "" : `<button class="iconbtn" data-action="shop-del" data-id="${esc(i.id)}" aria-label="Delete ${esc(i.name)}">✕</button>`}
-        </div>`).join("")}</div>`).join("") : '<p class="empty-state">The list is empty. Add items, or pull them from your meal plan.</p>'}
-      </div>
+    </div>
+    <div data-testid="shop-list" class="${ui.storeMode ? "store-mode" : ""}">
+      ${groups.map(([aisle, list]) => `<section class="aisle card" data-testid="aisle">
+        <h3><span class="aisle-icon" aria-hidden="true">${AISLE_ICONS[aisle] || "🛍️"}</span>${esc(aisle)}<span class="aisle-count">${list.length}</span></h3>
+        ${list.map(shopRow).join("")}
+      </section>`).join("")}
+      ${!toBuy.length ? `<div class="card empty-state" data-testid="shop-empty">${items.length ? "🎉 Everything is in the cart." : "The list is empty. Tap <strong>+ Add item</strong>, or pull items from your meal plan."}</div>` : ""}
+      ${inCart.length ? `<details class="card cart" data-testid="shop-cart" data-cart ${ui.cartOpen ? "open" : ""}>
+        <summary><span class="aisle-icon" aria-hidden="true">🛒</span>In the cart <span class="aisle-count">${inCart.length}</span></summary>
+        ${inCart.sort((a, b) => a.name.localeCompare(b.name)).map(shopRow).join("")}
+        ${ui.storeMode ? "" : `<button class="btn danger" style="margin-top:8px" data-action="clear-bought" data-testid="clear-bought">Clear the cart</button>`}
+      </details>` : ""}
+      ${items.length ? '<p class="small muted swipe-hint">Tip: swipe an item right when you have it, or left to delete.</p>' : ""}
     </div>
     ${ui.storeMode ? "" : `<div class="card">
       <h2>Fill the list</h2>
       <div class="row">
         <button class="btn" data-action="plan-to-shopping" data-testid="plan-to-shopping">From next 7 days of meals</button>
         <button class="btn" data-action="copy-list" data-testid="copy-list">Copy list as text</button>
-        <button class="btn danger" data-action="clear-bought" data-testid="clear-bought">Clear bought</button>
       </div>
       <details style="margin-top:10px"><summary>Stores</summary>
         <div class="chips" style="margin-top:8px">${state.stores.map((s) => `<span class="chip">${esc(s)}<button data-action="store-del" data-store="${esc(s)}" aria-label="Remove ${esc(s)}">✕</button></span>`).join("")}</div>
         <form data-form="store-add" class="row" style="margin-top:8px"><input type="text" name="store" class="grow" placeholder="Add a store" required><button class="btn sm">Add</button></form>
       </details>
-    </div>`}`;
+    </div>`}
+    <button class="fab" data-action="shop-fab" data-testid="shop-fab" aria-label="Add item"><span aria-hidden="true">＋</span> Add item</button>`;
+}
+
+function shopAddSheet() {
+  const onList = new Set(state.shopping.filter((i) => !i.bought).map((i) => normName(i.name)));
+  const again = [...new Set([...state.shopping.filter((i) => i.bought).map((i) => i.name), ...SHOP_STAPLES])].filter((n) => !onList.has(normName(n))).slice(0, 12);
+  const store = ui.shopStore === "all" ? "" : ui.shopStore;
+  sheet("shop-sheet", `<form data-form="shop-add" class="stack">
+    <div class="row between"><h2>Add to the list</h2><button type="button" class="iconbtn lg" data-sheet-close aria-label="Close">✕</button></div>
+    <input type="text" name="name" placeholder="Item (e.g. toor dal)" required aria-label="Item" data-testid="shop-name" class="big-input" autocomplete="off" enterkeyhint="done">
+    ${again.length ? `<div class="field"><span>Tap to add</span><div class="chips scroll-x" data-testid="shop-quick-list">${again.map((n) => `<button type="button" class="chip add big" data-action="shop-quick" data-name="${esc(n)}" data-testid="shop-quick">+ ${esc(n)}</button>`).join("")}</div></div>` : ""}
+    <div class="field"><span>How much</span>
+      <div class="stepper">
+        <button type="button" class="btn big" data-action="qty-step" data-delta="-1" aria-label="Less">−</button>
+        <input type="number" name="qty" min="0" step="any" placeholder="Qty" inputmode="decimal" aria-label="Quantity" data-testid="shop-qty">
+        <button type="button" class="btn big" data-action="qty-step" data-delta="1" aria-label="More">+</button>
+      </div>
+    </div>
+    <div class="field"><span>Unit</span>${chipRadios("unit", UNITS.map((u) => [u, u]), "", "shop-unit")}</div>
+    <div class="field"><span>Store</span>${chipRadios("store", [["", "Any store"], ...state.stores.map((s) => [s, s])], store, "shop-store")}</div>
+    <button class="btn primary big" data-testid="shop-add">Add to list</button>
+  </form>`);
+  $("[data-testid=shop-name]")?.focus();
+}
+
+function shopItemSheet(it) {
+  const units = UNITS.includes(it.unit) || !it.unit ? UNITS : [...UNITS, it.unit];
+  sheet("shop-item-sheet", `<form data-form="shop-edit" class="stack" data-id="${esc(it.id)}">
+    <div class="row between"><h2>${AISLE_ICONS[aisleFor(it.name)] || "🛍️"} ${esc(it.label || it.name)}</h2><button type="button" class="iconbtn lg" data-sheet-close aria-label="Close">✕</button></div>
+    ${it.sources?.length ? `<p class="small muted" style="margin:0">For: ${esc(it.sources.join(", "))}</p>` : ""}
+    <label class="field"><span>Name</span><input type="text" name="name" required value="${esc(it.label || it.name)}" data-testid="shop-edit-name"></label>
+    <div class="field"><span>How much</span>
+      <div class="stepper">
+        <button type="button" class="btn big" data-action="qty-step" data-delta="-1" aria-label="Less">−</button>
+        <input type="number" name="qty" min="0" step="any" value="${it.quantity ?? ""}" inputmode="decimal" aria-label="Quantity" data-testid="shop-edit-qty">
+        <button type="button" class="btn big" data-action="qty-step" data-delta="1" aria-label="More">+</button>
+      </div>
+    </div>
+    <div class="field"><span>Unit</span>${chipRadios("unit", units.map((u) => [u, u]), it.unit || "", "shop-edit-unit")}</div>
+    <div class="field"><span>Store</span>${chipRadios("store", [["", "Any store"], ...state.stores.map((s) => [s, s])], it.store || "", "shop-edit-store")}</div>
+    <button class="btn primary big" data-testid="shop-edit-save">Save</button>
+    <div class="row">
+      <button type="button" class="btn big grow" data-action="shop-sheet-toggle" data-id="${esc(it.id)}">${it.bought ? "↩ Put back on the list" : "✓ Got it"}</button>
+      <button type="button" class="btn danger big grow" data-action="shop-del" data-id="${esc(it.id)}" data-testid="shop-edit-delete">Delete</button>
+    </div>
+  </form>`);
+}
+
+// Ticks or unticks an item. Bought food goes straight into the kitchen so meal suggestions
+// can use it; unticking takes back only what the tick added. Returns the message to show.
+function setBought(it, bought) {
+  it.bought = bought;
+  const name = it.label || it.name;
+  if (bought && aisleFor(it.name) !== "Baby care" && aisleFor(it.name) !== "School & household" && !state.pantry.some((p) => normName(p) === normName(it.name))) {
+    state.pantry.push(it.name);
+    it.addedToPantry = true;
+    clearCaches();
+    return `Got ${name} · added to your kitchen`;
+  }
+  if (!bought && it.addedToPantry) {
+    state.pantry = state.pantry.filter((p) => normName(p) !== normName(it.name));
+    delete it.addedToPantry;
+    clearCaches();
+    return `${name} is back on the list and out of your kitchen`;
+  }
+  return bought ? `Got ${name}` : `${name} is back on the list`;
+}
+
+function toggleShopItem(id, bought) {
+  const it = state.shopping.find((i) => i.id === id);
+  if (!it) return;
+  const msg = setBought(it, bought);
+  save(state);
+  // Let the tick show, then slide the row away into (or out of) the cart.
+  const row = $(`.swipe[data-kind=shop][data-id="${CSS.escape(id)}"]`);
+  row?.classList.toggle("bought", bought);
+  row?.classList.add("leaving");
+  clearTimeout(toggleShopItem.timer);
+  toggleShopItem.timer = setTimeout(() => { if (ui.tab === "shopping") renderShopping(); }, 260);
+  toast(msg, () => { setBought(it, !bought); save(state); if (ui.tab === "shopping") renderShopping(); });
+}
+
+function deleteShopItem(id) {
+  const idx = state.shopping.findIndex((i) => i.id === id);
+  if (idx < 0) return;
+  const [it] = state.shopping.splice(idx, 1);
+  commit();
+  toast(`Deleted ${it.label || it.name}`, () => { state.shopping.splice(idx, 0, it); commit(); });
+}
+
+function deleteTodo(id) {
+  const idx = state.todos.findIndex((x) => x.id === id);
+  if (idx < 0) return;
+  const [t] = state.todos.splice(idx, 1);
+  const done = () => { if (ui.tab === "calendar") commitDay(t.date); else commit(); };
+  done();
+  toast(`Deleted “${t.text}”`, () => { state.todos.splice(idx, 0, t); done(); });
+}
+
+function toggleTodo(id, doneNow) {
+  const t = state.todos.find((x) => x.id === id);
+  if (!t) return;
+  t.done = doneNow;
+  if (ui.tab === "calendar") { commitDay(t.date); return; }
+  if (ui.tab !== "todo") { commit(); return; }
+  // On the To do tab, tick the row in place instead of rebuilding a long list.
+  save(state);
+  pendCache.delete(t.date);
+  for (const row of document.querySelectorAll(`.swipe[data-kind=todo][data-id="${CSS.escape(id)}"]`)) {
+    row.classList.toggle("done", doneNow);
+    const box = row.querySelector("input[type=checkbox]");
+    if (box) box.checked = doneNow;
+    const l = row.querySelector(".swipe-l");
+    if (l) l.textContent = doneNow ? "✓ Not done" : "✓ Done";
+  }
+  const list = todosOn(state, ui.todoDate);
+  const left = list.filter((x) => !x.done).length;
+  const pill = $("[data-testid=todo-left]");
+  if (pill) { pill.textContent = left ? `${left} left` : "All done"; pill.className = `pill ${left ? "warn" : "ok"}`; }
 }
 
 function plannedRecipes(fromKey_, days) {
@@ -981,22 +1199,16 @@ function renderTodo() {
         <button class="btn sm" data-action="todo-day" data-delta="1" aria-label="Next day">›</button>
       </div>
       <div class="row between" style="margin-top:10px"><h2 style="margin:0">To do: ${esc(dayName)}</h2><span class="pill ${left ? "warn" : "ok"}" data-testid="todo-left">${left ? `${left} left` : list.length ? "All done" : "Nothing yet"}</span></div>
-      <div data-testid="todo-list" style="margin-top:6px">${list.length ? list.map((t) => todoRow(t)).join("") : '<p class="empty-state">Nothing planned for the kids on this day. Add something below or tap an idea.</p>'}</div>
-      <form data-form="todo-add" class="form-grid" style="margin-top:10px">
-        <label class="field full"><span>What needs doing</span><input type="text" name="text" required maxlength="120" placeholder="e.g. Buy dresses for the school function" data-testid="todo-input"></label>
-        <label class="field"><span>For</span><select name="who" data-testid="todo-who">${WHO_OPTIONS()}</select></label>
-        <label class="field"><span>Date</span><input type="date" name="date" value="${key}" required data-testid="todo-input-date"></label>
-        <label class="field"><span>Time (optional)</span><input type="time" name="time"></label>
-        <div class="field" style="justify-content:flex-end"><button class="btn primary" data-testid="todo-add">Add to do</button></div>
-      </form>
+      <div data-testid="todo-list" style="margin-top:6px">${list.length ? list.map((t) => todoRow(t)).join("") : '<p class="empty-state">Nothing planned for the kids on this day. Tap <strong>+ Add to do</strong> or an idea below.</p>'}</div>
       <h3>Quick ideas for ${esc(dayName.toLowerCase() === "today" || dayName.toLowerCase() === "tomorrow" ? dayName.toLowerCase() : prettyDate(key))}</h3>
-      <div class="chips">${TODO_IDEAS.map((i) => `<button class="chip add" data-action="todo-idea" data-text="${esc(i.text)}" data-who="${i.who}" data-testid="todo-idea">+ ${esc(i.text)}</button>`).join("")}</div>
+      <div class="chips">${TODO_IDEAS.map((i) => `<button class="chip add big" data-action="todo-idea" data-text="${esc(i.text)}" data-who="${i.who}" data-testid="todo-idea">+ ${esc(i.text)}</button>`).join("")}</div>
     </div>
     ${allMissed.length ? `<div class="card" data-testid="todo-missed"><h2>⚠️ Not done yet</h2>${missed.map((t) => todoRow(t, { showDate: true })).join("")}
       ${older ? `<button class="btn ghost sm" data-action="todo-older" data-testid="todo-older">Show ${older} older</button>` : ""}</div>` : ""}
     <div class="card" data-testid="todo-upcoming"><h2>Coming up this week</h2>
       ${soon.length ? soon.map((t) => todoRow(t, { showDate: true })).join("") : '<p class="small muted">Nothing else in the next 7 days.</p>'}
-    </div>`;
+    </div>
+    <button class="fab" data-action="todo-fab" data-testid="todo-fab" aria-label="Add to do"><span aria-hidden="true">＋</span> Add to do</button>`;
 }
 
 // ---------- reminders ----------
@@ -1171,10 +1383,13 @@ document.addEventListener("click", (e) => {
       commitDay();
       break;
     }
-    case "todo-del": {
-      const t = state.todos.find((x) => x.id === el.dataset.id);
-      state.todos = state.todos.filter((x) => x !== t);
-      if (t && ui.tab === "calendar") commitDay(t.date); else commit();
+    case "todo-del": el.closest("dialog")?.close(); deleteTodo(el.dataset.id); break;
+    case "todo-fab": todoSheet(); break;
+    case "todo-more": { const t = state.todos.find((x) => x.id === el.dataset.id); if (t) todoSheet(t); break; }
+    case "todo-sheet-date": {
+      const f = el.closest("form");
+      f.date.value = el.dataset.date;
+      for (const b of f.querySelectorAll("[data-action=todo-sheet-date]")) b.classList.toggle("primary", b === el);
       break;
     }
     case "new-reminder": setTab("reminders"); renderReminders(el.dataset.date); $("[data-testid=rem-title]")?.focus(); break;
@@ -1210,9 +1425,30 @@ document.addEventListener("click", (e) => {
       break;
     }
 
-    case "store-mode": ui.storeMode = !ui.storeMode; if (ui.storeMode) ui.hideBought = false; render(); break;
+    case "store-mode": ui.storeMode = !ui.storeMode; keepScreenOn(ui.storeMode); render(); break;
+    case "shop-fab": shopAddSheet(); break;
+    case "shop-more": { const it = state.shopping.find((i) => i.id === el.dataset.id); if (it) shopItemSheet(it); break; }
+    case "shop-sheet-toggle": {
+      const it = state.shopping.find((i) => i.id === el.dataset.id);
+      el.closest("dialog")?.close();
+      if (it) toggleShopItem(it.id, !it.bought);
+      break;
+    }
+    case "shop-quick": {
+      addToShopping([{ name: el.dataset.name }], "manual");
+      commit();
+      el.remove();
+      toast(`Added ${el.dataset.name}`);
+      break;
+    }
+    case "qty-step": {
+      const inp = el.parentElement.querySelector("input[name=qty]");
+      const n = Math.max(0, (Number(inp.value) || 0) + Number(el.dataset.delta));
+      inp.value = n || "";
+      break;
+    }
     case "shop-store": ui.shopStore = el.dataset.store; render(); break;
-    case "shop-del": state.shopping = state.shopping.filter((i) => i.id !== el.dataset.id); commit(); break;
+    case "shop-del": el.closest("dialog")?.close(); deleteShopItem(el.dataset.id); break;
     case "plan-to-shopping": {
       const needs = plannedRecipes(TODAY, 7).flatMap(({ date, slot, recipe }) => shoppingNeeds(recipe).map((i) => ({ ...i, source: prettyDate(date), key: `${date}|${slot}|${recipe.id}|${normName(i.name)}` })));
       if (!needs.length) { toast("Nothing missing for the next 7 days of planned meals."); break; }
@@ -1221,7 +1457,14 @@ document.addEventListener("click", (e) => {
       toast(added ? `Added ${added} ingredient${added > 1 ? "s" : ""} from the meal plan.` : "Everything for the next 7 days is already on the list.");
       break;
     }
-    case "clear-bought": state.shopping = state.shopping.filter((i) => !i.bought); commit(); break;
+    case "clear-bought": {
+      const before = state.shopping;
+      const n = before.filter((i) => i.bought).length;
+      state.shopping = before.filter((i) => !i.bought);
+      commit();
+      toast(`Cleared ${n} item${n === 1 ? "" : "s"} from the cart`, () => { state.shopping = before; commit(); });
+      break;
+    }
     case "copy-list": {
       const text = groupByAisle(state.shopping.filter((i) => !i.bought)).map(([aisle, list]) => `${aisle}\n${list.map((i) => `- ${i.name}${formatQty(i) ? " (" + formatQty(i) + ")" : ""}`).join("\n")}`).join("\n\n");
       navigator.clipboard?.writeText(text).then(() => toast("Copied. Paste it into WhatsApp or notes."), () => toast("Couldn't copy on this browser."));
@@ -1265,22 +1508,7 @@ document.addEventListener("change", (e) => {
       commitDay();
       break;
     }
-    case "todo-toggle": {
-      const t = state.todos.find((x) => x.id === el.dataset.id);
-      if (!t) return;
-      t.done = el.checked;
-      if (ui.tab === "calendar") { commitDay(t.date); break; }
-      if (ui.tab !== "todo") { commit(); break; }
-      // On the To do tab, tick the row in place instead of rebuilding a long list.
-      save(state);
-      pendCache.delete(t.date);
-      el.closest(".chk")?.classList.toggle("done", t.done);
-      const list = todosOn(state, ui.todoDate);
-      const left = list.filter((x) => !x.done).length;
-      const pill = $("[data-testid=todo-left]");
-      if (pill) { pill.textContent = left ? `${left} left` : "All done"; pill.className = `pill ${left ? "warn" : "ok"}`; }
-      break;
-    }
+    case "todo-toggle": toggleTodo(el.dataset.id, el.checked); break;
     case "rem-done": {
       const r = state.reminders.find((x) => x.id === el.dataset.id);
       if (!r) return;
@@ -1289,31 +1517,7 @@ document.addEventListener("change", (e) => {
       if (ui.tab === "calendar") commitDay(el.dataset.date); else commit();
       break;
     }
-    case "shop-toggle": {
-      const it = state.shopping.find((i) => i.id === el.dataset.id);
-      if (it) it.bought = el.checked;
-      // Bought food goes straight into the kitchen, so meal suggestions can use it.
-      if (it && el.checked && aisleFor(it.name) !== "Baby care" && aisleFor(it.name) !== "School & household" && !state.pantry.some((p) => normName(p) === normName(it.name))) {
-        state.pantry.push(it.name);
-        it.addedToPantry = true;
-        clearCaches();
-        toast(`${it.name} added to your kitchen`);
-      } else if (it && !el.checked && it.addedToPantry) {
-        // Unticked by mistake: take back only what this tick added, not food already in the kitchen.
-        state.pantry = state.pantry.filter((p) => normName(p) !== normName(it.name));
-        delete it.addedToPantry;
-        clearCaches();
-        toast(`${it.name} taken out of your kitchen`);
-      }
-      el.closest(".shop-item")?.classList.toggle("bought", el.checked);
-      save(state);
-      const left = state.shopping.filter((i) => !i.bought).length;
-      const pill = $("[data-testid=shop-left]");
-      if (pill) pill.textContent = `${left} to buy`;
-      if (ui.hideBought) setTimeout(render, 250);
-      break;
-    }
-    case "hide-bought": ui.hideBought = el.checked; render(); break;
+    case "shop-toggle": toggleShopItem(el.dataset.id, el.checked); break;
     case "nut-free":
       state.settings = { ...state.settings, schoolNutFree: el.checked };
       ui.results = ui.results.filter((r) => !el.checked || checkForAudience(r, { schoolNutFree: true }).safe || !isSchoolFood(r));
@@ -1385,7 +1589,33 @@ document.addEventListener("submit", (e) => {
       const qty = f.qty.value === "" ? null : Number(f.qty.value);
       addToShopping([{ name, quantity: qty, unit: f.unit.value, store: f.store.value }], "manual");
       commit();
+      // The sheet stays open for the next item.
+      f.name.value = "";
+      f.qty.value = "";
+      for (const r of form.querySelectorAll("input[name=unit]")) r.checked = false;
+      toast(`Added ${name}`);
       $("[data-testid=shop-name]")?.focus();
+      break;
+    }
+    case "shop-edit": {
+      const it = state.shopping.find((i) => i.id === form.dataset.id);
+      const name = f.name.value.trim();
+      if (!it || !name) return;
+      Object.assign(it, { name, label: name, quantity: f.qty.value === "" ? null : Number(f.qty.value), unit: normUnit(f.unit.value), store: f.store.value });
+      delete it.aisle;
+      state.shopping = mergeItems(state.shopping).map((i) => ({ ...i, id: i.id || uid() }));
+      form.closest("dialog")?.close();
+      commit();
+      toast(`Saved ${name}`);
+      break;
+    }
+    case "todo-edit": {
+      const t = state.todos.find((x) => x.id === form.dataset.id);
+      const text = f.text.value.trim();
+      if (!t || !text || !isDateKey(f.date.value)) return;
+      Object.assign(t, { text, who: f.who.value, date: f.date.value, time: f.time.value });
+      form.closest("dialog")?.close();
+      commit();
       break;
     }
     case "store-add": {
@@ -1400,9 +1630,8 @@ document.addEventListener("submit", (e) => {
       const date = kind === "todo-add" ? f.date.value : ui.selected;
       if (!text || !isDateKey(date)) return;
       state.todos.push({ id: uid(), text, who: f.who.value, date, time: f.time?.value || "", done: false });
-      if (kind === "todo-add") ui.todoDate = date;
-      if (kind === "todo-add-day") commitDay(date); else commit();
-      $(kind === "todo-add" ? "[data-testid=todo-input]" : "[data-testid=day-todo-input]")?.focus();
+      if (kind === "todo-add") { ui.todoDate = date; form.closest("dialog")?.close(); toast(`Added for ${prettyDate(date)}.`); }
+      if (kind === "todo-add-day") { commitDay(date); $("[data-testid=day-todo-input]")?.focus(); } else commit();
       break;
     }
     case "rem-add": {
@@ -1432,10 +1661,76 @@ document.addEventListener("toggle", (e) => {
   if (e.target.open) ui.openGroups.add(g); else ui.openGroups.delete(g);
 }, true);
 
+document.addEventListener("toggle", (e) => { if (e.target?.dataset && "cart" in e.target.dataset) ui.cartOpen = e.target.open; }, true);
+
+$("#toast").addEventListener("click", (e) => {
+  if (!e.target.closest(".toast-undo")) return;
+  const undo = toast.undo;
+  toast.undo = null;
+  $("#toast").classList.remove("show");
+  undo?.();
+});
+
+// Swipe a shopping or to-do row: right ticks it, left deletes it (both can be undone from the toast).
+// Vertical drags scroll the page as usual; a swipe never also counts as a tap.
+const SWIPE_AT = 90;
+let swipe = null;
+let swipedAt = 0;
+// Swallow the click the browser may send after the finger lifts from a swipe.
+document.addEventListener("click", (e) => {
+  if (Date.now() - swipedAt < 400 && e.target.closest?.(".swipe")) { e.preventDefault(); e.stopPropagation(); }
+}, true);
+document.addEventListener("pointerdown", (e) => {
+  const fg = e.target.closest?.(".swipe-fg");
+  if (!fg || e.button > 0 || e.target.closest("button")) return;
+  swipe = { row: fg.parentElement, fg, x: e.clientX, y: e.clientY, dx: 0, active: false };
+});
+document.addEventListener("pointermove", (e) => {
+  if (!swipe) return;
+  const dx = e.clientX - swipe.x, dy = e.clientY - swipe.y;
+  if (!swipe.active) {
+    if (Math.abs(dy) > 12 && Math.abs(dy) > Math.abs(dx)) { swipe = null; return; }
+    if (Math.abs(dx) < 12) return;
+    swipe.active = true;
+    swipe.row.classList.add("swiping");
+  }
+  swipe.dx = dx;
+  swipe.fg.style.transform = `translateX(${dx}px)`;
+  swipe.row.classList.toggle("go-l", dx > SWIPE_AT);
+  swipe.row.classList.toggle("go-r", dx < -SWIPE_AT);
+});
+function endSwipe() {
+  if (!swipe) return;
+  const { row, fg, dx, active } = swipe;
+  swipe = null;
+  if (!active) return;
+  row.classList.remove("swiping", "go-l", "go-r");
+  fg.style.transform = "";
+  swipedAt = Date.now();
+  const { kind, id } = row.dataset;
+  if (dx > SWIPE_AT) {
+    if (kind === "shop") toggleShopItem(id, !row.classList.contains("bought"));
+    else toggleTodo(id, !row.classList.contains("done"));
+  } else if (dx < -SWIPE_AT) {
+    if (kind === "shop") deleteShopItem(id); else deleteTodo(id);
+  }
+}
+document.addEventListener("pointerup", endSwipe);
+document.addEventListener("pointercancel", () => { if (swipe) { swipe.fg.style.transform = ""; swipe.row.classList.remove("swiping", "go-l", "go-r"); swipe = null; } });
+
+// In store mode the phone screen stays on, so the list doesn't lock between aisles.
+let wakeLock = null;
+async function keepScreenOn(on) {
+  try {
+    if (on && !wakeLock && navigator.wakeLock) wakeLock = await navigator.wakeLock.request("screen");
+    else if (!on && wakeLock) { await wakeLock.release(); wakeLock = null; }
+  } catch { wakeLock = null; }
+}
+
 window.addEventListener("pagehide", () => save(state, { now: true }));
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "hidden") save(state, { now: true });
-  else refreshToday();
+  if (document.visibilityState === "hidden") { save(state, { now: true }); wakeLock = null; }
+  else { refreshToday(); if (ui.storeMode && ui.tab === "shopping") keepScreenOn(true); }
 });
 window.addEventListener("online", checkAi);
 window.addEventListener("offline", () => { ui.ai = "unreachable"; renderHeader(); });

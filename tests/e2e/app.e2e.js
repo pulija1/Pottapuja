@@ -53,6 +53,13 @@ const tid = (page, id) => page.getByTestId(id);
 const cell = (page, date) => tid(page, `cal-day-${date}`);
 const pendingTypes = (page) => page.locator("[data-testid=day-pending] li").evaluateAll((els) => els.map((e) => e.dataset.type));
 
+// The shopping list adds items in a bottom sheet: open it, add each item, close it.
+async function addShopItems(page, names) {
+  await tid(page, "shop-fab").click();
+  for (const n of names) { await tid(page, "shop-name").fill(n); await tid(page, "shop-add").click(); }
+  await page.keyboard.press("Escape");
+}
+
 async function openGroup(page, slot) {
   const group = tid(page, `meal-group-${slot.split("_")[0]}`);
   if (!(await group.evaluate((d) => d.open))) await group.locator("summary").click();
@@ -206,8 +213,7 @@ test("E2E OFF-03 browser goes offline: calendar and lists still editable", async
   await tid(page, "approve-day").click();
   assert.equal(await cell(page, TOMORROW).getAttribute("data-status"), "approved");
   await tid(page, "tab-shopping").click();
-  await tid(page, "shop-name").fill("Curry leaves");
-  await tid(page, "shop-add").click();
+  await addShopItems(page, ["Curry leaves"]);
   assert.equal(await tid(page, "shop-item").count(), 1);
   await ctx.setOffline(false);
   await ctx.close();
@@ -216,15 +222,20 @@ test("E2E OFF-03 browser goes offline: calendar and lists still editable", async
 test("E2E SHOP-02/05 add items, merge duplicates, tick bought, survives reload", async () => {
   const { page, ctx } = await open();
   await tid(page, "tab-shopping").click();
+  await tid(page, "shop-fab").click();
   for (const [n, q, u] of [["Toor dal", "500", "g"], ["tuvar dal", "1", "kg"], ["Curry leaves", "", ""]]) {
     await tid(page, "shop-name").fill(n);
     await tid(page, "shop-qty").fill(q);
-    if (u) await tid(page, "shop-unit").fill(u).catch(() => tid(page, "shop-unit").selectOption(u));
+    if (u) await tid(page, "shop-unit").getByText(u, { exact: true }).click();
     await tid(page, "shop-add").click();
   }
+  await page.keyboard.press("Escape");
   assert.equal(await tid(page, "shop-item").count(), 2);
   assert.match(await page.locator('[data-testid=shop-item][data-name="toor dal"]').innerText(), /1\.5\s*kg/);
   await page.locator('[data-testid=shop-item][data-name="curry leaves"] input[type=checkbox]').check();
+  // A ticked item slides into the "In the cart" section
+  await tid(page, "shop-cart").waitFor({ state: "attached" });
+  assert.equal(await tid(page, "shop-cart").getByTestId("shop-item").count(), 1);
   await page.waitForTimeout(300);
   await page.reload();
   await tid(page, "tab-shopping").click();
@@ -247,11 +258,76 @@ test("E2E SHOP-01 approved day's meals feed the shopping list (only missing item
 test("E2E SHOP-08 store mode at phone width: no sideways scrolling", async () => {
   const { page, ctx } = await open(mock, { viewport: { width: 375, height: 740 } });
   await tid(page, "tab-shopping").click();
-  await tid(page, "shop-name").fill("Drumstick");
-  await tid(page, "shop-add").click();
+  await addShopItems(page, ["Drumstick"]);
   await tid(page, "store-mode").click();
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
   assert.ok(overflow <= 0, `page is ${overflow}px wider than the phone`);
+  await ctx.close();
+});
+
+async function swipeRow(page, row, dx) {
+  const box = await row.locator(".swipe-fg").boundingBox();
+  const y = box.y + box.height / 2, x = box.x + box.width / 2;
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  for (let i = 1; i <= 8; i++) await page.mouse.move(x + (dx * i) / 8, y);
+  await page.mouse.up();
+}
+
+test("E2E SHOP-14 swipe right puts an item in the cart, swipe left deletes it, both can be undone", async () => {
+  const { page, ctx, errors } = await open(mock, { viewport: { width: 390, height: 844 } });
+  await tid(page, "tab-shopping").click();
+  await addShopItems(page, ["Milk", "Eggs"]);
+  const item = (n) => page.locator(`[data-testid=shop-item][data-name="${n}"]`);
+  assert.equal(await item("egg").locator(".name").innerText(), "Eggs", "names show as typed");
+  await swipeRow(page, item("milk"), 160);
+  await tid(page, "shop-cart").waitFor({ state: "attached" });
+  assert.ok(await item("milk").locator("input[type=checkbox]").isChecked());
+  await tid(page, "toast-undo").click();
+  await page.waitForTimeout(100);
+  assert.equal(await tid(page, "shop-cart").count(), 0);
+  assert.ok(!(await item("milk").locator("input[type=checkbox]").isChecked()));
+  await swipeRow(page, item("egg"), -160);
+  assert.equal(await item("egg").count(), 0);
+  await tid(page, "toast-undo").click();
+  assert.equal(await item("egg").count(), 1);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test("E2E SHOP-15 the details sheet edits an item; store mode is full screen with Done shopping", async () => {
+  const { page, ctx } = await open(mock, { viewport: { width: 390, height: 844 } });
+  await tid(page, "tab-shopping").click();
+  await addShopItems(page, ["Paneer"]);
+  await tid(page, "shop-more").click();
+  await tid(page, "shop-edit-qty").fill("400");
+  await tid(page, "shop-edit-unit").getByText("g", { exact: true }).click();
+  await tid(page, "shop-edit-store").getByText("Costco").click();
+  await tid(page, "shop-edit-save").click();
+  assert.match(await tid(page, "shop-item").innerText(), /400 g · Costco/);
+  await tid(page, "store-mode").click();
+  assert.ok(!(await page.locator(".tabs").isVisible()), "tabs are hidden in store mode");
+  assert.match(await tid(page, "store-mode").innerText(), /Done shopping/);
+  await tid(page, "shop-item").locator("label").click();
+  await page.waitForTimeout(350);
+  assert.match(await tid(page, "shop-empty").innerText(), /Everything is in the cart/);
+  await tid(page, "store-mode").click();
+  assert.ok(await page.locator(".tabs").isVisible());
+  await ctx.close();
+});
+
+test("E2E TODO-05 to-dos: tap the row to tick, edit in the sheet, swipe left to delete", async () => {
+  const { page, ctx } = await open(mock, { viewport: { width: 390, height: 844 } });
+  await tid(page, "tab-todo").click();
+  await tid(page, "todo-idea").filter({ hasText: "Pack school bag" }).click();
+  await tid(page, "todo-item").locator(".name").click();
+  assert.equal(await tid(page, "todo-left").innerText(), "All done");
+  await tid(page, "todo-more").click();
+  await tid(page, "todo-input").fill("Pack school bag and water bottle");
+  await tid(page, "todo-save").click();
+  assert.match(await tid(page, "todo-list").innerText(), /water bottle/);
+  await swipeRow(page, tid(page, "todo-list").getByTestId("todo-item"), -160);
+  assert.equal(await tid(page, "todo-list").getByTestId("todo-item").count(), 0);
   await ctx.close();
 });
 
@@ -260,8 +336,9 @@ test("E2E TODO-01 the To do tab opens on tomorrow; ideas and ticks persist; the 
   await tid(page, "tab-todo").click();
   assert.equal(await tid(page, "todo-date").inputValue(), TOMORROW);
   await tid(page, "todo-idea").filter({ hasText: "Buy dresses" }).click();
+  await tid(page, "todo-fab").click();
   await tid(page, "todo-input").fill("Doctor's appointment");
-  await tid(page, "todo-who").selectOption("baby");
+  await tid(page, "todo-who").getByText("8-month-old").click();
   await tid(page, "todo-add").click();
   assert.equal(await tid(page, "todo-item").count(), 2);
   await tid(page, "todo-item").filter({ hasText: "Buy dresses" }).locator("input[type=checkbox]").check();
@@ -333,8 +410,7 @@ test("E2E DATA-04 HTML typed into fields is shown as text, never run", async () 
   const xss = `<img src=x onerror="window.__xss=1">`;
   await planSlot(page, TOMORROW, "family_dinner", xss);
   await tid(page, "tab-shopping").click();
-  await tid(page, "shop-name").fill(xss);
-  await tid(page, "shop-add").click();
+  await addShopItems(page, [xss]);
   await tid(page, "tab-reminders").click();
   await tid(page, "rem-title").fill(xss);
   await tid(page, "rem-date").fill(TOMORROW);
@@ -484,10 +560,11 @@ test("E2E SHOP-09 unticking a bought item takes back only what the tick added to
   await tid(page, "pantry-input").fill("rice");
   await page.locator("[data-form=pantry-add] button").click();
   await tid(page, "tab-shopping").click();
-  for (const n of ["paneer", "rice"]) { await tid(page, "shop-name").fill(n); await tid(page, "shop-add").click(); }
+  await addShopItems(page, ["paneer", "rice"]);
   const box = (n) => tid(page, "shop-item").filter({ hasText: n }).locator("input[type=checkbox]");
-  for (const n of ["paneer", "rice"]) await box(n).check();
-  for (const n of ["paneer", "rice"]) await box(n).uncheck();
+  for (const n of ["paneer", "rice"]) { await box(n).check(); await page.waitForTimeout(350); }
+  await tid(page, "shop-cart").locator("summary").click();
+  for (const n of ["paneer", "rice"]) { await box(n).uncheck(); await page.waitForTimeout(350); }
   await tid(page, "tab-recipes").click();
   const pantry = await tid(page, "pantry-list").innerText();
   assert.ok(!pantry.includes("paneer"), pantry);
@@ -540,7 +617,7 @@ test("E2E SUG-03 suggestions are not offered for past days", async () => {
 test("E2E SHOP-13 ticking food as bought adds it to the kitchen; diapers and napkins don't", async () => {
   const { page, ctx } = await open();
   await tid(page, "tab-shopping").click();
-  for (const n of ["Drumstick", "Diapers", "Napkins"]) { await tid(page, "shop-name").fill(n); await tid(page, "shop-add").click(); }
+  await addShopItems(page, ["Drumstick", "Diapers", "Napkins"]);
   for (const n of ["drumstick", "diapers", "napkins"]) await page.locator(`[data-testid=shop-item][data-name="${n}"] input[type=checkbox]`).check();
   await page.waitForTimeout(300);
   const pantry = await page.evaluate(() => JSON.parse(localStorage.getItem("familyMealPlanner.v1")).pantry.map((x) => x.toLowerCase()));
@@ -553,6 +630,7 @@ test("E2E TODO-03 blank to-dos are ignored and HTML is shown as text", async () 
   const { page, ctx } = await open();
   await tid(page, "tab-todo").click();
   const before = await tid(page, "todo-item").count();
+  await tid(page, "todo-fab").click();
   await tid(page, "todo-input").fill("   ");
   await tid(page, "todo-add").click();
   assert.equal(await tid(page, "todo-item").count(), before);
@@ -827,11 +905,13 @@ test("E2E SYNC-10 'Keep mine' in a conflict replaces GitHub's copy; the other de
   await signIn(b.page);
   await toastHas(b.page, "Loaded");
   await tid(b.page, "tab-todo").click();
+  await tid(b.page, "todo-fab").click();
   await tid(b.page, "todo-input").fill("From B");
   await tid(b.page, "todo-add").click();
   await tid(b.page, "checkin").click();
   await toastHas(b.page, "Checked in");
   await tid(a.page, "tab-todo").click();
+  await tid(a.page, "todo-fab").click();
   await tid(a.page, "todo-input").fill("From A");
   await tid(a.page, "todo-add").click();
   await tid(a.page, "checkin").click();
@@ -854,6 +934,7 @@ test("E2E SYNC-11 signing in on a device that already has its own data asks befo
   const b = await device(gh);
   await tid(b.page, "login-skip").click();
   await tid(b.page, "tab-todo").click();
+  await tid(b.page, "todo-fab").click();
   await tid(b.page, "todo-input").fill("Made on B before signing in");
   await tid(b.page, "todo-add").click();
   await b.page.locator("#profile").click();
