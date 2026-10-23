@@ -31,12 +31,18 @@ const COARSE_VERB_BEFORE = new RegExp("\\b(crush|pulse)\\s+" + NUT_PREP, "i");
 const TO_FINE = /^\s*(\w+\s+){0,2}(to|into)\s+a\s+(very\s+)?(fine|smooth)\s+(powder|paste)\b/i;
 const GROUND_LATER = /^\s*(?:,?\s*(?:overnight|peel(?:ed)?|and|then|soaked|dry|roast(?:ed)?|lightly|well)\b\s*,?)*\s*(?:ground|grind|blend(?:ed)?|powder(?:ed)?)\s+(?:to|into)\s+(?:a\s+)?(?:very\s+)?(?:fine|smooth)?\s*(?:powder|paste)\b/i;
 
+// A nut cut small enough for a 4-year-old: "chopped almonds", "walnuts, finely chopped".
+const CUT_BEFORE = /\b(chopped|slivered|sliced|crushed|grated)\s+((the|soaked|roasted|toasted|peeled)\s+)?$/i;
+const CUT_AFTER = /^\s*,?\s*((very|finely|thinly)\s+)?(chopped|slivered|sliced|crushed|grated)\b/i;
+
 // Returns the first nut in the text that is not clearly ground, or null.
-function findWholeNut(text) {
+// With { cutOk } (the 4-year-old), chopped, slivered or crushed nuts are fine too.
+function findWholeNut(text, { cutOk = false } = {}) {
   const re = new RegExp(WHOLE_NUT.source, "gi");
   let m;
   while ((m = re.exec(text)) !== null) {
     if (isNegated(text, m.index)) continue;
+    if (cutOk && (CUT_BEFORE.test(text.slice(Math.max(0, m.index - 40), m.index)) || CUT_AFTER.test(text.slice(m.index + m[0].length)))) continue;
     // Anything coarse in the same sentence means pieces, whatever else it says.
     const sentStart = Math.max(text.lastIndexOf(".", m.index), text.lastIndexOf(";", m.index)) + 1;
     const sentEnd = text.slice(m.index).search(/[.;]/);
@@ -172,7 +178,7 @@ export function checkRecipe(recipe, opts = {}) {
 
   if (age === "kid") {
     for (const piece of pieces) {
-      const m = findWholeNut(piece);
+      const m = findWholeNut(piece, { cutOk: true });
       if (m) {
         add("warning", "whole-nuts", "Whole nuts are a choking risk under 5. Use chopped or powdered.", m[0]);
         break;

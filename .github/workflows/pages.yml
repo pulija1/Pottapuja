@@ -26,6 +26,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/configure-pages@v5
+      # The recipe book lives in recipes/ at the top of the repository; the app reads it from recipes/ next to index.html.
+      - run: cp -r recipes public/recipes
       # Give every file URL this deploy's version, so phones never mix cached old and new files.
       - run: node scripts/stamp-version.mjs public "${GITHUB_SHA::8}"
       - uses: actions/upload-pages-artifact@v3

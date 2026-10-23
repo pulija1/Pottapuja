@@ -1,7 +1,7 @@
 // Small zero-config server: serves the browser app and one AI endpoint.
 //   GET  /api/health   -> { ok, ai: "live" | "mock" | "off", model }
 //   POST /api/recipes  -> { recipes, rejected, mode, ms }  or 503 when the AI is unavailable
-// Everything else is a static file from ./public.
+// Everything else is a static file from ./public, except /recipes/*.md, the recipe book in ./recipes.
 
 import http from "node:http";
 import { readFile, stat } from "node:fs/promises";
@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 import { aiMode, generateRecipes, AiUnavailable, MODEL } from "./lib/ai.js";
 
 const ROOT = join(fileURLToPath(new URL(".", import.meta.url)), "public");
+const RECIPES = join(fileURLToPath(new URL(".", import.meta.url)), "recipes");
 const PORT = Number(process.env.PORT || 3000);
 const MAX_BODY = 32 * 1024;
 
@@ -22,6 +23,7 @@ const TYPES = {
   ".png": "image/png",
   ".ico": "image/x-icon",
   ".webmanifest": "application/manifest+json",
+  ".md": "text/markdown; charset=utf-8",
 };
 
 function sendJson(res, status, data) {
@@ -58,7 +60,7 @@ function readBody(req) {
   });
 }
 
-async function serveStatic(req, res, pathname) {
+async function serveStatic(req, res, pathname, root = ROOT) {
   let rel;
   try {
     rel = decodeURIComponent(pathname);
@@ -67,8 +69,8 @@ async function serveStatic(req, res, pathname) {
     return;
   }
   if (rel.endsWith("/")) rel += "index.html";
-  const file = normalize(join(ROOT, rel));
-  if (file !== ROOT && !file.startsWith(ROOT + sep)) {
+  const file = normalize(join(root, rel));
+  if (file !== root && !file.startsWith(root + sep)) {
     res.writeHead(403).end("Forbidden");
     return;
   }
@@ -119,6 +121,7 @@ export function createServer() {
       }
       if (url.pathname.startsWith("/api/")) return sendJson(res, 404, { error: "Unknown API route" });
       if (req.method !== "GET" && req.method !== "HEAD") return sendJson(res, 405, { error: "Method not allowed" });
+      if (url.pathname.startsWith("/recipes/")) return await serveStatic(req, res, url.pathname.slice("/recipes".length), RECIPES);
       return await serveStatic(req, res, url.pathname);
     } catch (err) {
       const status = err.status || 500;
