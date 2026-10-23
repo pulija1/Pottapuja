@@ -60,16 +60,20 @@ let timer = null;
 let changeListener = null;
 export function onChange(fn) { changeListener = fn; }
 let lastError = null;
+let errorListener = null;
+// Called with the error when a write fails (storage full or blocked), and with null once writes work again.
+export function onSaveError(fn) { errorListener = fn; }
 
 export function save(state, { now = false } = {}) {
   const write = () => {
     timer = null;
     try {
       localStorage.setItem(KEY, JSON.stringify(state));
-      lastError = null;
+      if (lastError) { lastError = null; errorListener?.(null); }
     } catch (e) {
       lastError = e;
       console.warn("Could not save", e);
+      errorListener?.(e);
     }
   };
   // Only edits bump the change time; the "now" saves (page close, restore) don't change anything.
@@ -80,6 +84,12 @@ export function save(state, { now = false } = {}) {
   } else if (!timer) {
     timer = setTimeout(write, 150);
   }
+}
+
+// Drop a write that hasn't happened yet, e.g. because another tab saved newer data.
+export function cancelPendingSave() {
+  clearTimeout(timer);
+  timer = null;
 }
 
 export function saveError() {

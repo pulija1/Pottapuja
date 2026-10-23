@@ -944,3 +944,39 @@ test("E2E BOOT-01 if the app's scripts fail to load, the page explains and offer
   assert.match(await tid(page, "boot-error").innerText(), /Reload/);
   await ctx.close();
 });
+
+test("E2E DATA-10 a change made in another tab shows up here instead of being overwritten later", async () => {
+  const a = await open();
+  const other = await a.ctx.newPage();
+  await other.goto(`${mock.url}?today=${TODAY}`);
+  await tid(other, "cal-grid").waitFor();
+  await tid(other, "tab-todo").click();
+  await tid(other, "todo-idea").first().click();
+  const text = await other.evaluate(() => window.__mealPlanner.state.todos[0].text);
+  await a.page.waitForFunction((t) => window.__mealPlanner.state.todos.some((x) => x.text === t), text);
+  await a.page.waitForFunction(() => document.querySelector("#toast").textContent.includes("another tab"));
+  // An edit here now keeps the other tab's to-do.
+  await tid(a.page, "tab-todo").click();
+  await tid(a.page, "todo-idea").nth(1).click();
+  await other.waitForFunction(() => window.__mealPlanner.state.todos.length === 2);
+  assert.deepEqual(a.errors, []);
+  await a.ctx.close();
+});
+
+test("E2E DATA-11 when saving fails (storage full), a warning stays on screen until saving works again", async () => {
+  const a = await open();
+  assert.equal(await tid(a.page, "save-warning").isVisible(), false);
+  await a.page.evaluate(() => {
+    const orig = Storage.prototype.setItem;
+    window.__restoreSave = () => { Storage.prototype.setItem = orig; };
+    Storage.prototype.setItem = function () { throw new DOMException("full", "QuotaExceededError"); };
+  });
+  await tid(a.page, "tab-todo").click();
+  await tid(a.page, "todo-idea").first().click();
+  await tid(a.page, "save-warning").waitFor();
+  assert.match(await tid(a.page, "save-warning").innerText(), /aren't being saved/);
+  await a.page.evaluate(() => window.__restoreSave());
+  await tid(a.page, "todo-idea").nth(1).click();
+  await tid(a.page, "save-warning").waitFor({ state: "hidden" });
+  await a.ctx.close();
+});
