@@ -316,6 +316,30 @@ test("E2E SHOP-15 the details sheet edits an item; store mode is full screen wit
   await ctx.close();
 });
 
+test("E2E SHOP-16 Back closes the sheet, then leaves store mode, without leaving the app", async () => {
+  const { page, ctx } = await open(mock, { viewport: { width: 390, height: 844 } });
+  await tid(page, "tab-shopping").click();
+  await tid(page, "store-mode").click();
+  await tid(page, "shop-fab").click();
+  await tid(page, "shop-sheet").waitFor();
+  await page.goBack();
+  await tid(page, "shop-sheet").waitFor({ state: "detached" });
+  assert.match(await tid(page, "store-mode").innerText(), /Done shopping/);
+  await page.goBack();
+  await page.waitForTimeout(100);
+  assert.match(await tid(page, "store-mode").innerText(), /at the store/);
+  assert.match(page.url(), /#shopping$/);
+  // Done shopping after a sheet was closed by its own ✕ leaves no stray history step behind
+  await tid(page, "store-mode").click();
+  await tid(page, "shop-fab").click();
+  await page.locator("[data-testid=shop-sheet] [data-sheet-close]").click();
+  await tid(page, "store-mode").click();
+  await page.waitForTimeout(100);
+  assert.ok(await page.locator(".tabs").isVisible());
+  assert.match(page.url(), /#shopping$/);
+  await ctx.close();
+});
+
 test("E2E TODO-05 to-dos: tap the row to tick, edit in the sheet, swipe left to delete", async () => {
   const { page, ctx } = await open(mock, { viewport: { width: 390, height: 844 } });
   await tid(page, "tab-todo").click();
@@ -618,7 +642,8 @@ test("E2E SHOP-13 ticking food as bought adds it to the kitchen; diapers and nap
   const { page, ctx } = await open();
   await tid(page, "tab-shopping").click();
   await addShopItems(page, ["Drumstick", "Diapers", "Napkins"]);
-  for (const n of ["drumstick", "diapers", "napkins"]) await page.locator(`[data-testid=shop-item][data-name="${n}"] input[type=checkbox]`).check();
+  // Taps right after a tick are ignored briefly (the next row slides under the thumb), so pause between ticks.
+  for (const n of ["drumstick", "diapers", "napkins"]) { await page.locator(`[data-testid=shop-item][data-name="${n}"] input[type=checkbox]`).check(); await page.waitForTimeout(350); }
   await page.waitForTimeout(300);
   const pantry = await page.evaluate(() => JSON.parse(localStorage.getItem("familyMealPlanner.v1")).pantry.map((x) => x.toLowerCase()));
   assert.ok(pantry.includes("drumstick"));

@@ -181,7 +181,7 @@ input[type=date], input[type=time] { height: 42px; }
 /* Recipes */
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip { display: inline-flex; align-items: center; gap: 4px; border-radius: 999px; background: var(--brand-soft); color: var(--ink); padding: 4px 4px 4px 12px; font-size: .9rem; }
-.chip button { border: 0; background: none; width: 26px; height: 26px; border-radius: 50%; color: var(--muted); }
+.chip button { border: 0; background: none; width: 36px; height: 36px; border-radius: 50%; color: var(--muted); }
 .chip button:hover { background: var(--card); color: var(--bad); }
 .chip.add { background: var(--bg); border: 1px dashed var(--line); padding: 4px 12px; cursor: pointer; }
 .recipe-grid { display: grid; gap: 12px; }
@@ -263,8 +263,12 @@ details > summary { cursor: pointer; color: var(--brand); font-weight: 500; }
 body.in-store { padding-bottom: 0; }
 body.in-store .topbar, body.in-store .tabs { display: none; }
 body.in-store .shop-head { position: sticky; top: 0; z-index: 4; margin: -16px -16px 14px; border-radius: 0 0 var(--radius) var(--radius); padding-top: calc(14px + env(safe-area-inset-top)); }
-body.in-store .fab { bottom: calc(16px + env(safe-area-inset-bottom)); }
-body.in-store .toast { bottom: calc(86px + env(safe-area-inset-bottom)) !important; }
+body.in-store .fab { bottom: calc(16px + env(safe-area-inset-bottom)); width: 60px; height: 60px; padding: 0; justify-content: center; font-size: 0; gap: 0; }
+body.in-store .fab span { font-size: 1.8rem; }
+/* The toast becomes a strip along the bottom edge so it never sits on a row */
+body.in-store .toast { left: 0; right: 0; bottom: 0 !important; width: auto; max-width: none; transform: translateY(100%); border-radius: 0; justify-content: space-between; padding: 8px 16px calc(8px + env(safe-area-inset-bottom)) !important; }
+body.in-store .toast.show { transform: none; }
+body.in-store .view:has(> .fab) { padding-bottom: 96px; }
 
 /* Floating add button above the tab bar */
 .fab {
@@ -296,7 +300,7 @@ dialog.sheet {
 .stepper .btn { font-size: 1.5rem; padding: 0; }
 .radio-chips label { cursor: pointer; }
 .radio-chips input { position: absolute; opacity: 0; width: 1px; height: 1px; }
-.radio-chips span { display: inline-flex; align-items: center; min-height: 44px; padding: 8px 16px; border: 1px solid var(--line); border-radius: 999px; background: var(--card); color: var(--ink); font-size: .95rem; }
+.radio-chips span { display: inline-flex; align-items: center; justify-content: center; min-width: 48px; min-height: 44px; padding: 8px 16px; border: 1px solid var(--line); border-radius: 999px; background: var(--card); color: var(--ink); font-size: .95rem; }
 .radio-chips input:checked + span { background: var(--brand); color: var(--brand-ink); border-color: var(--brand); font-weight: 600; }
 .radio-chips input:focus-visible + span { outline: 3px solid var(--brand); outline-offset: 2px; }
 .chip.big { min-height: 44px; padding: 8px 16px; font-size: .95rem; }
@@ -331,7 +335,7 @@ dialog.sheet {
   display: flex; align-items: center; gap: 12px;
 }
 .toast.has-undo.show { pointer-events: auto; padding: 6px 6px 6px 16px; }
-.toast-undo { border: 0; border-radius: 999px; background: var(--brand-soft); color: var(--brand); font-weight: 700; min-height: 40px; padding: 0 16px; flex: none; }
+.toast-undo { border: 0; border-radius: 999px; background: var(--brand-soft); color: var(--brand); font-weight: 700; min-height: 44px; padding: 0 16px; flex: none; }
 /* Clear of the floating add button */
 body:has(.view:not([hidden]) > .fab) .toast { bottom: calc(146px + env(safe-area-inset-bottom)); }
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
@@ -371,3 +375,6 @@ label.row > input[type=checkbox] { width: 22px; height: 22px; accent-color: var(
 dialog details > * + * { margin-top: 8px; }
 .sheet form > .btn.big { width: 100%; }
 .shop-head [data-testid=store-mode] { white-space: nowrap; flex: none; }
+/* The main button of a sheet stays in reach while the fields above it scroll */
+.sheet form > .btn.primary.big { position: sticky; bottom: 0; box-shadow: 0 -10px 12px var(--card), 0 30px 0 18px var(--card); }
+.shop-extra > summary { display: flex; align-items: center; min-height: 44px; }

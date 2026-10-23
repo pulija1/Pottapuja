@@ -52,6 +52,7 @@ function toast(msg, undo = null) {
 
 // A bottom sheet: slides up from the bottom, closes on Escape, a tap on the dimmed
 // backdrop, the ✕, or dragging the handle down. Forms inside use the global submit handler.
+let ignorePop = false;
 function sheet(testid, html) {
   $(`dialog[data-testid=${testid}]`)?.close();
   const dlg = document.createElement("dialog");
@@ -62,7 +63,12 @@ function sheet(testid, html) {
   dlg.addEventListener("click", (e) => {
     if (e.target === dlg || e.target.closest("[data-sheet-close]")) dlg.close();
   });
-  dlg.addEventListener("close", () => dlg.remove());
+  // The phone's Back gesture closes the sheet instead of leaving the app.
+  history.pushState({ sheet: true }, "");
+  dlg.addEventListener("close", () => {
+    dlg.remove();
+    if (history.state?.sheet) { ignorePop = true; history.back(); }
+  });
   let startY = null;
   const grip = dlg.querySelector(".sheet-grip");
   grip.addEventListener("pointerdown", (e) => { startY = e.clientY; grip.setPointerCapture(e.pointerId); dlg.style.transition = "none"; });
@@ -1024,7 +1030,7 @@ function renderShopping() {
         <h3><span class="aisle-icon" aria-hidden="true">${AISLE_ICONS[aisle] || "🛍️"}</span>${esc(aisle)}<span class="aisle-count">${list.length}</span></h3>
         ${list.map(shopRow).join("")}
       </section>`).join("")}
-      ${!toBuy.length ? `<div class="card empty-state" data-testid="shop-empty">${items.length ? "🎉 Everything is in the cart." : "The list is empty. Tap <strong>+ Add item</strong>, or pull items from your meal plan."}</div>` : ""}
+      ${!toBuy.length ? `<div class="card empty-state" data-testid="shop-empty">${items.length ? `🎉 Everything is in the cart.${ui.storeMode ? '<button class="btn primary big" style="display:flex;width:100%;margin-top:12px" data-action="store-mode" data-testid="store-done">✓ Done shopping</button>' : ""}` : "The list is empty. Tap <strong>+ Add item</strong>, or pull items from your meal plan."}</div>` : ""}
       ${inCart.length ? `<details class="card cart" data-testid="shop-cart" data-cart ${ui.cartOpen ? "open" : ""}>
         <summary><span class="aisle-icon" aria-hidden="true">🛒</span>In the cart <span class="aisle-count">${inCart.length}</span></summary>
         ${inCart.sort((a, b) => a.name.localeCompare(b.name)).map(shopRow).join("")}
@@ -1038,7 +1044,7 @@ function renderShopping() {
         <button class="btn" data-action="plan-to-shopping" data-testid="plan-to-shopping">From next 7 days of meals</button>
         <button class="btn" data-action="copy-list" data-testid="copy-list">Copy list as text</button>
       </div>
-      <details style="margin-top:10px"><summary>Stores</summary>
+      <details class="shop-extra" style="margin-top:10px"><summary>Stores</summary>
         <div class="chips" style="margin-top:8px">${state.stores.map((s) => `<span class="chip">${esc(s)}<button data-action="store-del" data-store="${esc(s)}" aria-label="Remove ${esc(s)}">✕</button></span>`).join("")}</div>
         <form data-form="store-add" class="row" style="margin-top:8px"><input type="text" name="store" class="grow" placeholder="Add a store" required><button class="btn sm">Add</button></form>
       </details>
@@ -1121,6 +1127,7 @@ function toggleShopItem(id, bought) {
   row?.classList.toggle("bought", bought);
   row?.classList.add("leaving");
   clearTimeout(toggleShopItem.timer);
+  rowChangedAt = Date.now();
   toggleShopItem.timer = setTimeout(() => { if (ui.tab === "shopping") renderShopping(); }, 260);
   toast(msg, () => { setBought(it, !bought); save(state); if (ui.tab === "shopping") renderShopping(); });
 }
@@ -1425,7 +1432,7 @@ document.addEventListener("click", (e) => {
       break;
     }
 
-    case "store-mode": ui.storeMode = !ui.storeMode; keepScreenOn(ui.storeMode); render(); break;
+    case "store-mode": setStoreMode(!ui.storeMode); break;
     case "shop-fab": shopAddSheet(); break;
     case "shop-more": { const it = state.shopping.find((i) => i.id === el.dataset.id); if (it) shopItemSheet(it); break; }
     case "shop-sheet-toggle": {
@@ -1676,13 +1683,17 @@ $("#toast").addEventListener("click", (e) => {
 const SWIPE_AT = 90;
 let swipe = null;
 let swipedAt = 0;
-// Swallow the click the browser may send after the finger lifts from a swipe.
+let rowChangedAt = 0;
+// Swallow the click the browser may send after the finger lifts from a swipe, and a quick
+// second tap just after a tick, when the next row has slid up under the thumb.
 document.addEventListener("click", (e) => {
-  if (Date.now() - swipedAt < 400 && e.target.closest?.(".swipe")) { e.preventDefault(); e.stopPropagation(); }
+  const now = Date.now();
+  if ((now - swipedAt < 400 || now - rowChangedAt < 300) && e.target.closest?.(".swipe")) { e.preventDefault(); e.stopPropagation(); }
 }, true);
 document.addEventListener("pointerdown", (e) => {
   const fg = e.target.closest?.(".swipe-fg");
-  if (!fg || e.button > 0 || e.target.closest("button")) return;
+  // Starts at the very left edge belong to the phone's own Back swipe.
+  if (!fg || e.button > 0 || e.target.closest("button") || e.clientX < 20) return;
   swipe = { row: fg.parentElement, fg, x: e.clientX, y: e.clientY, dx: 0, active: false };
 });
 document.addEventListener("pointermove", (e) => {
@@ -1717,6 +1728,21 @@ function endSwipe() {
 }
 document.addEventListener("pointerup", endSwipe);
 document.addEventListener("pointercancel", () => { if (swipe) { swipe.fg.style.transform = ""; swipe.row.classList.remove("swiping", "go-l", "go-r"); swipe = null; } });
+
+// Store mode is a history step, so the phone's Back gesture leaves it instead of the app.
+function setStoreMode(on) {
+  ui.storeMode = on;
+  keepScreenOn(on);
+  if (on) history.pushState({ store: true }, "");
+  else if (history.state?.store) { ignorePop = true; history.back(); }
+  render();
+}
+window.addEventListener("popstate", () => {
+  if (ignorePop) { ignorePop = false; return; }
+  const open = document.querySelector("dialog.sheet[open]");
+  if (open) open.close();
+  else if (ui.storeMode) setStoreMode(false);
+});
 
 // In store mode the phone screen stays on, so the list doesn't lock between aisles.
 let wakeLock = null;
