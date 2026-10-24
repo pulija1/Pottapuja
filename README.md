@@ -4,24 +4,25 @@ A browser app for a South Indian family with an 8-month-old and a 4-year-old who
 
 - **Calendar**: tap a date to see its meals in collapsible sections for the 4-year-old, the 8-month-old and the family, plus the day's schedule and to-dos. Each empty day shows **suggested meals** picked from what is in the kitchen (safety-checked for each child); shuffle or swap them, then **Approve these meals** to put them into that day's plan and approve it. Each date shows whether it is approved, waiting for approval, or has nothing planned, plus a count of what is still pending (unapproved plan, reminders not done, to-dos not ticked). Editing an approved day sends it back to "waiting for approval".
 - **Recipes**: list what's in the kitchen and get recipes made from it. With the AI on, Claude writes the recipes; every recipe is then checked in code for age safety (no honey, salt, sugar or whole nuts for the baby, soft textures only, nut-free school lunchboxes). Recipes that fail are dropped. Saved recipes work offline.
-- **Shopping**: one list, grouped by aisle, with store filters and a big-checkbox "I'm at the store" mode. Ticking an item as bought adds it to the kitchen, so the next suggestions use it. Pull missing ingredients from the next 7 days of meals; quantities merge (500 g + 1 kg toor dal = 1.5 kg) and Indian names match (sooji = rava, tuvar = toor).
-- **To do**: things to do for the kids (buy dresses, check the school schedule, doctor's appointment), defaulting to tomorrow, with one-tap ideas, a "not done yet" list and the coming week.
+- **Shopping**: one list, grouped by aisle with big icons and store filters. Every row is a large touch target: tap it (or swipe it right) when it's in the cart and it slides into a collapsed **In the cart** section; swipe left to delete. Both show an **Undo** toast. **+ Add item** opens a sheet from the bottom with one-tap staples, a − / + quantity stepper and unit and store chips; **⋯** on a row opens its details to edit. **I'm at the store** goes full screen with bigger rows, keeps the phone screen on and ends with **Done shopping**. Ticking an item as bought adds it to the kitchen, so the next suggestions use it. Pull missing ingredients from the next 7 days of meals; quantities merge (500 g + 1 kg toor dal = 1.5 kg) and Indian names match (sooji = rava, tuvar = toor).
+- **To do**: things to do or bring for the kids (pack the school bag, buy dresses, doctor's appointment), defaulting to tomorrow, with one-tap ideas, a "not done yet" list and the coming week. Rows work like the shopping list: tap or swipe right to tick, swipe left to delete, **⋯** to edit, and **+ Add to do** opens a bottom sheet.
 - **Reminders**: school events, vaccines, birthdays, with repeats, a "missed" list, and alerts while the app is open.
 
-All data lives in the browser (localStorage). There is a backup download and restore.
+All data lives in the browser (localStorage), with a backup download and restore. With family sync on, it is also kept in Firebase so every phone in the family sees the same data.
 
-### Sign in and Check in (GitHub)
+### Family sync (Firebase)
 
-On first launch the app offers a sign-in page (skipped automatically when GitHub can't be reached, or with "Use on this device only"). Signing in takes a private GitHub repository (`owner/name`) and a fine-grained token limited to that repository with **Contents: Read and write**; GitHub doesn't allow apps to sign in with a password. The token stays in that browser only.
+Sign in with Google, start a family space, and add the rest of the family by their Google email; their phone shows who started the space and asks before joining. Every change saves on its own and shows on the other phones within seconds; with no signal the app works from the phone's copy and catches up later. Each write is a Firestore transaction that merges this phone's edit into the cloud's current value, so two phones changing the same list, day or item at once both keep their changes. Only people listed in the family space can read or change its data (see `firestore.rules`). The first time a phone signs in, its own data is added to the family's: nothing is thrown away. **Export backup** downloads a copy at any time. (This replaces the earlier GitHub check-in.)
 
-- **⬆ Check in** (top right) commits everything to `output/` in the private repository as readable Markdown: `meal-plan.md`, `shopping-list.md`, `todo.md`, `reminders.md`, `kitchen.md`, `recipes.md` and `README.md`, plus a session log in `output/sessions/` with what changed since the last check-in. A dot on the button means there are changes not checked in yet.
-- **⬇ Load latest** (profile menu) reads those Markdown files back. The exact data sits in an HTML comment at the end of each file, so the readable part can be edited without breaking anything.
-- If another device checked in since this one last synced, Check in asks whether to load theirs or keep yours instead of overwriting.
-- Public repositories are refused, so the family's data can't end up readable by everyone.
+Setup (once, free): [docs/firebase-setup.md](docs/firebase-setup.md). Until `public/firebase-config.js` has a project in it, the app works on one device as before.
+
+- `public/cloud.js`: Google sign-in, the family space, and the Firestore listener and writes.
+- `public/shared/cloud-sync.js`: how the data is split into documents (a field per item) and the merge: inside objects key by key, lists of items by id, the kitchen and store lists as sets.
+- `npm run test:firebase`: rules tests and two-phone sync tests against the Firebase emulator (Java 21).
 
 ### AI recipes on GitHub Pages (your own Claude API key)
 
-GitHub Pages has no server, so the site can't hold an API key. Instead, tap the AI chip or 👤 → **Claude API key**, and paste a key from [console.anthropic.com](https://console.anthropic.com) → API Keys. The key is kept only in that browser (never in check-ins or backups), and the browser calls Claude directly with the same prompt, answer schema and age-safety screening as the server (`public/shared/ai-prompt.js`). Set a monthly spend limit in the Console. When the site has its own AI server, that is used first.
+GitHub Pages has no server, so the site can't hold an API key. Instead, tap the AI chip or 👤 → **Claude API key**, and paste a key from [console.anthropic.com](https://console.anthropic.com) → API Keys. The key is kept only in that browser (never synced to the family or put in backups), and the browser calls Claude directly with the same prompt, answer schema and age-safety screening as the server (`public/shared/ai-prompt.js`). Set a monthly spend limit in the Console. When the site has its own AI server, that is used first.
 
 ## Run it
 
@@ -50,7 +51,7 @@ The app never depends on the AI. If `/api/recipes` fails, times out (50 s in the
 ## For testers
 
 - `?today=YYYY-MM-DD` in the URL pins "today", e.g. `http://localhost:3000/?today=2026-10-22`.
-- Key elements carry `data-testid` attributes (`approve-day`, `day-status` with `data-status`, `cal-day-YYYY-MM-DD` with `data-status` and `data-pending`, `generate-recipes`, `recipe-card` with `data-safe`, `shop-item`, `store-mode`, `todo-item`, `meal-group-kid`, `day-suggestions`, `suggest-approve`, `rem-add`, …).
+- Key elements carry `data-testid` attributes (`approve-day`, `day-status` with `data-status`, `cal-day-YYYY-MM-DD` with `data-status` and `data-pending`, `generate-recipes`, `recipe-card` with `data-safe`, `shop-item`, `shop-fab`, `shop-more`, `shop-cart`, `store-mode`, `todo-item`, `todo-fab`, `toast-undo`, `meal-group-kid`, `day-suggestions`, `suggest-approve`, `rem-add`, …).
 - `window.__mealPlanner` exposes the live state in the browser console.
 - Pure logic is in `public/shared/` and can be unit tested directly:
   - `safety.js`: `checkRecipe(recipe, { age: "baby" | "kid", lunchbox })`, `checkForAudience(recipe)`

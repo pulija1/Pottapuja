@@ -1,6 +1,6 @@
 // AI recipes straight from the browser with the family's own Claude API key, for sites with no
 // server (GitHub Pages). The key lives only in this browser under its own storage key, so it
-// never goes into backups or check-ins. This is a static site with no build step, so it calls the
+// never goes into backups or family sync. This is a static site with no build step, so it calls the
 // Messages API with fetch rather than the Node SDK the server uses.
 
 import { SYSTEM, MODEL, RECIPE_LIST_SCHEMA, buildPrompt, parseRequest, screen } from "./shared/ai-prompt.js";
