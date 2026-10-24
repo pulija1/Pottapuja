@@ -32,3 +32,13 @@ test("AIKEY-03 key check accepts Claude keys only", () => {
   assert.ok(!looksLikeKey("sk-ant-"));
   assert.ok(!looksLikeKey(""));
 });
+
+test("QUICK-01 quick mode asks for one recipe ready in 20 minutes", () => {
+  const req = parseRequest({ ingredients: ["eggs", "bread"], forWhom: "kid", mealType: "breakfast", count: 4, quick: true });
+  assert.equal(req.count, 1);
+  const p = buildPrompt(req);
+  assert.match(p, /Suggest 1 recipe for/);
+  assert.match(p, /20 minutes or less/);
+  assert.equal(parseRequest({ quick: "yes" }).quick, false);
+  assert.doesNotMatch(buildPrompt(parseRequest({ ingredients: ["rice"] })), /minutes or less/);
+});
