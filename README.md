@@ -22,6 +22,10 @@ Setup (once, free): [docs/firebase-setup.md](docs/firebase-setup.md). Until `pub
 - `public/shared/cloud-sync.js`: how the data is split into documents (a field per item) and the merge: inside objects key by key, lists of items by id, the kitchen and store lists as sets.
 - `npm run test:firebase`: rules tests and two-phone sync tests against the Firebase emulator (Java 21).
 
+### AI recipes on GitHub Pages (your own Claude API key)
+
+GitHub Pages has no server, so the site can't hold an API key. Instead, tap the AI chip or 👤 → **Claude API key**, and paste a key from [console.anthropic.com](https://console.anthropic.com) → API Keys. The key is kept only in that browser (never synced to the family or put in backups), and the browser calls Claude directly with the same prompt, answer schema and age-safety screening as the server (`public/shared/ai-prompt.js`). Set a monthly spend limit in the Console. When the site has its own AI server, that is used first.
+
 ## Run it
 
 ```bash

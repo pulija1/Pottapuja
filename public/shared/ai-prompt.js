@@ -1,0 +1,88 @@
+// The recipe AI's instructions, request cleaning, answer schema and safety screening. Shared by
+// the server (lib/ai.js) and the browser (ai-browser.js), so both ask Claude the same way and
+// drop the same unsafe answers.
+
+import { checkForAudience } from "./safety.js";
+
+export const MODEL = "claude-opus-5-5";
+
+export const SYSTEM = `You plan meals for a South Indian family (Telugu, Tamil, Kannada and Kerala home cooking) with an 8-month-old baby and a 4-year-old who goes to school.
+
+Write practical home recipes that use the ingredients the family already has, adding as few extra ingredients as possible.
+
+Rules for the 8-month-old (forWhom "baby"):
+- No salt, no sugar or jaggery, and never honey.
+- No whole or chopped nuts; finely ground nut powder only.
+- Texture must be puree, mashed, porridge or soft finger food. Nothing hard, round or chewy.
+- Mild: no chilli, pepper or garam masala. A pinch of turmeric, jeera or hing is fine.
+- Eggs fully cooked. No tea, coffee, pickles, papad or packaged foods.
+
+Rules for the 4-year-old (forWhom "kid"):
+- Mild spice. No whole nuts. Cut grapes lengthwise.
+- Lunchbox recipes must travel well for 4 hours unrefrigerated and be easy to eat with fingers or a spoon.
+- If the parent says the school is nut-free, lunchbox and snack recipes must contain no peanuts or tree nuts (seed butters are fine).
+
+Family recipes (forWhom "family") should say in the notes how to take out a plain baby portion before salt and spice go in.
+
+Use quantities as numbers and short units (g, kg, ml, cup, tbsp, tsp, pcs, pinch). Keep steps short and clear.`;
+
+export const FOR_WHOM = ["baby", "kid", "family"];
+export const MEAL_TYPES = ["breakfast", "lunch", "lunchbox", "snack", "dinner"];
+
+const obj = (properties) => ({ type: "object", properties, required: Object.keys(properties), additionalProperties: false });
+
+// JSON schema for Claude's structured output (the server's zod schema has the same shape).
+export const RECIPE_LIST_SCHEMA = obj({
+  recipes: {
+    type: "array",
+    items: obj({
+      title: { type: "string" },
+      forWhom: { type: "string", enum: FOR_WHOM },
+      mealType: { type: "string", enum: MEAL_TYPES },
+      texture: { type: "string" },
+      prepMinutes: { type: "number" },
+      ingredients: { type: "array", items: obj({ name: { type: "string" }, quantity: { type: "number" }, unit: { type: "string" } }) },
+      steps: { type: "array", items: { type: "string" } },
+      notes: { type: "string" },
+    }),
+  },
+});
+
+export function buildPrompt({ ingredients, forWhom, mealType, notes, count, schoolNutFree }) {
+  const who = forWhom === "both" ? "the baby and the 4-year-old (mix of both)" : forWhom === "baby" ? "the 8-month-old baby" : forWhom === "kid" ? "the 4-year-old" : "the whole family";
+  return [
+    `Ingredients we have: ${ingredients.join(", ") || "(nothing listed, suggest staples)"}.`,
+    `Suggest ${count} recipes for ${who}.`,
+    mealType ? `Meal: ${mealType}.` : "",
+    schoolNutFree ? "The school is nut-free." : "",
+    notes ? `Extra notes from the parent: ${notes}` : "",
+  ].filter(Boolean).join("\n");
+}
+
+// Clean and bound the request body.
+export function parseRequest(body) {
+  const b = body && typeof body === "object" ? body : {};
+  const list = Array.isArray(b.ingredients) ? b.ingredients : [];
+  const ingredients = list
+    .map((s) => String(s ?? "").trim().slice(0, 60))
+    .filter(Boolean)
+    .slice(0, 60);
+  const forWhom = ["baby", "kid", "family", "both"].includes(b.forWhom) ? b.forWhom : "both";
+  const mealType = ["breakfast", "lunch", "lunchbox", "snack", "dinner", ""].includes(b.mealType ?? "") ? (b.mealType ?? "") : "";
+  const notes = String(b.notes ?? "").slice(0, 300);
+  const count = Math.min(6, Math.max(1, Number.parseInt(b.count, 10) || 4));
+  const schoolNutFree = b.schoolNutFree === true;
+  return { ingredients, forWhom, mealType, notes, count, schoolNutFree };
+}
+
+// Attach safety results; drop recipes that fail the age rules.
+export function screen(recipes, opts = {}) {
+  const kept = [];
+  const rejected = [];
+  for (const r of recipes) {
+    const safety = checkForAudience(r, opts);
+    if (safety.safe) kept.push({ ...r, safety });
+    else rejected.push({ title: r.title, forWhom: r.forWhom, errors: safety.errors });
+  }
+  return { kept, rejected };
+}
