@@ -117,10 +117,11 @@ test("DATA-04 path traversal is blocked", async () => {
 });
 
 test("DATA-05 no API key or secret in responses or client files", async () => {
-  const files = ["/", "/app.js", "/store.js", "/shared/safety.js", "/shared/recipes.js"];
+  // The app mentions the "sk-ant-" prefix to help people paste their own key; an actual key never ships.
+  const files = ["/", "/app.js", "/store.js", "/ai-browser.js", "/shared/ai-prompt.js", "/shared/safety.js", "/shared/recipes.js"];
   for (const f of files) {
     const text = await (await fetch(mock.url + f)).text();
-    assert.ok(!/sk-ant-|ANTHROPIC_API_KEY/.test(text), f);
+    assert.ok(!/sk-ant-[\w-]{20,}|ANTHROPIC_API_KEY/.test(text), f);
   }
 });
 

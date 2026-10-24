@@ -1,5 +1,6 @@
 import { load, save, exportJson, importJson, onChange, defaultState, onSaveError, cancelPendingSave, STORAGE_KEY } from "./store.js";
 import * as cloud from "./cloud.js";
+import { getAiKey, setAiKey, looksLikeKey, browserRecipes } from "./ai-browser.js";
 import { todayKey, addDays, addMonths, monthGrid, monthLabel, prettyDate, fromKey, isDateKey, isSchoolDay, occurrences } from "./shared/dates.js";
 import { checkRecipe, checkForAudience, isNutIngredient, isSchoolFood } from "./shared/safety.js";
 import { LIBRARY, suggestFromLibrary } from "./shared/recipes.js";
@@ -228,19 +229,22 @@ async function checkAi() {
   } catch {
     ui.ai = "unreachable";
   }
+  // No AI on this site (GitHub Pages has no server): use the family's own key from this browser.
+  if (!aiOnline() && getAiKey()) ui.ai = "key";
   renderHeader();
   if (ui.tab === "recipes") render();
 }
 
 function aiOnline() {
-  return ui.ai === "live" || ui.ai === "mock";
+  return ui.ai === "live" || ui.ai === "mock" || ui.ai === "key";
 }
 
 // ---------- header & tabs ----------
 function renderHeader() {
   $("#today-label").textContent = "Today: " + fromKey(TODAY).toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" });
   const chip = $("#ai-chip");
-  const label = { live: "AI recipes on", mock: "AI: test mode", off: "AI off: using saved recipes", unreachable: "Offline: using saved recipes", unknown: "AI: checking…" }[ui.ai];
+  const label = { live: "AI recipes on", key: "AI recipes on (your key)", mock: "AI: test mode", off: "AI off: tap to add a key", unreachable: "AI off: tap to add a key", unknown: "AI: checking…" }[ui.ai];
+  chip.title = aiOnline() ? "Tap to check the recipe AI again" : "Recipes come from the built-in recipe book. Tap to add a Claude API key for AI recipes.";
   chip.textContent = label;
   chip.className = "ai-chip " + (aiOnline() ? "on" : ui.ai === "unknown" ? "" : "off");
   renderSyncButtons();
@@ -417,8 +421,15 @@ function chooseFamilyDialog(c, list) {
   });
 }
 
-function profileDialog() {
+function profileDialog({ focusKey = false } = {}) {
   const c = cloud.getCloud();
+  const hasKey = !!getAiKey();
+  const aiKey = `<details ${focusKey ? "open" : ""} data-testid="ai-key-section"><summary class="small">Claude API key (AI recipes)${hasKey ? " · added" : ""}</summary>
+      <p class="small muted">Kept only in this browser. It is never synced to the family or put in backups. Get a key at console.anthropic.com under API Keys, and set a monthly spend limit there.</p>
+      <label class="field"><span>API key</span><input name="aiKey" type="password" autocomplete="off" spellcheck="false" placeholder="${hasKey ? "Saved. Paste a new key to replace it" : "sk-ant-…"}" data-testid="ai-key"></label>
+      <p class="small" data-testid="ai-key-status" role="status"></p>
+      <div class="row"><button type="button" class="btn sm" data-sync="aikey-save" data-testid="ai-key-save">Save key</button>${hasKey ? '<button type="button" class="btn sm ghost" data-sync="aikey-remove" data-testid="ai-key-remove">Remove key</button>' : ""}</div>
+    </details>`;
   const names = `<details ${state.settings.kidName ? "" : "open"} data-testid="family-names"><summary class="small">Children's names</summary>
       <p class="small muted">Saved with the family's data, not in the app's public code.</p>
       <label class="field"><span>4-year-old</span><input name="kidName" value="${esc(state.settings.kidName || "")}" maxlength="30" data-testid="kid-name"></label>
@@ -446,6 +457,7 @@ function profileDialog() {
     ${c.configured ? `<p class="small sync-status" data-testid="cloud-status-text" role="status">${esc(cloudStatusText(c))}</p>` : ""}
     ${members}
     ${names}
+    ${aiKey}
     <p class="small muted">A backup file is still handy: <button type="button" class="linkish" data-sync="export" data-testid="profile-export">Export backup</button></p>
     <div class="row between">
       ${c.user ? '<button type="button" class="btn ghost sm" data-sync="signout" data-testid="cloud-signout">Sign out of this phone</button>' : ""}
@@ -476,6 +488,22 @@ function profileDialog() {
         break;
       case "export": downloadBackup(); break;
       case "signout": await cloud.signOutCloud(); dlg.close(); toast("Signed out. Your data is still on this phone."); break;
+      case "aikey-save": {
+        const k = dlg.querySelector("form").elements.aiKey.value.trim();
+        const status = dlg.querySelector("[data-testid=ai-key-status]");
+        if (!looksLikeKey(k)) { status.textContent = "⚠️ That doesn't look like a Claude API key. It starts with sk-ant-."; break; }
+        setAiKey(k);
+        dlg.close();
+        toast("API key saved on this device.");
+        ui.ai = "unknown"; renderHeader(); checkAi();
+        break;
+      }
+      case "aikey-remove":
+        setAiKey("");
+        dlg.close();
+        toast("API key removed from this device.");
+        ui.ai = "unknown"; renderHeader(); checkAi();
+        break;
       case "close": dlg.close(); break;
     }
   });
@@ -923,7 +951,7 @@ async function generate(form) {
     ui.aiNotice = `${why} Showing recipes from the built-in family recipe book that best match your kitchen.`;
   };
   if (!aiOnline()) {
-    fallback(ui.ai === "off" ? "The recipe AI is turned off." : "The recipe AI can't be reached right now.");
+    fallback(ui.ai === "unknown" ? "The recipe AI is still being checked." : "AI recipes are off. To turn them on, add a Claude API key in 👤 Profile.");
     render();
     return;
   }
@@ -933,13 +961,25 @@ async function generate(form) {
   render();
   const started = performance.now();
   try {
-    const res = await fetch("api/recipes", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-      signal: ui.aiController.signal,
-    });
-    const data = await res.json().catch(() => ({}));
+    let res, data;
+    if (ui.ai === "key") {
+      try {
+        data = await browserRecipes(body, { signal: ui.aiController.signal });
+        res = { ok: true };
+      } catch (err) {
+        if (ui.aiController?.signal.aborted) throw err;
+        res = { ok: false };
+        data = { error: err.message };
+      }
+    } else {
+      res = await fetch("api/recipes", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+        signal: ui.aiController.signal,
+      });
+      data = await res.json().catch(() => ({}));
+    }
     if (!res.ok) {
       fallback((data.error || "The recipe AI is unavailable.") + "");
     } else {
@@ -1327,7 +1367,10 @@ function checkDueReminders() {
 document.addEventListener("click", (e) => {
   const tab = e.target.closest(".tabs button");
   if (tab) return setTab(tab.dataset.tab);
-  if (e.target.closest("#ai-chip")) { ui.ai = "unknown"; renderHeader(); return checkAi(); }
+  if (e.target.closest("#ai-chip")) {
+    if (ui.ai === "off" || ui.ai === "unreachable") return profileDialog({ focusKey: true });
+    ui.ai = "unknown"; renderHeader(); return checkAi();
+  }
   if (e.target.closest("#cloud")) return profileDialog();
   if (e.target.closest("#profile")) return profileDialog();
   const el = e.target.closest("[data-action]");
