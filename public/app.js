@@ -1,5 +1,4 @@
-import { load, save, exportJson, importJson, onChange } from "./store.js";
-import { getSync, setSync, signOut, syncReady, cleanRepo, cleanFolder, verify, checkIn, loadLatest, githubReachable } from "./sync.js";
+import { load, save, exportJson, importJson, onChange, defaultState } from "./store.js";
 import * as cloud from "./cloud.js";
 import { todayKey, addDays, addMonths, monthGrid, monthLabel, prettyDate, fromKey, isDateKey, isSchoolDay, occurrences } from "./shared/dates.js";
 import { checkRecipe, checkForAudience, isNutIngredient, isSchoolFood } from "./shared/safety.js";
@@ -30,7 +29,6 @@ const ui = {
   savedFilter: "",
   gen: { forWhom: "both", mealType: "", notes: "" },
   confirmUnsafe: null,    // date whose unsafe plan the parent was warned about
-  syncBusy: false,        // a check-in or load is talking to GitHub
   // recipe form values survive re-renders
 };
 
@@ -240,86 +238,7 @@ function renderHeader() {
   renderSyncButtons();
 }
 
-// ---------- sign-in, profile & check-in ----------
-// Changes made since the last check-in or load on this device.
-function unsynced(sync = getSync()) {
-  return !!state.updatedAt && (!sync.lastAt || state.updatedAt > sync.lastAt);
-}
-
-function renderSyncButtons() {
-  if (cloud.cloudConfigured()) return renderCloudButtons();
-  const sync = getSync();
-  const btn = $("#checkin");
-  btn.disabled = ui.syncBusy;
-  btn.textContent = ui.syncBusy ? "Syncing…" : "⬆ Check in";
-  btn.classList.toggle("dirty", syncReady(sync) && unsynced(sync));
-  btn.title = !syncReady(sync) ? "Sign in to check in to GitHub" : sync.lastAt ? `Last synced ${new Date(sync.lastAt).toLocaleString()}${unsynced(sync) ? ". Changes since then are not checked in." : ""}` : "Not checked in yet";
-  const prof = $("#profile");
-  const who = sync.name || sync.login;
-  prof.innerHTML = syncReady(sync) && sync.avatar ? `<img src="${esc(sync.avatar)}" alt="" width="32" height="32">` : who ? esc(who.trim().charAt(0).toUpperCase()) : "👤";
-  prof.setAttribute("aria-label", syncReady(sync) ? `Signed in as ${who}. Profile and check-in` : "Sign in");
-}
-
-function setStatus(text) {
-  for (const el of document.querySelectorAll("[data-testid=sync-status]")) el.textContent = text;
-}
-
-function syncError(err) {
-  ui.syncBusy = false;
-  if (err?.kind === "expired") {
-    // An expired or revoked token can't do anything: forget it and ask for a new one.
-    setSync({ token: "" });
-    renderSyncButtons();
-    $("dialog[data-testid=profile-dialog]")?.close();
-    showLogin(err.message, { github: true });
-    return;
-  }
-  renderSyncButtons();
-  const msg = err?.message || "Something went wrong talking to GitHub.";
-  setStatus("⚠️ " + msg);
-  toast(msg);
-}
-
-async function doCheckIn({ force = false } = {}) {
-  if (ui.syncBusy) return;
-  if (!syncReady()) return showLogin("Sign in to check in your data to GitHub.", { github: true });
-  ui.syncBusy = true;
-  renderSyncButtons();
-  try {
-    save(state, { now: true });
-    const res = await checkIn(state, { force, today: TODAY });
-    ui.syncBusy = false;
-    renderSyncButtons();
-    if (res.conflict) return conflictDialog();
-    setStatus("✅ Checked in just now.");
-    toast("Checked in to GitHub ✅");
-  } catch (err) {
-    syncError(err);
-  }
-}
-
-async function doLoadLatest() {
-  if (ui.syncBusy) return;
-  if (!syncReady()) return showLogin("Sign in to load your data from GitHub.", { github: true });
-  ui.syncBusy = true;
-  renderSyncButtons();
-  try {
-    const data = await loadLatest();
-    ui.syncBusy = false;
-    if (!data) { renderSyncButtons(); setStatus("Nothing checked in yet."); toast("Nothing has been checked in yet. Tap Check in to save this device's data."); return; }
-    const next = importJson(JSON.stringify(data));
-    for (const k of Object.keys(state)) delete state[k];
-    Object.assign(state, next);
-    save(state, { now: true });
-    clearCaches();
-    render();
-    setStatus("✅ Loaded the latest check-in.");
-    toast("Loaded the latest check-in ✅");
-  } catch (err) {
-    syncError(err);
-  }
-}
-
+// ---------- sign-in & profile ----------
 function modal(testid, html, onClick) {
   $(`dialog[data-testid=${testid}]`)?.close();
   const dlg = document.createElement("dialog");
@@ -333,43 +252,6 @@ function modal(testid, html, onClick) {
   return dlg;
 }
 
-function conflictDialog() {
-  modal("sync-conflict", `<div class="stack">
-    <h2>Another device checked in</h2>
-    <p>Someone checked in from another phone or browser since this one last synced. Choose which data to keep.</p>
-    <button class="btn primary" data-sync="load" data-testid="conflict-load">Load theirs (replaces this device's data)</button>
-    <button class="btn" data-sync="force" data-testid="conflict-force">Keep mine (replaces what's in GitHub)</button>
-    <button class="btn ghost" data-sync="cancel">Cancel</button>
-  </div>`, (act, dlg) => {
-    dlg.close();
-    if (act === "load") doLoadLatest(); else if (act === "force") doCheckIn({ force: true });
-  });
-}
-
-// Full-screen sign-in. Shown on first launch; "Use on this device only" skips it for good.
-function showLogin(note = "", { github = false } = {}) {
-  if (cloud.cloudConfigured() && !github) return showCloudLogin(note);
-  const s = getSync();
-  const el = $("#login");
-  el.innerHTML = `<form class="card login-card" data-testid="login-form" novalidate>
-    <div class="brand"><span class="logo" aria-hidden="true">🍛</span><h1>Family Meal Planner</h1></div>
-    <h2>Sign in</h2>
-    <p class="small muted">Sign in with GitHub to check in your meal plans, lists, to-dos and reminders as Markdown files in your family's private repository, and to load them on other phones.</p>
-    ${note ? `<p class="small" style="color:var(--warn)">${esc(note)}</p>` : ""}
-    <label class="field"><span>Your name</span><input name="name" value="${esc(s.name)}" maxlength="40" placeholder="e.g. Ram" autocomplete="name" data-testid="login-name"></label>
-    <label class="field"><span>Private data repository</span><input name="repo" value="${esc(s.repo)}" placeholder="owner/name, e.g. pulija1/Pottapuja-data" autocapitalize="off" spellcheck="false" data-testid="login-repo"></label>
-    <label class="field"><span>GitHub access token</span><input name="token" type="password" placeholder="github_pat_…" autocomplete="current-password" data-testid="login-token"></label>
-    <p class="small muted">GitHub doesn't let apps sign in with your password. Create a <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">fine-grained token</a> for only the data repository with <b>Contents: Read and write</b> and an expiry such as 90 days, and paste it here. It stays in this browser and is never checked in.</p>
-    <label class="row small"><input type="checkbox" name="remember" ${s.remember === false ? "" : "checked"} data-testid="login-remember"> Remember me on this device (untick on a shared phone or computer)</label>
-    <p class="small sync-status" data-testid="login-status" role="status"></p>
-    <button class="btn primary" data-testid="login-submit">Sign in</button>
-    <button type="button" class="btn ghost" data-login="skip" data-testid="login-skip">Use on this device only, without signing in</button>
-  </form>`;
-  el.hidden = false;
-  document.body.classList.add("locked");
-  el.querySelector(s.repo ? "[name=token]" : "[name=name]").focus();
-}
-
 function hideLogin() {
   $("#login").hidden = true;
   $("#login").innerHTML = "";
@@ -377,127 +259,15 @@ function hideLogin() {
 }
 
 $("#login").addEventListener("click", (e) => {
-  if (e.target.closest("[data-login=skip]")) { setSync({ skipped: true }); cloud.setCloudSkipped(true); hideLogin(); renderSyncButtons(); }
+  if (e.target.closest("[data-login=skip]")) { cloud.setCloudSkipped(true); hideLogin(); renderSyncButtons(); }
   if (e.target.closest("[data-login=google]")) cloudSignIn(e.target.closest("button"));
 });
 
-$("#login").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  if (e.target.dataset.testid !== "login-form") return;
-  const f = e.target.elements;
-  const status = $("[data-testid=login-status]");
-  const btn = $("[data-testid=login-submit]");
-  btn.disabled = true;
-  status.textContent = "Checking with GitHub…";
-  try {
-    const repo = cleanRepo(f.repo.value);
-    const token = f.token.value.trim();
-    const user = await verify({ token, repo });
-    const old = getSync();
-    const sameRepo = old.repo === repo;
-    setSync({ name: f.name.value.trim() || user.name, login: user.login, avatar: user.avatar, repo, token, remember: f.remember.checked, branch: sameRepo ? old.branch : user.branch, skipped: false, ...(sameRepo ? {} : { lastSha: "", lastAt: "", lastSummary: null }) });
-    hideLogin();
-    renderSyncButtons();
-    toast(`Signed in as ${user.login}`);
-    // A fresh device picks up the family's data; a device with its own data checks in,
-    // which asks what to keep if another device already checked in.
-    if (state.updatedAt) doCheckIn(); else doLoadLatest();
-  } catch (err) {
-    btn.disabled = false;
-    // GitHub can't be reached at all: don't hold the family up, open the app and sign in later.
-    if (err?.kind === "network") { hideLogin(); renderSyncButtons(); toast("Couldn't reach GitHub, so you're using the app on this device. Sign in later from the 👤 button."); return; }
-    status.textContent = "⚠️ " + (err?.message || "Couldn't sign in.");
-  }
-});
-
-// First launch: offer sign-in, but only when GitHub can be reached; otherwise just open the app.
+// First launch: offer Google sign-in when family sync is set up and nobody is signed in.
 async function maybeShowLogin() {
-  if (cloud.cloudConfigured()) {
-    await cloud.cloudAuthSettled();
-    const c = cloud.getCloud();
-    if (c.status === "signed-out" && !cloud.cloudSkipped()) showCloudLogin();
-    return;
-  }
-  const s = getSync();
-  if (syncReady(s) || s.skipped || !navigator.onLine) return;
-  if (await githubReachable()) showLogin();
-}
-
-function profileDialog({ github = false } = {}) {
-  if (cloud.cloudConfigured() && !github) return cloudProfileDialog();
-  const s = getSync();
-  const signedIn = syncReady(s);
-  const family = `<details ${state.settings.kidName ? "" : "open"} data-testid="family-names"><summary class="small">Children's names</summary>
-      <p class="small muted">Saved with your data (and checked in to your private repository), not in the app's public code.</p>
-      <label class="field"><span>4-year-old</span><input name="kidName" value="${esc(state.settings.kidName || "")}" maxlength="30" data-testid="kid-name"></label>
-      <label class="field"><span>8-month-old</span><input name="babyName" value="${esc(state.settings.babyName || "")}" maxlength="30" data-testid="baby-name"></label>
-      <button type="button" class="btn sm" data-sync="names" data-testid="save-names">Save names</button>
-    </details>`;
-  const onNames = (dlg) => {
-    const f = dlg.querySelector("form").elements;
-    state.settings = { ...state.settings, kidName: f.kidName.value.trim(), babyName: f.babyName.value.trim() };
-    commit();
-    toast("Names saved.");
-  };
-  if (!signedIn) {
-    modal("profile-dialog", `<form class="stack">
-      <h2>Profile</h2>
-      <p class="small muted">Not signed in. Your data is saved on this device only.</p>
-      <button type="button" class="btn primary" data-sync="signin" data-testid="profile-signin">Sign in to check in to GitHub</button>
-      ${family}
-      <button type="button" class="btn ghost sm" data-sync="close">Close</button>
-    </form>`, (act, dlg) => {
-      if (act === "signin") { dlg.close(); showLogin("", { github: true }); }
-      else if (act === "names") onNames(dlg);
-      else if (act === "close") dlg.close();
-    });
-    return;
-  }
-  modal("profile-dialog", `<form class="stack">
-    <div class="row">${s.avatar ? `<img class="avatar-img" src="${esc(s.avatar)}" alt="" width="40" height="40">` : ""}<div class="grow"><strong data-testid="profile-name">${esc(s.name || s.login)}</strong><div class="small muted">Signed in as ${esc(s.login)} · ${esc(s.repo)}</div></div></div>
-    <p class="small sync-status" data-testid="sync-status">${s.lastAt ? `Last synced ${esc(new Date(s.lastAt).toLocaleString())}.${unsynced(s) ? " This device has changes that aren't checked in." : " Everything is checked in."}` : "Not synced yet."}</p>
-    <div class="row">
-      <button type="button" class="btn ok" data-sync="checkin" data-testid="sync-checkin">⬆ Check in</button>
-      <button type="button" class="btn" data-sync="load" data-testid="sync-load">⬇ Load latest</button>
-    </div>
-    <p class="small"><a href="https://github.com/${esc(s.repo)}/tree/${esc(s.branch)}/${esc(s.folder)}" target="_blank" rel="noopener">Open the Markdown files on GitHub</a></p>
-    ${family}
-    <details><summary class="small">More settings</summary>
-      <label class="field"><span>Your name</span><input name="name" value="${esc(s.name)}" maxlength="40" data-testid="sync-name"></label>
-      <label class="field"><span>Branch</span><input name="branch" value="${esc(s.branch)}" data-testid="sync-branch"></label>
-      <label class="field"><span>Folder</span><input name="folder" value="${esc(s.folder)}" data-testid="sync-folder"></label>
-      <button type="button" class="btn sm" data-sync="save">Save settings</button>
-    </details>
-    <div class="row between">
-      <button type="button" class="btn ghost sm" data-sync="signout" data-testid="sync-signout">Sign out of this device</button>
-      <button type="button" class="btn ghost sm" data-sync="close">Close</button>
-    </div>
-  </form>`, (act, dlg, b) => {
-    switch (act) {
-      case "checkin": doCheckIn(); break;
-      case "load":
-        if (unsynced() && !b.dataset.armed) {
-          b.dataset.armed = "1";
-          setStatus("⚠️ This device has changes that aren't checked in. Loading will replace them. Tap Load latest again to go ahead.");
-          break;
-        }
-        doLoadLatest();
-        break;
-      case "save": {
-        const f = dlg.querySelector("form").elements;
-        const patch = { name: f.name.value.trim(), branch: f.branch.value.trim() || "main", folder: cleanFolder(f.folder.value) };
-        const old = getSync();
-        if (patch.branch !== old.branch || patch.folder !== old.folder) Object.assign(patch, { lastSha: "", lastAt: "", lastSummary: null });
-        setSync(patch);
-        renderSyncButtons();
-        toast("Settings saved.");
-        break;
-      }
-      case "names": onNames(dlg); break;
-      case "signout": signOut(); dlg.close(); renderSyncButtons(); showLogin("Signed out. Your data is still on this device.", { github: true }); break;
-      case "close": dlg.close(); break;
-    }
-  });
+  if (!cloud.cloudConfigured()) return;
+  await cloud.cloudAuthSettled();
+  if (cloud.getCloud().status === "signed-out" && !cloud.cloudSkipped()) showCloudLogin();
 }
 
 function downloadBackup() {
@@ -512,7 +282,7 @@ function downloadBackup() {
 // ---------- family sync (Firebase) ----------
 const CLOUD_LABEL = {
   loading: "☁ Starting…", connecting: "☁ Connecting…", synced: "☁ Synced", saving: "☁ Saving…",
-  offline: "☁ Offline", error: "☁ Sync problem", "no-family": "☁ Set up sync", "signed-out": "☁ Sign in", unavailable: "☁ Sync off",
+  offline: "☁ Offline", error: "☁ Sync problem", "no-family": "☁ Set up sync", choose: "☁ Set up sync", "signed-out": "☁ Sign in", unavailable: "☁ Sync off",
 };
 const CLOUD_TEXT = {
   loading: "Starting family sync…",
@@ -521,6 +291,7 @@ const CLOUD_TEXT = {
   saving: "Saving your changes to the family…",
   offline: "Offline. Changes are saved on this phone and sync when it's back online.",
   "no-family": "Signed in, but not in a family space yet.",
+  choose: "Signed in. Choose the family space to join.",
   "signed-out": "Not signed in. Your data is saved on this phone only.",
 };
 
@@ -528,11 +299,10 @@ function cloudStatusText(c = cloud.getCloud()) {
   return c.error && (c.status === "error" || c.status === "unavailable") ? "⚠️ " + c.error : CLOUD_TEXT[c.status] || "";
 }
 
-function renderCloudButtons() {
+function renderSyncButtons() {
   const c = cloud.getCloud();
-  $("#checkin").hidden = true;
   const btn = $("#cloud");
-  btn.hidden = false;
+  btn.hidden = !c.configured;
   btn.textContent = CLOUD_LABEL[c.status] || "☁ Sync";
   btn.dataset.status = c.status;
   btn.title = cloudStatusText(c);
@@ -579,22 +349,25 @@ function noFamilyDialog(c = cloud.getCloud(), { removed = false } = {}) {
   modal("no-family", `<div class="stack">
     <h2>${removed ? "You're no longer in the family space" : "Set up family sync"}</h2>
     <p>${removed ? "Someone took" : "There's no family space for"} <strong>${esc(c.user?.email || "")}</strong>${removed ? " out of the family space. Your data stays on this phone." : " yet."}</p>
-    <button class="btn primary" data-sync="start" data-testid="family-start">Start our family space</button>
-    <p class="small muted">Starts a new space with this phone's data in it. Then add the rest of the family in 👤 Profile by their Google email.</p>
+    ${c.otherAccountData ? `<p class="small" style="color:var(--warn)">The lists on this phone were synced by a different Google account. Start fresh to keep them out of your space; they stay in that account's family space.</p>
+    <button class="btn primary" data-sync="start-fresh" data-testid="family-start-fresh">Start our family space, fresh</button>
+    <button class="btn" data-sync="start" data-testid="family-start">Start it with this phone's lists</button>` : `<button class="btn primary" data-sync="start" data-testid="family-start">Start our family space</button>
+    <p class="small muted">Starts a new space with this phone's data in it.</p>`}
+    <p class="small muted">Then add the rest of the family in 👤 Profile by their Google email.</p>
     <p class="small muted">If someone in the family already started one, ask them to add <strong>${esc(c.user?.email || "")}</strong> in their 👤 Profile, then tap Check again.</p>
     <p class="small sync-status" data-testid="no-family-status" role="status"></p>
     <button class="btn" data-sync="again" data-testid="family-check">Check again</button>
     <button class="btn ghost" data-sync="signout" data-testid="family-signout">Sign out</button>
   </div>`, async (act, dlg, b) => {
     const st = dlg.querySelector("[data-testid=no-family-status]");
-    if (act === "start") {
+    if (act === "start" || act === "start-fresh") {
       b.disabled = true;
       st.textContent = "Starting your family space…";
-      try { await cloud.startFamily(); dlg.close(); } catch (err) { b.disabled = false; st.textContent = "⚠️ " + (err?.message || "Couldn't start it."); }
+      try { await cloud.startFamily({ fresh: act === "start-fresh" }); dlg.close(); } catch (err) { b.disabled = false; st.textContent = "⚠️ " + (err?.message || "Couldn't start it."); }
     } else if (act === "again") {
-      st.textContent = "Looking…";
-      if (await cloud.checkFamilyAgain()) dlg.close();
-      else st.textContent = `Not added yet. Ask them to add ${c.user?.email || "your email"} in 👤 Profile.`;
+      dlg.close();
+      // Opens the join question, or this dialog again when nobody has added this account yet.
+      if (!(await cloud.checkFamilyAgain())) $("dialog[data-testid=no-family] [data-testid=no-family-status]")?.replaceChildren(`Not added yet. Ask them to add ${c.user?.email || "your email"} in 👤 Profile.`);
     } else if (act === "signout") {
       await cloud.signOutCloud();
       dlg.close();
@@ -602,7 +375,41 @@ function noFamilyDialog(c = cloud.getCloud(), { removed = false } = {}) {
   });
 }
 
-function cloudProfileDialog() {
+// This account is listed in one or more family spaces. Anyone can list any email in their own
+// space, so show who started each one and join only when the person says so.
+function chooseFamilyDialog(c, list) {
+  hideLogin();
+  const used = !!state.updatedAt;
+  const rows = list.map((f) => {
+    const takeFamily = f.otherFamilyData || c.otherAccountData;
+    const buttons = !used
+      ? `<button class="btn primary" data-sync="join" data-id="${esc(f.id)}" data-testid="family-join">Join</button>`
+      : takeFamily
+        ? `<button class="btn primary" data-sync="join-family" data-id="${esc(f.id)}" data-testid="family-join-theirs">Join and use the family's lists</button>
+           <button class="btn" data-sync="join" data-id="${esc(f.id)}" data-testid="family-join">Join and add this phone's lists</button>`
+        : `<button class="btn primary" data-sync="join" data-id="${esc(f.id)}" data-testid="family-join">Join and add this phone's lists</button>
+           <button class="btn" data-sync="join-family" data-id="${esc(f.id)}" data-testid="family-join-theirs">Join and use only the family's lists</button>`;
+    return `<div class="card family-choice" data-testid="family-choice">
+      <strong>${esc(f.name)}</strong>
+      <span class="small">Started by <strong>${esc(f.ownerEmail)}</strong> · ${f.emails.length} ${f.emails.length === 1 ? "person" : "people"}</span>
+      ${takeFamily && used ? `<span class="small muted">The lists on this phone came from ${c.otherAccountData ? "a different Google account" : "another family space"}.</span>` : ""}
+      ${buttons}
+    </div>`;
+  }).join("");
+  modal("choose-family", `<div class="stack">
+    <h2>Join a family space?</h2>
+    <p class="small">${list.length === 1 ? "A family space lists" : "These family spaces list"} <strong>${esc(c.user?.email || "")}</strong>. Join only if you know who started it: everyone in it sees the lists.</p>
+    ${rows}
+    <button class="btn ghost" data-sync="none" data-testid="family-decline">None of these</button>
+    <button class="btn ghost" data-sync="signout" data-testid="family-signout">Sign out</button>
+  </div>`, async (act, dlg, b) => {
+    if (act === "join" || act === "join-family") { dlg.close(); cloud.joinFamily(b.dataset.id, { useFamilyData: act === "join-family" }); }
+    else if (act === "none") { dlg.close(); noFamilyDialog(cloud.getCloud()); }
+    else if (act === "signout") { dlg.close(); await cloud.signOutCloud(); }
+  });
+}
+
+function profileDialog() {
   const c = cloud.getCloud();
   const names = `<details ${state.settings.kidName ? "" : "open"} data-testid="family-names"><summary class="small">Children's names</summary>
       <p class="small muted">Saved with the family's data, not in the app's public code.</p>
@@ -618,28 +425,29 @@ function cloudProfileDialog() {
       <button type="button" class="btn sm" data-sync="add" data-testid="member-add">Add to family</button>
       <p class="small muted">They sign in on their phone with that Google account and see the same lists.</p>
     </div>` : "";
-  const top = !c.user
+  const top = !c.configured
+    ? `<p class="small muted">Family sync isn't set up in this copy of the app, so your data is saved on this phone only. Download a backup to move it to another phone.</p>`
+    : !c.user
     ? `<p class="small muted">Not signed in. Your data is saved on this device only.</p>
        <button type="button" class="btn primary" data-sync="google" data-testid="profile-google">Sign in with Google to sync</button>`
     : `<div class="row">${c.user.photo ? `<img class="avatar-img" src="${esc(c.user.photo)}" alt="" width="40" height="40" referrerpolicy="no-referrer">` : ""}<div class="grow"><strong data-testid="profile-name">${esc(c.user.name || c.user.email)}</strong><div class="small muted">${esc(c.user.email)}</div></div></div>
-       ${c.status === "no-family" ? '<button type="button" class="btn primary" data-sync="setup" data-testid="profile-setup">Set up family sync</button>' : ""}`;
+       ${c.status === "no-family" || c.status === "choose" ? '<button type="button" class="btn primary" data-sync="setup" data-testid="profile-setup">Set up family sync</button>' : ""}`;
   modal("profile-dialog", `<form class="stack">
     <h2>Profile</h2>
     ${top}
-    <p class="small sync-status" data-testid="cloud-status-text" role="status">${esc(cloudStatusText(c))}</p>
+    ${c.configured ? `<p class="small sync-status" data-testid="cloud-status-text" role="status">${esc(cloudStatusText(c))}</p>` : ""}
     ${members}
     ${names}
     <p class="small muted">A backup file is still handy: <button type="button" class="linkish" data-sync="export" data-testid="profile-export">Export backup</button></p>
     <div class="row between">
       ${c.user ? '<button type="button" class="btn ghost sm" data-sync="signout" data-testid="cloud-signout">Sign out of this phone</button>' : ""}
-      <button type="button" class="btn ghost sm" data-sync="github" data-testid="profile-github">GitHub check-in (old)</button>
       <button type="button" class="btn ghost sm" data-sync="close">Close</button>
     </div>
   </form>`, async (act, dlg, b) => {
     const st = dlg.querySelector("[data-testid=cloud-status-text]");
     switch (act) {
       case "google": cloudSignIn(b); break;
-      case "setup": dlg.close(); noFamilyDialog(); break;
+      case "setup": dlg.close(); cloud.checkFamilyAgain(); break;
       case "names": {
         const f = dlg.querySelector("form").elements;
         state.settings = { ...state.settings, kidName: f.kidName.value.trim(), babyName: f.babyName.value.trim() };
@@ -649,18 +457,17 @@ function cloudProfileDialog() {
       }
       case "add": {
         const input = dlg.querySelector("[name=member]");
-        try { await cloud.addMember(input.value); toast(`Added ${input.value.trim().toLowerCase()} to the family.`); cloudProfileDialog(); }
+        try { await cloud.addMember(input.value); toast(`Added ${input.value.trim().toLowerCase()} to the family.`); profileDialog(); }
         catch (err) { st.textContent = "⚠️ " + err.message; }
         break;
       }
       case "remove":
         if (b.dataset.armed !== "1") { b.dataset.armed = "1"; b.textContent = "Tap again to remove"; break; }
-        try { await cloud.removeMember(b.dataset.email); toast(`Removed ${b.dataset.email}.`); cloudProfileDialog(); }
+        try { await cloud.removeMember(b.dataset.email); toast(`Removed ${b.dataset.email}.`); profileDialog(); }
         catch (err) { st.textContent = "⚠️ " + err.message; }
         break;
       case "export": downloadBackup(); break;
       case "signout": await cloud.signOutCloud(); dlg.close(); toast("Signed out. Your data is still on this phone."); break;
-      case "github": dlg.close(); profileDialog({ github: true }); break;
       case "close": dlg.close(); break;
     }
   });
@@ -688,6 +495,19 @@ function startFamilySync() {
       renderSyncButtons();
     },
     onNoFamily: (c, opts) => noFamilyDialog(c, opts),
+    onChooseFamily: (c, list) => chooseFamilyDialog(c, list),
+    // Start a family space clean: this phone's lists belong to another account's family.
+    resetLocal: () => {
+      const fresh = defaultState();
+      for (const k of Object.keys(state)) delete state[k];
+      Object.assign(state, fresh);
+    },
+    // Two phones' lists can both have "ghee": combine same-name items after the first sync.
+    tidyAfterFirstSync: (st) => {
+      const before = JSON.stringify(st.shopping);
+      st.shopping = mergeItems(st.shopping).map((i) => ({ ...i, id: i.id || uid() }));
+      return JSON.stringify(st.shopping) !== before;
+    },
     onFirstSync: ({ hadFamilyData, uploaded }) => {
       toast(hadFamilyData ? (uploaded ? "Synced: this phone's data was added to the family's." : "Synced with your family ✅") : "Family sync is on. This phone's data is now in the cloud ✅");
     },
@@ -1335,7 +1155,8 @@ function toggleShopItem(id, bought) {
   clearTimeout(toggleShopItem.timer);
   rowChangedAt = Date.now();
   toggleShopItem.timer = setTimeout(() => { if (ui.tab === "shopping") renderShopping(); }, 260);
-  toast(msg, () => { setBought(it, !bought); save(state); if (ui.tab === "shopping") renderShopping(); });
+  // Look the item up again: a change from another phone may have replaced the object since.
+  toast(msg, () => { const cur = state.shopping.find((i) => i.id === id); if (!cur) return; setBought(cur, !bought); save(state); if (ui.tab === "shopping") renderShopping(); });
 }
 
 function deleteShopItem(id) {
@@ -1343,7 +1164,7 @@ function deleteShopItem(id) {
   if (idx < 0) return;
   const [it] = state.shopping.splice(idx, 1);
   commit();
-  toast(`Deleted ${it.label || it.name}`, () => { state.shopping.splice(idx, 0, it); commit(); });
+  toast(`Deleted ${it.label || it.name}`, () => { if (!state.shopping.some((i) => i.id === it.id)) state.shopping.splice(idx, 0, it); commit(); });
 }
 
 function deleteTodo(id) {
@@ -1352,7 +1173,7 @@ function deleteTodo(id) {
   const [t] = state.todos.splice(idx, 1);
   const done = () => { if (ui.tab === "calendar") commitDay(t.date); else commit(); };
   done();
-  toast(`Deleted “${t.text}”`, () => { state.todos.splice(idx, 0, t); done(); });
+  toast(`Deleted “${t.text}”`, () => { if (!state.todos.some((x) => x.id === t.id)) state.todos.splice(idx, 0, t); done(); });
 }
 
 function toggleTodo(id, doneNow) {
@@ -1499,7 +1320,6 @@ document.addEventListener("click", (e) => {
   const tab = e.target.closest(".tabs button");
   if (tab) return setTab(tab.dataset.tab);
   if (e.target.closest("#ai-chip")) { ui.ai = "unknown"; renderHeader(); return checkAi(); }
-  if (e.target.closest("#checkin")) return doCheckIn();
   if (e.target.closest("#cloud")) return profileDialog();
   if (e.target.closest("#profile")) return profileDialog();
   const el = e.target.closest("[data-action]");
@@ -1664,11 +1484,15 @@ document.addEventListener("click", (e) => {
       break;
     }
     case "clear-bought": {
-      const before = state.shopping;
-      const n = before.filter((i) => i.bought).length;
-      state.shopping = before.filter((i) => !i.bought);
+      const cleared = state.shopping.filter((i) => i.bought);
+      const n = cleared.length;
+      state.shopping = state.shopping.filter((i) => !i.bought);
       commit();
-      toast(`Cleared ${n} item${n === 1 ? "" : "s"} from the cart`, () => { state.shopping = before; commit(); });
+      // Put back only what was cleared, so items another phone added meanwhile stay.
+      toast(`Cleared ${n} item${n === 1 ? "" : "s"} from the cart`, () => {
+        state.shopping = [...state.shopping, ...cleared.filter((c) => !state.shopping.some((i) => i.id === c.id))];
+        commit();
+      });
       break;
     }
     case "copy-list": {

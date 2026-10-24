@@ -145,3 +145,70 @@ test("SYNC-11 emails are compared in lower case", () => {
   assert.ok(validEmail("a@b.co"));
   assert.ok(!validEmail("not an email"));
 });
+
+test("SYNC-12 both phones change the kitchen list, the names or the same day: both changes stay", () => {
+  const start = sample();
+  const base = encode(start);
+  const a = structuredClone(start), b = structuredClone(start);
+  a.pantry.push("methi"); b.pantry.push("jeera"); b.pantry = b.pantry.filter((p) => p !== "rice");
+  a.settings.kidName = "Kiran"; b.settings.babyName = "Tara";
+  a.stores.push("Patel Brothers"); b.stores.push("Aldi");
+  a.days["2026-10-23"].meals.kid_lunch = { title: "Lemon rice" };
+  b.days["2026-10-23"].meals.family_dinner = { title: "Sambar rice" };
+  a.shopping[0].quantity = 3; b.shopping[0].bought = true;
+  // B wrote first; A merges.
+  const s = structuredClone(a);
+  decodeInto(s, merge(encode(a), base, encode(b)));
+  assert.ok(s.pantry.includes("methi") && s.pantry.includes("jeera") && !s.pantry.includes("rice"));
+  assert.equal(s.settings.kidName, "Kiran");
+  assert.equal(s.settings.babyName, "Tara");
+  assert.ok(s.stores.includes("Patel Brothers") && s.stores.includes("Aldi"));
+  assert.deepEqual(Object.keys(s.days["2026-10-23"].meals).sort(), ["baby_breakfast", "family_dinner", "kid_lunch"]);
+  assert.equal(s.shopping[0].quantity, 3);
+  assert.equal(s.shopping[0].bought, true);
+});
+
+test("SYNC-13 schedule items added on both phones for the same day are both kept", () => {
+  const start = sample();
+  const base = encode(start);
+  const a = structuredClone(start), b = structuredClone(start);
+  a.days["2026-10-23"].schedule.push({ id: "s1", time: "08:00", text: "School" });
+  b.days["2026-10-23"].schedule.push({ id: "s2", time: "17:00", text: "Swim" });
+  const s = structuredClone(a);
+  decodeInto(s, merge(encode(a), base, encode(b)));
+  assert.deepEqual(s.days["2026-10-23"].schedule.map((x) => x.id), ["s1", "s2"]);
+});
+
+test("SYNC-14 first sync merges a shared day and fills in names from either phone", () => {
+  const fam = sample();
+  fam.settings = { ...fam.settings, kidName: "Kiran", babyName: "" };
+  const mine = defaultState();
+  mine.days = { "2026-10-23": { meals: { family_dinner: { title: "Sambar rice" } }, schedule: [] } };
+  mine.settings = { ...mine.settings, babyName: "Meera" };
+  const s = structuredClone(mine);
+  decodeInto(s, firstMerge(encode(mine), encode(fam), { used: true }));
+  assert.deepEqual(Object.keys(s.days["2026-10-23"].meals).sort(), ["baby_breakfast", "family_dinner"]);
+  assert.equal(s.settings.kidName, "Kiran");
+  assert.equal(s.settings.babyName, "Meera");
+});
+
+test("SYNC-15 malformed data from the cloud is skipped instead of breaking the app", () => {
+  const s = sample();
+  const docs = clone(encode(s));
+  docs.meta.pantry = JSON.stringify("not a list");
+  docs.meta.stores = JSON.stringify({ a: 1 });
+  docs.meta.settings = JSON.stringify(["x"]);
+  docs.shopping.x1 = JSON.stringify({ noName: true });
+  docs.reminders.r9 = JSON.stringify({ title: 5, date: "2026-11-01" });
+  docs["days-2026-10"]["2026-10-24"] = JSON.stringify({ meals: "oops", schedule: 3 });
+  docs["days-2026-10"]["not-a-date"] = JSON.stringify({ meals: {} });
+  const t = sample();
+  decodeInto(t, docs);
+  assert.deepEqual(t.pantry, s.pantry);
+  assert.deepEqual(t.stores, s.stores);
+  assert.deepEqual(t.settings, s.settings);
+  assert.deepEqual(t.shopping.map((i) => i.id), ["a1", "b2"]);
+  assert.deepEqual(t.reminders.map((r) => r.id), ["r1"]);
+  assert.deepEqual(t.days["2026-10-24"], { meals: {}, schedule: [] });
+  assert.equal(t.days["not-a-date"], undefined);
+});

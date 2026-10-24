@@ -22,15 +22,20 @@ daily limits (50,000 reads, 20,000 writes, 1 GB stored) are far more than a fami
 8. **Start the family space.** On your phone open the app, tap **Sign in with Google**, then
    **Start our family space**. Everything already on that phone goes up to the cloud.
 9. **Add the family.** Tap 👤 → **Family members**, type the other person's Google email and tap
-   **Add to family**. They open the app on their phone and sign in with that account. Data they already
-   had on their phone is added to the family's, nothing is thrown away.
+   **Add to family**. They open the app on their phone and sign in with that account. The app shows who
+   started the space and asks before joining (anyone can type any email into their own space, so it never
+   joins one on its own). Data they already had on their phone is added to the family's: nothing is thrown
+   away, and two phones' meals for the same day or names filled in on either phone are combined.
 
 ## What happens day to day
 
 - Every change saves on its own and shows on the other phones within a second or two. The ☁ button at the
   top shows **Synced**, **Saving…** or **Offline**.
 - With no signal (a store basement) the app keeps working from the copy on the phone, and catches up when
-  the signal comes back. Two people ticking different items at the same time both keep their ticks.
+  the signal comes back. Two people changing the same list at the same time both keep their changes: ticks
+  on different items, a quantity on one phone and a tick on the other, kitchen items, meals on the same day.
+- On a shared phone, signing out keeps the lists on the phone. If a different Google account then signs in,
+  the app offers to start fresh or use that family's lists, so one family's data never ends up in another's.
 - **Export backup** (👤 Profile, or the Backup card on the Calendar) still downloads a file you keep.
 - Removing someone in 👤 Profile stops their phone syncing right away. Their phone keeps its own copy.
 
