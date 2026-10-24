@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 import { parseIngredient, parseRecipeMarkdown, combineBooks, nutritionTags, recipeToMarkdown, RECIPE_FILES } from "../public/shared/recipe-book.js";
 import { LIBRARY, RECIPE_BOOK_STATUS, readyToCook, missingForRecipe, suggestFromLibrary } from "../public/shared/recipes.js";
 import { checkForAudience, checkRecipe, isSchoolFood } from "../public/shared/safety.js";
+import { normName } from "../public/shared/shopping.js";
 
 const book = (f) => readFileSync(new URL(`../recipes/${f}`, import.meta.url), "utf8");
 
@@ -149,4 +150,23 @@ test("BOOK-11 the links in the recipe book README point at real recipes", () => 
     assert.ok(anchors[file], `${from} links to missing file ${file}`);
     if (anchor) assert.ok(anchors[file].has(anchor), `${from} links to ${file}#${anchor}`);
   }
+});
+
+test("BOOK-11 Telugu curries: family dinners with a baby portion, and Telugu vegetable names match the recipes", () => {
+  const telugu = LIBRARY.filter((r) => r.file === "telugu-curries.md");
+  assert.ok(telugu.length >= 15, "recipes: " + telugu.length);
+  for (const r of telugu) {
+    assert.equal(r.forWhom, "family", r.title);
+    assert.equal(r.mealType, "dinner", r.title);
+    assert.equal(r.cuisine, "Telugu", r.title);
+    assert.ok(r.steps.some((s) => /baby portion/i.test(s)), r.title + ": no baby portion step");
+  }
+  for (const [te, en] of [["Vankaya (brinjal)", "brinjal"], ["sorakaya", "bottle gourd"], ["Bendakaya", "okra"], ["beerakaya", "ridge gourd"],
+    ["Palakura (spinach)", "spinach"], ["gongura", "gongura"], ["Pachi mirapakaya (green chilli)", "green chilli"], ["kandi pappu", "toor dal"]]) {
+    assert.equal(normName(te), en, te);
+  }
+  assert.equal(normName("pachi mirapakaya"), normName("green chillies"));
+  // A kitchen filled with Telugu names is ready to cook a Telugu curry.
+  const pantry = ["Vankaya (brinjal)", "Ullipaya (onion)", "Tamata (tomato)", "rice", "mustard seeds", "curry leaves", "red chilli powder", "coriander powder"];
+  assert.ok(readyToCook(pantry, { maxMissing: 0, limit: 100 }).some((x) => x.recipe.title.startsWith("Vankaya kura")));
 });

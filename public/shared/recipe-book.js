@@ -5,7 +5,7 @@
 import { isNutIngredient } from "./safety.js";
 
 // The files the app loads, in this order. A new file must be added here to be loaded.
-export const RECIPE_FILES = ["kid-4-years.md", "baby-8-months.md", "family-dinners.md"];
+export const RECIPE_FILES = ["kid-4-years.md", "baby-8-months.md", "family-dinners.md", "telugu-curries.md"];
 
 const WHO = {
   baby: "baby", "8-month-old": "baby", "8 month old": "baby", "8 months": "baby", infant: "baby",

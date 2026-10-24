@@ -57,6 +57,18 @@ const SYNONYMS = {
   "black bean": "black beans", "black beans": "black beans", "pinto bean": "pinto beans", "pinto beans": "pinto beans",
   "oats": "rolled oats", "rolled oats": "rolled oats", "cheddar": "cheddar cheese", "cheddar cheese": "cheddar cheese",
   "badam powder": "almond powder", "almond powder": "almond powder", "almond flour": "almond powder",
+  // Telugu vegetable names (kuragayalu and aakukuralu). The kitchen's quick-add chips and
+  // recipes/telugu-curries.md use them as "vankaya (brinjal)", so either name matches.
+  "vankaya": "brinjal", "eggplant": "brinjal", "bendakaya": "okra", "sorakaya": "bottle gourd", "anapakaya": "bottle gourd",
+  "beerakaya": "ridge gourd", "kakarakaya": "bitter gourd", "dondakaya": "ivy gourd", "tindora": "ivy gourd",
+  "potlakaya": "snake gourd", "munagakaya": "drumstick", "aratikaya": "raw banana", "chamadumpa": "taro root", "arbi": "taro root",
+  "gummadikaya": "pumpkin", "bangaladumpa": "potato", "chilagada dumpa": "sweet potato", "chikkudukaya": "broad beans",
+  "goruchikkudu": "cluster beans", "gorikayalu": "cluster beans", "palakura": "spinach", "thotakura": "amaranth leaves",
+  "gongura": "gongura", "sorrel leaves": "gongura", "menthikura": "methi leaves", "fenugreek leaves": "methi leaves", "methi": "methi leaves",
+  "mullangi": "radish", "kanda": "yam", "kandagadda": "yam", "mamidikaya": "raw mango", "tamata": "tomato", "ullipaya": "onion",
+  "pachi mirapakaya": "green chilli", "green chillies": "green chilli", "allam": "ginger", "vellulli": "garlic",
+  "kothimeera": "coriander leaves", "pudina": "mint leaves", "pachi batani": "peas", "mokkajonna": "sweet corn", "kobbari": "coconut",
+  "dosakaya": "cucumber", "cabbage": "cabbage", "cauliflower": "cauliflower", "capsicum": "capsicum",
 };
 
 // Regional names from the grocery dataset (Hindi, Tamil, Telugu, Kannada, Malayalam) map to the English name.
