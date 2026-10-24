@@ -8,16 +8,17 @@ A browser app for a South Indian family with an 8-month-old and a 4-year-old who
 - **To do**: things to do or bring for the kids (pack the school bag, buy dresses, doctor's appointment), defaulting to tomorrow, with one-tap ideas, a "not done yet" list and the coming week. Rows work like the shopping list: tap or swipe right to tick, swipe left to delete, **⋯** to edit, and **+ Add to do** opens a bottom sheet.
 - **Reminders**: school events, vaccines, birthdays, with repeats, a "missed" list, and alerts while the app is open.
 
-All data lives in the browser (localStorage). There is a backup download and restore.
+All data lives in the browser (localStorage), with a backup download and restore. With family sync on, it is also kept in Firebase so every phone in the family sees the same data.
 
-### Sign in and Check in (GitHub)
+### Family sync (Firebase)
 
-On first launch the app offers a sign-in page (skipped automatically when GitHub can't be reached, or with "Use on this device only"). Signing in takes a private GitHub repository (`owner/name`) and a fine-grained token limited to that repository with **Contents: Read and write**; GitHub doesn't allow apps to sign in with a password. The token stays in that browser only.
+Sign in with Google, start a family space, and add the rest of the family by their Google email; their phone shows who started the space and asks before joining. Every change saves on its own and shows on the other phones within seconds; with no signal the app works from the phone's copy and catches up later. Each write is a Firestore transaction that merges this phone's edit into the cloud's current value, so two phones changing the same list, day or item at once both keep their changes. Only people listed in the family space can read or change its data (see `firestore.rules`). The first time a phone signs in, its own data is added to the family's: nothing is thrown away. **Export backup** downloads a copy at any time. (This replaces the earlier GitHub check-in.)
 
-- **⬆ Check in** (top right) commits everything to `output/` in the private repository as readable Markdown: `meal-plan.md`, `shopping-list.md`, `todo.md`, `reminders.md`, `kitchen.md`, `recipes.md` and `README.md`, plus a session log in `output/sessions/` with what changed since the last check-in. A dot on the button means there are changes not checked in yet.
-- **⬇ Load latest** (profile menu) reads those Markdown files back. The exact data sits in an HTML comment at the end of each file, so the readable part can be edited without breaking anything.
-- If another device checked in since this one last synced, Check in asks whether to load theirs or keep yours instead of overwriting.
-- Public repositories are refused, so the family's data can't end up readable by everyone.
+Setup (once, free): [docs/firebase-setup.md](docs/firebase-setup.md). Until `public/firebase-config.js` has a project in it, the app works on one device as before.
+
+- `public/cloud.js`: Google sign-in, the family space, and the Firestore listener and writes.
+- `public/shared/cloud-sync.js`: how the data is split into documents (a field per item) and the merge: inside objects key by key, lists of items by id, the kitchen and store lists as sets.
+- `npm run test:firebase`: rules tests and two-phone sync tests against the Firebase emulator (Java 21).
 
 ## Run it
 
