@@ -69,6 +69,7 @@ const SYNONYMS = {
   "pachi mirapakaya": "green chilli", "green chillies": "green chilli", "allam": "ginger", "vellulli": "garlic",
   "kothimeera": "coriander leaves", "pudina": "mint leaves", "pachi batani": "peas", "mokkajonna": "sweet corn", "kobbari": "coconut",
   "dosakaya": "cucumber", "cabbage": "cabbage", "cauliflower": "cauliflower", "capsicum": "capsicum",
+  "ladies finger": "okra", "lady's finger": "okra", "ladys finger": "okra", "lady finger": "okra", "ladyfinger": "okra", "ladies fingers": "okra",
 };
 
 // Regional names from the grocery dataset (Hindi, Tamil, Telugu, Kannada, Malayalam) map to the English name.
@@ -79,6 +80,8 @@ for (const item of DATASET_ITEMS) {
     if (a && !SYNONYMS[a]) SYNONYMS[a] = SYNONYMS[english] || english;
   }
 }
+// Every English name is its own key too, so plurals like "brinjals" or "ridge gourds" find it.
+for (const en of Object.values(SYNONYMS)) if (!SYNONYMS[en]) SYNONYMS[en] = en;
 
 export function normName(name) {
   // "ragi flour (finger millet)" -> "ragi flour"
