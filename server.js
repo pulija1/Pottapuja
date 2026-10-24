@@ -12,6 +12,15 @@ import { aiMode, generateRecipes, AiUnavailable, MODEL } from "./lib/ai.js";
 const ROOT = join(fileURLToPath(new URL(".", import.meta.url)), "public");
 const PORT = Number(process.env.PORT || 3000);
 const MAX_BODY = 32 * 1024;
+// Live AI calls cost money on the family's key: cap them per visitor so a public server can't be drained.
+const AI_PER_MINUTE = Number(process.env.AI_PER_MINUTE || 10);
+
+// Browser hardening for every answer (the page's CSP is in index.html, so it also works on GitHub Pages).
+const SECURITY_HEADERS = {
+  "x-content-type-options": "nosniff",
+  "referrer-policy": "no-referrer",
+  "x-frame-options": "DENY",
+};
 
 const TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -23,6 +32,21 @@ const TYPES = {
   ".ico": "image/x-icon",
   ".webmanifest": "application/manifest+json",
 };
+
+// Fixed one-minute window per key (the client's IP address). Returns false once the key is over the limit.
+export function rateLimiter(limit, windowMs = 60000) {
+  const hits = new Map();
+  return (key, now = Date.now()) => {
+    const h = hits.get(key);
+    if (!h || now - h.start >= windowMs) {
+      if (hits.size > 10000) hits.clear();
+      hits.set(key, { start: now, count: 1 });
+      return true;
+    }
+    h.count += 1;
+    return h.count <= limit;
+  };
+}
 
 function sendJson(res, status, data) {
   const body = JSON.stringify(data);
@@ -93,7 +117,9 @@ async function serveStatic(req, res, pathname) {
 }
 
 export function createServer() {
+  const allowAi = rateLimiter(AI_PER_MINUTE);
   return http.createServer(async (req, res) => {
+    for (const [k, v] of Object.entries(SECURITY_HEADERS)) res.setHeader(k, v);
     const url = new URL(req.url, "http://localhost");
     try {
       if (url.pathname === "/api/health") {
@@ -102,6 +128,9 @@ export function createServer() {
       }
       if (url.pathname === "/api/recipes") {
         if (req.method !== "POST") return sendJson(res, 405, { error: "Use POST" });
+        if (aiMode() === "live" && !allowAi(req.socket.remoteAddress)) {
+          return sendJson(res, 429, { error: "Too many recipe requests. Wait a minute and try again." });
+        }
         const body = await readBody(req);
         const ac = new AbortController();
         res.on("close", () => { if (!res.writableEnded) ac.abort(); });

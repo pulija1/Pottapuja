@@ -1,4 +1,4 @@
-import { load, save, exportJson, importJson, onChange, defaultState } from "./store.js";
+import { load, save, exportJson, importJson, onChange, defaultState, onSaveError, cancelPendingSave, STORAGE_KEY } from "./store.js";
 import * as cloud from "./cloud.js";
 import { getAiKey, setAiKey, looksLikeKey, browserRecipes } from "./ai-browser.js";
 import { todayKey, addDays, addMonths, monthGrid, monthLabel, prettyDate, fromKey, isDateKey, isSchoolDay, occurrences } from "./shared/dates.js";
@@ -143,6 +143,14 @@ function refreshToday() {
   if (ui.month === TODAY) ui.month = now;
   TODAY = now;
   window.__mealPlanner.TODAY = now;
+  clearCaches();
+  render();
+}
+
+// Swap in a whole new set of data (restore, load latest, another tab's save) and redraw.
+function replaceState(next) {
+  for (const k of Object.keys(state)) delete state[k];
+  Object.assign(state, next);
   clearCaches();
   render();
 }
@@ -1603,12 +1611,8 @@ document.addEventListener("change", (e) => {
       if (!file) return;
       file.text().then((text) => {
         try {
-          const next = importJson(text);
-          for (const k of Object.keys(state)) delete state[k];
-          Object.assign(state, next);
+          replaceState(importJson(text));
           save(state, { now: true });
-          clearCaches();
-          render();
           cloud.pushSoon();
           toast(cloud.getCloud().ready ? "Backup restored and synced to the family." : "Backup restored.");
         } catch (err) {
@@ -1825,6 +1829,15 @@ document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "hidden") { save(state, { now: true }); cloud.syncNow(); wakeLock = null; }
   else { refreshToday(); if (ui.storeMode && ui.tab === "shopping") keepScreenOn(true); }
 });
+// Another tab or window of the planner saved: take its data instead of overwriting it with ours later.
+window.addEventListener("storage", (e) => {
+  if (e.key !== STORAGE_KEY || !e.newValue) return;
+  cancelPendingSave();
+  replaceState(load());
+  toast("Updated with changes from another tab.");
+});
+// A failed write (storage full, private mode) would otherwise lose every change without a word.
+onSaveError((err) => { $("#save-warning").hidden = !err; });
 window.addEventListener("online", checkAi);
 window.addEventListener("offline", () => { ui.ai = "unreachable"; renderHeader(); });
 
@@ -1836,6 +1849,8 @@ startFamilySync();
 maybeShowLogin();
 checkAi();
 checkDueReminders();
+// Ask the browser not to clear this site's storage on its own (Safari deletes it after 7 days without a visit otherwise).
+navigator.storage?.persist?.().catch(() => {});
 setInterval(() => { refreshToday(); checkDueReminders(); }, 30000);
 
 // Exposed for tests and debugging in the console.

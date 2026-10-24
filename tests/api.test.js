@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import net from "node:net";
+import { rateLimiter } from "../server.js";
 
 const SERVER = fileURLToPath(new URL("../server.js", import.meta.url));
 
@@ -139,4 +140,20 @@ test("OFF-01b live mode with no key fails fast with 503, not a hang", async () =
     assert.equal(res.status, 503);
     assert.ok(Date.now() - t < 8000);
   } finally { live.proc.kill(); }
+});
+
+test("DATA-06 every answer carries nosniff, no-referrer and no-framing headers", async () => {
+  for (const p of ["/", "/app.js", "/api/health", "/nope"]) {
+    const res = await fetch(mock.url + p);
+    assert.equal(res.headers.get("x-content-type-options"), "nosniff", p);
+    assert.equal(res.headers.get("referrer-policy"), "no-referrer", p);
+    assert.equal(res.headers.get("x-frame-options"), "DENY", p);
+  }
+});
+
+test("DATA-07 the live-AI rate limit allows the limit per minute, then refuses until the window resets", () => {
+  const allow = rateLimiter(3, 60000);
+  assert.deepEqual([1, 2, 3, 4].map(() => allow("1.2.3.4", 1000)), [true, true, true, false]);
+  assert.equal(allow("5.6.7.8", 1000), true, "other visitors are counted separately");
+  assert.equal(allow("1.2.3.4", 61000), true, "a new minute starts fresh");
 });
