@@ -1,0 +1,64 @@
+rules_version = '2';
+
+// Family Meal Planner: only the people listed in a family space can read or change its data.
+// Paste this into Firebase console > Firestore Database > Rules, then Publish.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null
+        && request.auth.token.email is string
+        && request.auth.token.email_verified == true;
+    }
+
+    function me() {
+      return request.auth.token.email.lower();
+    }
+
+    function isMember(fid) {
+      return signedIn() && me() in get(/databases/$(database)/documents/families/$(fid)).data.emails;
+    }
+
+    function validEmails(list) {
+      return list is list && list.size() >= 1 && list.size() <= 10;
+    }
+
+    // families/{fid}: { name, owner, ownerEmail, emails: [lower-case emails], createdAt }
+    match /families/{fid} {
+      allow read: if signedIn() && me() in resource.data.emails;
+
+      // Anyone signed in can start a family space with only themselves in it.
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(["name", "owner", "ownerEmail", "emails", "createdAt"])
+        && request.resource.data.owner == request.auth.uid
+        && request.resource.data.ownerEmail == me()
+        && request.resource.data.emails == [me()]
+        && request.resource.data.name is string && request.resource.data.name.size() <= 60;
+
+      // Members can rename the space and add or remove people, but the person who started it
+      // always stays in, and who started it can't change.
+      allow update: if signedIn() && me() in resource.data.emails
+        && request.resource.data.keys().hasOnly(["name", "owner", "ownerEmail", "emails", "createdAt"])
+        && request.resource.data.owner == resource.data.owner
+        && request.resource.data.ownerEmail == resource.data.ownerEmail
+        && request.resource.data.createdAt == resource.data.createdAt
+        && validEmails(request.resource.data.emails)
+        && resource.data.ownerEmail in request.resource.data.emails
+        && request.resource.data.name is string && request.resource.data.name.size() <= 60;
+
+      allow delete: if signedIn() && resource.data.owner == request.auth.uid;
+
+      // The family's data: shopping, to-dos, days, reminders, recipes, kitchen and settings.
+      match /items/{doc} {
+        allow read, delete: if isMember(fid);
+        allow create, update: if isMember(fid)
+          && doc.matches('^(shopping|reminders|meta|todos-[0-9a-z-]+|days-[0-9a-z-]+|recipes-[0-9]+)$');
+      }
+    }
+
+    // Everything else is closed.
+    match /{path=**} {
+      allow read, write: if false;
+    }
+  }
+}
