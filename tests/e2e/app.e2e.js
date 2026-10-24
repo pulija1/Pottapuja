@@ -33,8 +33,13 @@ after(async () => { await browser?.close(); mock?.proc.kill(); off?.proc.kill();
 
 // A browser context. Family sync isn't configured here, so there is no sign-in page
 // (tests/firebase/ covers sync against the Firebase emulator).
+// These tests cover the app on one device; family sync has its own tests against the Firebase
+// emulator (npm run test:firebase), so the real project's settings are switched off here.
 async function newContext(opts = {}) {
-  return browser.newContext(opts);
+  const ctx = await browser.newContext(opts);
+  await ctx.route("**/firebase-config.js", (route) =>
+    route.fulfill({ contentType: "text/javascript", body: "export const firebaseConfig = null;" }));
+  return ctx;
 }
 
 // Fresh browser context per test so localStorage starts empty. Collects console errors.
