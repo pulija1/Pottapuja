@@ -142,6 +142,17 @@ test("OFF-01b live mode with no key fails fast with 503, not a hang", async () =
   } finally { live.proc.kill(); }
 });
 
+test("BOOK-10 the server serves the Markdown recipe book at /recipes/, and nothing outside it", async () => {
+  const res = await fetch(mock.url + "/recipes/kid-4-years.md");
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get("content-type"), /text\/markdown/);
+  assert.match(await res.text(), /^### /m);
+  for (const p of ["/recipes/..%2fserver.js", "/recipes/%2e%2e/package.json"]) {
+    const bad = await fetch(mock.url + p);
+    assert.ok([403, 404].includes(bad.status), p + " -> " + bad.status);
+  }
+});
+
 test("DATA-06 every answer carries nosniff, no-referrer and no-framing headers", async () => {
   for (const p of ["/", "/app.js", "/api/health", "/nope"]) {
     const res = await fetch(mock.url + p);

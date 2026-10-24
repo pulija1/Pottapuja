@@ -51,6 +51,12 @@ const SYNONYMS = {
   "asafoetida": "hing", "inguva": "hing", "perungayam": "hing",
   "green peas": "peas", "french beans": "beans", "whole wheat flour": "atta", "wheat flour": "atta",
   "plain yogurt": "curd", "pumpkin": "pumpkin", "tomato puree": "tomato puree",
+  // Names used in the recipe book (recipes/*.md) and how people write them on a list.
+  "whole wheat bread": "bread", "brown bread": "bread", "sandwich bread": "bread", "greek yogurt": "curd", "hung curd": "curd",
+  "flour tortilla": "flour tortilla", "corn tortilla": "corn tortilla", "tortilla": "flour tortilla",
+  "black bean": "black beans", "black beans": "black beans", "pinto bean": "pinto beans", "pinto beans": "pinto beans",
+  "oats": "rolled oats", "rolled oats": "rolled oats", "cheddar": "cheddar cheese", "cheddar cheese": "cheddar cheese",
+  "badam powder": "almond powder", "almond powder": "almond powder", "almond flour": "almond powder",
 };
 
 // Regional names from the grocery dataset (Hindi, Tamil, Telugu, Kannada, Malayalam) map to the English name.

@@ -716,6 +716,38 @@ test("E2E BOOT-01 if the app's scripts fail to load, the page explains and offer
   await ctx.close();
 });
 
+test("E2E GOAL-01 each day shows egg, milk and nuts for the 4-year-old; planned meals tick them and suggestions cover them", async () => {
+  const { page, ctx, errors } = await open();
+  await cell(page, "2026-10-26").click();
+  const goal = (g) => page.locator(`[data-testid=kid-goal][data-goal=${g}]`);
+  assert.equal(await tid(page, "kid-goal").count(), 3);
+  assert.equal(await goal("egg").getAttribute("data-done"), "false");
+  await planSlot(page, "2026-10-26", "kid_breakfast", "Egg rava upma");
+  assert.equal(await goal("egg").getAttribute("data-done"), "true");
+  assert.match(await goal("egg").innerText(), /Egg rava upma/);
+  // The suggestions for the other empty slots fill in milk and nuts.
+  await tid(page, "suggest-approve").click();
+  for (const g of ["egg", "dairy", "nuts"]) assert.equal(await goal(g).getAttribute("data-done"), "true", g);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test("E2E BOOK-12 the Recipes tab lists recipe-book recipes that the kitchen can make now", async () => {
+  const { page, ctx, errors } = await open();
+  await tid(page, "tab-recipes").click();
+  await tid(page, "pantry-input").fill("eggs, whole wheat bread, milk, almond powder, banana, butter");
+  await tid(page, "pantry-add").click();
+  assert.ok((await tid(page, "ready-recipe").count()) > 0);
+  await tid(page, "ready-to-cook").getByText("French toast sticks", { exact: false }).click();
+  const dialog = page.locator("dialog[open]");
+  await dialog.waitFor();
+  assert.match(await dialog.innerText(), /Indian American/);
+  assert.match(await dialog.innerText(), /Egg/);
+  assert.equal(await tid(page, "recipe-book-problems").count(), 0);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
 test("E2E DATA-10 a change made in another tab shows up here instead of being overwritten later", async () => {
   const a = await open();
   const other = await a.ctx.newPage();

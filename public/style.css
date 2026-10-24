@@ -374,6 +374,21 @@ label.row > input[type=checkbox] { width: 22px; height: 22px; accent-color: var(
 
 /* Settings tucked into details blocks in dialogs: space the fields and buttons */
 dialog details > * + * { margin-top: 8px; }
+
+/* Daily goals for the 4-year-old (egg, milk, nuts) and the "ready to cook" list */
+.goals { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-bottom: 10px; }
+.goal { border-radius: 12px; padding: 10px 12px; min-height: 56px; display: flex; flex-direction: column; justify-content: center; gap: 2px; border: 2px solid var(--line); background: var(--card); }
+.goal .goal-label { font-weight: 700; font-size: 1rem; }
+.goal .goal-how { font-size: .78rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.goal.done { border-color: var(--ok); background: var(--ok-soft); }
+.goal.done .goal-label { color: var(--ok); }
+.goal.idea { border-style: dashed; border-color: var(--brand); }
+.goal.todo { border-style: dashed; border-color: var(--warn); }
+.ready-list { display: grid; gap: 6px; }
+.ready-item { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 52px; text-align: left; border: 1px solid var(--line); border-radius: 12px; background: var(--card); color: var(--ink); padding: 8px 12px; font: inherit; cursor: pointer; }
+.ready-item:hover { border-color: var(--brand); }
+.ready-item .small { display: block; }
+@media (max-width: 520px) { .goals { gap: 6px; } .goal { padding: 8px; } .goal .goal-label { font-size: .9rem; } }
 .sheet form > .btn.big { width: 100%; }
 .shop-head [data-testid=store-mode] { white-space: nowrap; flex: none; }
 /* The main button of a sheet stays in reach while the fields above it scroll */
