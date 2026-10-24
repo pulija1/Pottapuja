@@ -380,3 +380,10 @@ dialog details > * + * { margin-top: 8px; }
 .shop-extra > summary { display: flex; align-items: center; min-height: 44px; }
 /* While the toast strip shows in store mode, the add button rises above it */
 body.in-store:has(.toast.show) .fab { bottom: calc(92px + env(safe-area-inset-bottom)); transition: bottom .2s; }
+
+/* Family sync */
+.checkin[hidden] { display: none; }
+.cloud[data-status="offline"], .cloud[data-status="error"], .cloud[data-status="no-family"] { border-color: var(--warn); color: var(--warn); }
+.members { list-style: none; margin: 0; padding: 0; }
+.members li { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px dashed var(--line); word-break: break-all; }
+.linkish { background: none; border: 0; padding: 0; color: var(--brand); text-decoration: underline; font: inherit; cursor: pointer; }

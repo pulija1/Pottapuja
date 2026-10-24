@@ -1,5 +1,6 @@
 import { load, save, exportJson, importJson, onChange } from "./store.js";
 import { getSync, setSync, signOut, syncReady, cleanRepo, cleanFolder, verify, checkIn, loadLatest, githubReachable } from "./sync.js";
+import * as cloud from "./cloud.js";
 import { todayKey, addDays, addMonths, monthGrid, monthLabel, prettyDate, fromKey, isDateKey, isSchoolDay, occurrences } from "./shared/dates.js";
 import { checkRecipe, checkForAudience, isNutIngredient, isSchoolFood } from "./shared/safety.js";
 import { LIBRARY, suggestFromLibrary } from "./shared/recipes.js";
@@ -246,6 +247,7 @@ function unsynced(sync = getSync()) {
 }
 
 function renderSyncButtons() {
+  if (cloud.cloudConfigured()) return renderCloudButtons();
   const sync = getSync();
   const btn = $("#checkin");
   btn.disabled = ui.syncBusy;
@@ -269,7 +271,7 @@ function syncError(err) {
     setSync({ token: "" });
     renderSyncButtons();
     $("dialog[data-testid=profile-dialog]")?.close();
-    showLogin(err.message);
+    showLogin(err.message, { github: true });
     return;
   }
   renderSyncButtons();
@@ -280,7 +282,7 @@ function syncError(err) {
 
 async function doCheckIn({ force = false } = {}) {
   if (ui.syncBusy) return;
-  if (!syncReady()) return showLogin("Sign in to check in your data to GitHub.");
+  if (!syncReady()) return showLogin("Sign in to check in your data to GitHub.", { github: true });
   ui.syncBusy = true;
   renderSyncButtons();
   try {
@@ -298,7 +300,7 @@ async function doCheckIn({ force = false } = {}) {
 
 async function doLoadLatest() {
   if (ui.syncBusy) return;
-  if (!syncReady()) return showLogin("Sign in to load your data from GitHub.");
+  if (!syncReady()) return showLogin("Sign in to load your data from GitHub.", { github: true });
   ui.syncBusy = true;
   renderSyncButtons();
   try {
@@ -345,7 +347,8 @@ function conflictDialog() {
 }
 
 // Full-screen sign-in. Shown on first launch; "Use on this device only" skips it for good.
-function showLogin(note = "") {
+function showLogin(note = "", { github = false } = {}) {
+  if (cloud.cloudConfigured() && !github) return showCloudLogin(note);
   const s = getSync();
   const el = $("#login");
   el.innerHTML = `<form class="card login-card" data-testid="login-form" novalidate>
@@ -374,11 +377,13 @@ function hideLogin() {
 }
 
 $("#login").addEventListener("click", (e) => {
-  if (e.target.closest("[data-login=skip]")) { setSync({ skipped: true }); hideLogin(); renderSyncButtons(); }
+  if (e.target.closest("[data-login=skip]")) { setSync({ skipped: true }); cloud.setCloudSkipped(true); hideLogin(); renderSyncButtons(); }
+  if (e.target.closest("[data-login=google]")) cloudSignIn(e.target.closest("button"));
 });
 
 $("#login").addEventListener("submit", async (e) => {
   e.preventDefault();
+  if (e.target.dataset.testid !== "login-form") return;
   const f = e.target.elements;
   const status = $("[data-testid=login-status]");
   const btn = $("[data-testid=login-submit]");
@@ -407,12 +412,19 @@ $("#login").addEventListener("submit", async (e) => {
 
 // First launch: offer sign-in, but only when GitHub can be reached; otherwise just open the app.
 async function maybeShowLogin() {
+  if (cloud.cloudConfigured()) {
+    await cloud.cloudAuthSettled();
+    const c = cloud.getCloud();
+    if (c.status === "signed-out" && !cloud.cloudSkipped()) showCloudLogin();
+    return;
+  }
   const s = getSync();
   if (syncReady(s) || s.skipped || !navigator.onLine) return;
   if (await githubReachable()) showLogin();
 }
 
-function profileDialog() {
+function profileDialog({ github = false } = {}) {
+  if (cloud.cloudConfigured() && !github) return cloudProfileDialog();
   const s = getSync();
   const signedIn = syncReady(s);
   const family = `<details ${state.settings.kidName ? "" : "open"} data-testid="family-names"><summary class="small">Children's names</summary>
@@ -435,7 +447,7 @@ function profileDialog() {
       ${family}
       <button type="button" class="btn ghost sm" data-sync="close">Close</button>
     </form>`, (act, dlg) => {
-      if (act === "signin") { dlg.close(); showLogin(); }
+      if (act === "signin") { dlg.close(); showLogin("", { github: true }); }
       else if (act === "names") onNames(dlg);
       else if (act === "close") dlg.close();
     });
@@ -482,9 +494,203 @@ function profileDialog() {
         break;
       }
       case "names": onNames(dlg); break;
-      case "signout": signOut(); dlg.close(); renderSyncButtons(); showLogin("Signed out. Your data is still on this device."); break;
+      case "signout": signOut(); dlg.close(); renderSyncButtons(); showLogin("Signed out. Your data is still on this device.", { github: true }); break;
       case "close": dlg.close(); break;
     }
+  });
+}
+
+function downloadBackup() {
+  const blob = new Blob([exportJson(state)], { type: "application/json" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = `meal-planner-backup-${TODAY}.json`;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+}
+
+// ---------- family sync (Firebase) ----------
+const CLOUD_LABEL = {
+  loading: "☁ Starting…", connecting: "☁ Connecting…", synced: "☁ Synced", saving: "☁ Saving…",
+  offline: "☁ Offline", error: "☁ Sync problem", "no-family": "☁ Set up sync", "signed-out": "☁ Sign in", unavailable: "☁ Sync off",
+};
+const CLOUD_TEXT = {
+  loading: "Starting family sync…",
+  connecting: "Connecting to your family's data…",
+  synced: "Everything is synced with your family.",
+  saving: "Saving your changes to the family…",
+  offline: "Offline. Changes are saved on this phone and sync when it's back online.",
+  "no-family": "Signed in, but not in a family space yet.",
+  "signed-out": "Not signed in. Your data is saved on this phone only.",
+};
+
+function cloudStatusText(c = cloud.getCloud()) {
+  return c.error && (c.status === "error" || c.status === "unavailable") ? "⚠️ " + c.error : CLOUD_TEXT[c.status] || "";
+}
+
+function renderCloudButtons() {
+  const c = cloud.getCloud();
+  $("#checkin").hidden = true;
+  const btn = $("#cloud");
+  btn.hidden = false;
+  btn.textContent = CLOUD_LABEL[c.status] || "☁ Sync";
+  btn.dataset.status = c.status;
+  btn.title = cloudStatusText(c);
+  const prof = $("#profile");
+  prof.innerHTML = c.user?.photo ? `<img src="${esc(c.user.photo)}" alt="" width="32" height="32" referrerpolicy="no-referrer">` : c.user ? esc((c.user.name || c.user.email).trim().charAt(0).toUpperCase()) : "👤";
+  prof.setAttribute("aria-label", c.user ? `Signed in as ${c.user.email}. Profile and family sync` : "Profile and family sync");
+  for (const el of document.querySelectorAll("[data-testid=cloud-status-text]")) el.textContent = cloudStatusText(c);
+}
+
+function showCloudLogin(note = "") {
+  const el = $("#login");
+  el.innerHTML = `<div class="card login-card" data-testid="cloud-login">
+    <div class="brand"><span class="logo" aria-hidden="true">🍛</span><h1>Family Meal Planner</h1></div>
+    <h2>Sign in</h2>
+    <p class="small muted">Sign in with Google to keep the meal plans, shopping list, to-dos and reminders the same on every phone in the family. Changes save on their own, and the app still works with no signal.</p>
+    ${note ? `<p class="small" style="color:var(--warn)">${esc(note)}</p>` : ""}
+    <p class="small sync-status" data-testid="login-status" role="status"></p>
+    <button type="button" class="btn primary" data-login="google" data-testid="google-signin">Sign in with Google</button>
+    <button type="button" class="btn ghost" data-login="skip" data-testid="login-skip">Use on this device only, without signing in</button>
+  </div>`;
+  el.hidden = false;
+  document.body.classList.add("locked");
+  el.querySelector("[data-login=google]").focus();
+}
+
+async function cloudSignIn(btn) {
+  const status = $("[data-testid=login-status]") || $("[data-testid=cloud-status-text]");
+  if (btn) btn.disabled = true;
+  if (status) status.textContent = "Opening Google sign-in…";
+  try {
+    await cloud.signIn();
+    cloud.setCloudSkipped(false);
+    hideLogin();
+    $("dialog[data-testid=profile-dialog]")?.close();
+  } catch (err) {
+    if (btn) btn.disabled = false;
+    if (status) status.textContent = "⚠️ " + (err?.message || "Couldn't sign in.");
+  }
+}
+
+// Signed in, but this Google account isn't in a family space: start one, or wait to be added.
+function noFamilyDialog(c = cloud.getCloud(), { removed = false } = {}) {
+  hideLogin();
+  modal("no-family", `<div class="stack">
+    <h2>${removed ? "You're no longer in the family space" : "Set up family sync"}</h2>
+    <p>${removed ? "Someone took" : "There's no family space for"} <strong>${esc(c.user?.email || "")}</strong>${removed ? " out of the family space. Your data stays on this phone." : " yet."}</p>
+    <button class="btn primary" data-sync="start" data-testid="family-start">Start our family space</button>
+    <p class="small muted">Starts a new space with this phone's data in it. Then add the rest of the family in 👤 Profile by their Google email.</p>
+    <p class="small muted">If someone in the family already started one, ask them to add <strong>${esc(c.user?.email || "")}</strong> in their 👤 Profile, then tap Check again.</p>
+    <p class="small sync-status" data-testid="no-family-status" role="status"></p>
+    <button class="btn" data-sync="again" data-testid="family-check">Check again</button>
+    <button class="btn ghost" data-sync="signout" data-testid="family-signout">Sign out</button>
+  </div>`, async (act, dlg, b) => {
+    const st = dlg.querySelector("[data-testid=no-family-status]");
+    if (act === "start") {
+      b.disabled = true;
+      st.textContent = "Starting your family space…";
+      try { await cloud.startFamily(); dlg.close(); } catch (err) { b.disabled = false; st.textContent = "⚠️ " + (err?.message || "Couldn't start it."); }
+    } else if (act === "again") {
+      st.textContent = "Looking…";
+      if (await cloud.checkFamilyAgain()) dlg.close();
+      else st.textContent = `Not added yet. Ask them to add ${c.user?.email || "your email"} in 👤 Profile.`;
+    } else if (act === "signout") {
+      await cloud.signOutCloud();
+      dlg.close();
+    }
+  });
+}
+
+function cloudProfileDialog() {
+  const c = cloud.getCloud();
+  const names = `<details ${state.settings.kidName ? "" : "open"} data-testid="family-names"><summary class="small">Children's names</summary>
+      <p class="small muted">Saved with the family's data, not in the app's public code.</p>
+      <label class="field"><span>4-year-old</span><input name="kidName" value="${esc(state.settings.kidName || "")}" maxlength="30" data-testid="kid-name"></label>
+      <label class="field"><span>8-month-old</span><input name="babyName" value="${esc(state.settings.babyName || "")}" maxlength="30" data-testid="baby-name"></label>
+      <button type="button" class="btn sm" data-sync="names" data-testid="save-names">Save names</button>
+    </details>`;
+  const fam = c.family;
+  const members = fam ? `<div class="stack" data-testid="family-members">
+      <strong class="small">Family members</strong>
+      <ul class="members">${fam.emails.map((e) => `<li data-testid="family-member"><span class="grow">${esc(e)}${e === fam.ownerEmail ? ' <span class="muted">(started it)</span>' : ""}${e === c.user?.email ? ' <span class="muted">(you)</span>' : ""}</span>${e !== fam.ownerEmail ? `<button type="button" class="btn ghost sm" data-sync="remove" data-email="${esc(e)}" aria-label="Remove ${esc(e)}" data-testid="member-remove">Remove</button>` : ""}</li>`).join("")}</ul>
+      <label class="field"><span>Add someone by their Google email</span><input name="member" type="email" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="name@gmail.com" data-testid="member-email"></label>
+      <button type="button" class="btn sm" data-sync="add" data-testid="member-add">Add to family</button>
+      <p class="small muted">They sign in on their phone with that Google account and see the same lists.</p>
+    </div>` : "";
+  const top = !c.user
+    ? `<p class="small muted">Not signed in. Your data is saved on this device only.</p>
+       <button type="button" class="btn primary" data-sync="google" data-testid="profile-google">Sign in with Google to sync</button>`
+    : `<div class="row">${c.user.photo ? `<img class="avatar-img" src="${esc(c.user.photo)}" alt="" width="40" height="40" referrerpolicy="no-referrer">` : ""}<div class="grow"><strong data-testid="profile-name">${esc(c.user.name || c.user.email)}</strong><div class="small muted">${esc(c.user.email)}</div></div></div>
+       ${c.status === "no-family" ? '<button type="button" class="btn primary" data-sync="setup" data-testid="profile-setup">Set up family sync</button>' : ""}`;
+  modal("profile-dialog", `<form class="stack">
+    <h2>Profile</h2>
+    ${top}
+    <p class="small sync-status" data-testid="cloud-status-text" role="status">${esc(cloudStatusText(c))}</p>
+    ${members}
+    ${names}
+    <p class="small muted">A backup file is still handy: <button type="button" class="linkish" data-sync="export" data-testid="profile-export">Export backup</button></p>
+    <div class="row between">
+      ${c.user ? '<button type="button" class="btn ghost sm" data-sync="signout" data-testid="cloud-signout">Sign out of this phone</button>' : ""}
+      <button type="button" class="btn ghost sm" data-sync="github" data-testid="profile-github">GitHub check-in (old)</button>
+      <button type="button" class="btn ghost sm" data-sync="close">Close</button>
+    </div>
+  </form>`, async (act, dlg, b) => {
+    const st = dlg.querySelector("[data-testid=cloud-status-text]");
+    switch (act) {
+      case "google": cloudSignIn(b); break;
+      case "setup": dlg.close(); noFamilyDialog(); break;
+      case "names": {
+        const f = dlg.querySelector("form").elements;
+        state.settings = { ...state.settings, kidName: f.kidName.value.trim(), babyName: f.babyName.value.trim() };
+        commit();
+        toast("Names saved.");
+        break;
+      }
+      case "add": {
+        const input = dlg.querySelector("[name=member]");
+        try { await cloud.addMember(input.value); toast(`Added ${input.value.trim().toLowerCase()} to the family.`); cloudProfileDialog(); }
+        catch (err) { st.textContent = "⚠️ " + err.message; }
+        break;
+      }
+      case "remove":
+        if (b.dataset.armed !== "1") { b.dataset.armed = "1"; b.textContent = "Tap again to remove"; break; }
+        try { await cloud.removeMember(b.dataset.email); toast(`Removed ${b.dataset.email}.`); cloudProfileDialog(); }
+        catch (err) { st.textContent = "⚠️ " + err.message; }
+        break;
+      case "export": downloadBackup(); break;
+      case "signout": await cloud.signOutCloud(); dlg.close(); toast("Signed out. Your data is still on this phone."); break;
+      case "github": dlg.close(); profileDialog({ github: true }); break;
+      case "close": dlg.close(); break;
+    }
+  });
+}
+
+// Other phones' changes were merged into `state`: save them here and redraw, but not while
+// someone is typing in the page (the redraw would wipe what they're typing).
+let redrawWaiting = false;
+function onRemoteChange() {
+  save(state, { now: true });
+  clearCaches();
+  const typing = document.activeElement?.matches?.("#main input, #main textarea, #main select");
+  if (!typing) { render(); return; }
+  if (redrawWaiting) return;
+  redrawWaiting = true;
+  document.activeElement.addEventListener("blur", () => { redrawWaiting = false; setTimeout(render, 0); }, { once: true });
+}
+
+function startFamilySync() {
+  cloud.startCloud({
+    getState: () => state,
+    onRemoteChange,
+    onStatus: (c) => {
+      if (c.user && $("[data-testid=cloud-login]")) hideLogin();   // signed in (also after a redirect sign-in)
+      renderSyncButtons();
+    },
+    onNoFamily: (c, opts) => noFamilyDialog(c, opts),
+    onFirstSync: ({ hadFamilyData, uploaded }) => {
+      toast(hadFamilyData ? (uploaded ? "Synced: this phone's data was added to the family's." : "Synced with your family ✅") : "Family sync is on. This phone's data is now in the cloud ✅");
+    },
   });
 }
 
@@ -581,7 +787,7 @@ function renderUpcomingPending() {
 
 function renderBackupCard() {
   return `<div class="card"><h2>Backup</h2>
-    <p class="small muted">Everything is saved on this device. Download a backup to move it to another phone or browser.</p>
+    <p class="small muted">${cloud.getCloud().ready ? "Everything syncs with your family on its own. A backup file is a copy you keep yourself." : "Everything is saved on this device. Download a backup to move it to another phone or browser."}</p>
     <div class="row">
       <button class="btn sm" data-action="export" data-testid="export">Download backup</button>
       <label class="btn sm">Restore backup<input type="file" accept="application/json" data-action="import" hidden data-testid="import"></label>
@@ -1294,6 +1500,7 @@ document.addEventListener("click", (e) => {
   if (tab) return setTab(tab.dataset.tab);
   if (e.target.closest("#ai-chip")) { ui.ai = "unknown"; renderHeader(); return checkAi(); }
   if (e.target.closest("#checkin")) return doCheckIn();
+  if (e.target.closest("#cloud")) return profileDialog();
   if (e.target.closest("#profile")) return profileDialog();
   const el = e.target.closest("[data-action]");
   if (!el || el.tagName === "INPUT" && el.type !== "button") return;
@@ -1400,15 +1607,7 @@ document.addEventListener("click", (e) => {
       break;
     }
     case "new-reminder": setTab("reminders"); renderReminders(el.dataset.date); $("[data-testid=rem-title]")?.focus(); break;
-    case "export": {
-      const blob = new Blob([exportJson(state)], { type: "application/json" });
-      const link = document.createElement("a");
-      link.href = URL.createObjectURL(blob);
-      link.download = `meal-planner-backup-${TODAY}.json`;
-      link.click();
-      setTimeout(() => URL.revokeObjectURL(link.href), 1000);
-      break;
-    }
+    case "export": downloadBackup(); break;
 
     case "pantry-del": state.pantry = state.pantry.filter((p) => p !== el.dataset.name); commit(); break;
     case "pantry-quick": if (!state.pantry.some((p) => normName(p) === normName(el.dataset.name))) state.pantry.push(el.dataset.name); commit(); break;
@@ -1543,7 +1742,8 @@ document.addEventListener("change", (e) => {
           save(state, { now: true });
           clearCaches();
           render();
-          toast("Backup restored.");
+          cloud.pushSoon();
+          toast(cloud.getCloud().ready ? "Backup restored and synced to the family." : "Backup restored.");
         } catch (err) {
           toast(err.message || "That file couldn't be read.");
         }
@@ -1753,9 +1953,9 @@ async function keepScreenOn(on) {
   } catch { wakeLock = null; }
 }
 
-window.addEventListener("pagehide", () => save(state, { now: true }));
+window.addEventListener("pagehide", () => { save(state, { now: true }); cloud.syncNow(); });
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "hidden") { save(state, { now: true }); wakeLock = null; }
+  if (document.visibilityState === "hidden") { save(state, { now: true }); cloud.syncNow(); wakeLock = null; }
   else { refreshToday(); if (ui.storeMode && ui.tab === "shopping") keepScreenOn(true); }
 });
 window.addEventListener("online", checkAi);
@@ -1764,11 +1964,12 @@ window.addEventListener("offline", () => { ui.ai = "unreachable"; renderHeader()
 // ---------- start ----------
 const initialTab = location.hash.replace("#", "");
 setTab(["calendar", "recipes", "shopping", "todo", "reminders"].includes(initialTab) ? initialTab : "calendar");
-onChange(() => renderSyncButtons());
+onChange(() => { renderSyncButtons(); cloud.pushSoon(); });
+startFamilySync();
 maybeShowLogin();
 checkAi();
 checkDueReminders();
 setInterval(() => { refreshToday(); checkDueReminders(); }, 30000);
 
 // Exposed for tests and debugging in the console.
-window.__mealPlanner = { state, ui, TODAY };
+window.__mealPlanner = { state, ui, TODAY, cloud };
