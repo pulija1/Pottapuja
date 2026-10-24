@@ -147,3 +147,15 @@ test("teaspoons merge into tablespoons and -ies plurals merge", () => {
   assert.equal(out.filter((i) => i.name === "berry").length, 1);
   assert.equal(normName("green chillies"), "green chilli");
 });
+
+test("QUICK-02 quick suggestions from the recipe book are ready in 20 minutes, or the fastest there is", () => {
+  const [kid] = suggestFromLibrary(["eggs", "bread"], { forWhom: "kid", mealType: "breakfast", limit: 1, maxMinutes: 20 });
+  assert.ok(kid.prepMinutes > 0 && kid.prepMinutes <= 20, kid.title + " " + kid.prepMinutes);
+  const quick = suggestFromLibrary([], { forWhom: "baby", limit: 100, maxMinutes: 20 });
+  const firstSlow = quick.findIndex((r) => !(r.prepMinutes <= 20));
+  assert.ok(firstSlow === -1 || quick.slice(firstSlow).every((r) => !(r.prepMinutes <= 20)), "quick ones come first");
+  // No family dinner in the book takes 20 minutes, so it offers the fastest one rather than nothing.
+  const dinners = LIBRARY.filter((r) => r.forWhom === "family" && r.mealType === "dinner");
+  const [fast] = suggestFromLibrary([], { forWhom: "family", mealType: "dinner", limit: 1, maxMinutes: 20 });
+  assert.equal(fast.prepMinutes, Math.min(...dinners.map((r) => r.prepMinutes || Infinity)));
+});

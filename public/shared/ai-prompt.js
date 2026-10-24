@@ -48,12 +48,15 @@ export const RECIPE_LIST_SCHEMA = obj({
   },
 });
 
-export function buildPrompt({ ingredients, forWhom, mealType, notes, count, schoolNutFree }) {
+export const QUICK_MINUTES = 20;
+
+export function buildPrompt({ ingredients, forWhom, mealType, notes, count, schoolNutFree, quick }) {
   const who = forWhom === "both" ? "the baby and the 4-year-old (mix of both)" : forWhom === "baby" ? "the 8-month-old baby" : forWhom === "kid" ? "the 4-year-old" : "the whole family";
   return [
     `Ingredients we have: ${ingredients.join(", ") || "(nothing listed, suggest staples)"}.`,
-    `Suggest ${count} recipes for ${who}.`,
+    `Suggest ${count} recipe${count === 1 ? "" : "s"} for ${who}.`,
     mealType ? `Meal: ${mealType}.` : "",
+    quick ? `It must be quick: ready in ${QUICK_MINUTES} minutes or less, with few ingredients and short steps.` : "",
     schoolNutFree ? "The school is nut-free." : "",
     notes ? `Extra notes from the parent: ${notes}` : "",
   ].filter(Boolean).join("\n");
@@ -70,9 +73,10 @@ export function parseRequest(body) {
   const forWhom = ["baby", "kid", "family", "both"].includes(b.forWhom) ? b.forWhom : "both";
   const mealType = ["breakfast", "lunch", "lunchbox", "snack", "dinner", ""].includes(b.mealType ?? "") ? (b.mealType ?? "") : "";
   const notes = String(b.notes ?? "").slice(0, 300);
-  const count = Math.min(6, Math.max(1, Number.parseInt(b.count, 10) || 4));
+  const quick = b.quick === true;
+  const count = quick ? 1 : Math.min(6, Math.max(1, Number.parseInt(b.count, 10) || 4));
   const schoolNutFree = b.schoolNutFree === true;
-  return { ingredients, forWhom, mealType, notes, count, schoolNutFree };
+  return { ingredients, forWhom, mealType, notes, count, schoolNutFree, quick };
 }
 
 // Attach safety results; drop recipes that fail the age rules.

@@ -1,6 +1,7 @@
 import { load, save, exportJson, importJson, onChange, defaultState, onSaveError, cancelPendingSave, STORAGE_KEY } from "./store.js";
 import * as cloud from "./cloud.js";
 import { getAiKey, setAiKey, looksLikeKey, browserRecipes } from "./ai-browser.js";
+import { QUICK_MINUTES } from "./shared/ai-prompt.js";
 import { todayKey, addDays, addMonths, monthGrid, monthLabel, prettyDate, fromKey, isDateKey, isSchoolDay, occurrences } from "./shared/dates.js";
 import { checkRecipe, checkForAudience, isNutIngredient, isSchoolFood } from "./shared/safety.js";
 import { LIBRARY, suggestFromLibrary, readyToCook, RECIPE_BOOK_STATUS } from "./shared/recipes.js";
@@ -29,7 +30,7 @@ const ui = {
   openGroups: new Set(),          // meal sections the parent has expanded in the day panel
   suggest: {},                    // date -> { seed, picks: { slotId: recipeId } } meal suggestions shown in the day panel
   savedFilter: "",
-  gen: { forWhom: "both", mealType: "", notes: "" },
+  gen: { forWhom: "both", mealType: "", notes: "", quick: false },
   confirmUnsafe: null,    // date whose unsafe plan the parent was warned about
   // recipe form values survive re-renders
 };
@@ -934,11 +935,12 @@ function renderRecipes() {
           <select name="mealType" data-testid="gen-meal" data-action="gen-field">
             ${[["", "Any"], ["breakfast", "Breakfast"], ["lunchbox", "School lunchbox"], ["lunch", "Lunch"], ["snack", "Snack"], ["dinner", "Dinner"]].map(([v, l]) => `<option value="${v}" ${ui.gen.mealType === v ? "selected" : ""}>${l}</option>`).join("")}
           </select></label>
+        <label class="chk full" style="min-height:0"><input type="checkbox" name="quick" data-action="gen-field" ${ui.gen.quick ? "checked" : ""} data-testid="gen-quick"> ⚡ Quick: just one recipe, ready in ${QUICK_MINUTES} minutes</label>
         <label class="chk full" style="min-height:0"><input type="checkbox" data-action="nut-free" ${nutFreeOn() ? "checked" : ""} data-testid="school-nut-free"> School is nut-free (no peanuts or tree nuts in the lunchbox or snack box)</label>
         <label class="field full"><span>Anything else? (optional)</span>
           <input type="text" name="notes" maxlength="300" value="${esc(ui.gen.notes)}" placeholder="e.g. baby just started eggs, no onion today" data-testid="gen-notes" data-action="gen-field"></label>
         <div class="full row">
-          <button class="btn primary" data-testid="generate-recipes" ${ui.aiBusy ? "disabled" : ""}>${aiOnline() ? "✨ Get recipes" : "Find recipes"}</button>
+          <button class="btn primary" data-testid="generate-recipes" ${ui.aiBusy ? "disabled" : ""}>${ui.gen.quick ? (aiOnline() ? "⚡ Get a quick recipe" : "Find a quick recipe") : aiOnline() ? "✨ Get recipes" : "Find recipes"}</button>
           ${ui.aiBusy ? `<span class="spinner" aria-hidden="true"></span><span class="small muted">Asking the AI… this can take up to a minute</span><button type="button" class="btn sm" data-action="cancel-ai" data-testid="cancel-ai">Cancel</button>` : ""}
         </div>
       </form>
@@ -1009,19 +1011,20 @@ function recipeCard(r, { saved = false } = {}) {
 }
 
 async function generate(form) {
-  ui.gen = { forWhom: form.forWhom.value, mealType: form.mealType.value, notes: form.notes.value };
+  ui.gen = { forWhom: form.forWhom.value, mealType: form.mealType.value, notes: form.notes.value, quick: form.quick.checked };
   const body = {
     ingredients: state.pantry,
     forWhom: form.forWhom.value,
     mealType: form.mealType.value,
     notes: form.notes.value,
-    count: 4,
+    count: ui.gen.quick ? 1 : 4,
+    quick: ui.gen.quick,
     schoolNutFree: nutFreeOn(),
   };
   ui.aiNotice = "";
   ui.rejected = [];
   const fallback = (why) => {
-    ui.results = suggestFromLibrary(state.pantry, { forWhom: body.forWhom, mealType: body.mealType, limit: 6, schoolNutFree: body.schoolNutFree });
+    ui.results = suggestFromLibrary(state.pantry, { forWhom: body.forWhom, mealType: body.mealType, limit: body.quick ? 1 : 6, schoolNutFree: body.schoolNutFree, maxMinutes: body.quick ? QUICK_MINUTES : 0 });
     ui.aiNotice = `${why} Showing recipes from the built-in family recipe book that best match your kitchen.`;
   };
   if (!aiOnline()) {
@@ -1699,7 +1702,10 @@ document.addEventListener("change", (e) => {
 });
 
 document.addEventListener("input", (e) => {
-  if (e.target.dataset?.action === "gen-field") ui.gen[e.target.name] = e.target.value;
+  if (e.target.dataset?.action === "gen-field") {
+    ui.gen[e.target.name] = e.target.type === "checkbox" ? e.target.checked : e.target.value;
+    if (e.target.type === "checkbox") render();   // the button says "quick recipe"
+  }
   if (e.target.dataset?.action === "saved-filter") {
     ui.savedFilter = e.target.value;
     const pos = e.target.selectionStart;

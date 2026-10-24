@@ -77,9 +77,13 @@ export function readyToCook(pantry, { forWhom = "", maxMissing = 0, schoolNutFre
 
 // Rank library recipes by how many of their ingredients are in the pantry.
 // With schoolNutFree, recipes that are not nut-free are left out of lunchbox and snack suggestions.
-export function suggestFromLibrary(pantry, { forWhom = "both", mealType = "", limit = 6, schoolNutFree = false } = {}) {
+// maxMinutes (quick mode) puts recipes ready in that time first, then the fastest of the rest,
+// so there is always an answer even when nothing in the book is that quick.
+export function suggestFromLibrary(pantry, { forWhom = "both", mealType = "", limit = 6, schoolNutFree = false, maxMinutes = 0 } = {}) {
   const have = pantrySet(pantry);
   const wanted = forWhom === "both" ? ["baby", "kid", "family"] : [forWhom, "family"];
+  const quick = (r) => r.prepMinutes > 0 && r.prepMinutes <= maxMinutes;
+  const minutes = (r) => r.prepMinutes || Infinity;
   return LIBRARY.filter((x) => wanted.includes(x.forWhom))
     .filter((x) => !mealType || x.mealType === mealType || (mealType === "lunch" && x.mealType === "lunchbox"))
     .filter((x) => !schoolNutFree || x.forWhom !== "kid" || checkForAudience(x, { schoolNutFree: true }).safe)
@@ -90,6 +94,7 @@ export function suggestFromLibrary(pantry, { forWhom = "both", mealType = "", li
       return { recipe: x, score, hit };
     })
     .sort((a, b) => b.score - a.score || b.hit - a.hit)
+    .sort((a, b) => !maxMinutes ? 0 : quick(b.recipe) - quick(a.recipe) || (quick(a.recipe) ? 0 : minutes(a.recipe) - minutes(b.recipe)))
     .slice(0, limit)
     .map((s) => s.recipe);
 }

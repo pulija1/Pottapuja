@@ -161,6 +161,25 @@ test("E2E REC-01 generate baby recipes (mock AI): all marked safe", async () => 
   await ctx.close();
 });
 
+test("E2E QUICK-03 the Quick option asks for one recipe and shows just one", async () => {
+  const { page, ctx, errors } = await open();
+  const bodies = [];
+  await page.route("**/api/recipes", async (route) => { bodies.push(route.request().postDataJSON()); await route.continue(); });
+  await tid(page, "tab-recipes").click();
+  await tid(page, "gen-for").selectOption("kid");
+  await tid(page, "gen-meal").selectOption("breakfast");
+  await tid(page, "gen-quick").check();
+  assert.match(await tid(page, "generate-recipes").innerText(), /quick recipe/);
+  await tid(page, "generate-recipes").click();
+  await tid(page, "recipe-card").first().waitFor({ timeout: 5000 });
+  assert.equal(await tid(page, "recipe-card").count(), 1);
+  assert.equal(bodies[0].quick, true);
+  assert.equal(bodies[0].count, 1);
+  assert.ok(await tid(page, "gen-quick").isChecked(), "stays ticked after the results come in");
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
 test("E2E REC-10 double-clicking Get recipes sends one request", async () => {
   const { page, ctx } = await open();
   let calls = 0;
