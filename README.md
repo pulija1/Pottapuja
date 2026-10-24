@@ -8,7 +8,7 @@ A browser app for a South Indian family with an 8-month-old and a 4-year-old who
 - **To do**: things to do or bring for the kids (pack the school bag, buy dresses, doctor's appointment), defaulting to tomorrow, with one-tap ideas, a "not done yet" list and the coming week. Rows work like the shopping list: tap or swipe right to tick, swipe left to delete, **⋯** to edit, and **+ Add to do** opens a bottom sheet.
 - **Reminders**: school events, vaccines, birthdays, with repeats, a "missed" list, and alerts while the app is open.
 
-All data lives in the browser (localStorage), with a backup download and restore. With family sync on, it is also kept in Firebase so every phone in the family sees the same data.
+All data lives in the browser (localStorage), with a backup download and restore. If saving fails (storage full or blocked) a warning stays at the top until it works again, and a change made in another tab of the app is picked up instead of being overwritten. With family sync on, it is also kept in Firebase so every phone in the family sees the same data.
 
 ### Family sync (Firebase)
 
@@ -42,6 +42,7 @@ npm run test:e2e                            # browser tests (Playwright, Chromiu
 | `ANTHROPIC_API_KEY` | | Claude API key (server side only, never sent to the browser) |
 | `CLAUDE_MODEL` | `claude-opus-5-5` | Model used for recipes |
 | `AI_TIMEOUT_MS` | `40000` | Server-side timeout for the AI call |
+| `AI_PER_MINUTE` | `10` | Live AI requests allowed per visitor (IP address) per minute; more get 429 and the app falls back to the recipe book |
 | `PORT` | `3000` | |
 
 ### When the AI or the server is down
