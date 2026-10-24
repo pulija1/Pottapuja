@@ -715,3 +715,77 @@ test("E2E BOOT-01 if the app's scripts fail to load, the page explains and offer
   assert.match(await tid(page, "boot-error").innerText(), /Reload/);
   await ctx.close();
 });
+
+// ---------- AI recipes with the family's own Claude API key (sites with no server, like GitHub Pages) ----------
+const FAKE_KEY = "sk-ant-api03-" + "x".repeat(40);
+const claudeRecipe = (o) => ({ title: "Ragi banana porridge", forWhom: "baby", mealType: "breakfast", texture: "porridge", prepMinutes: 10,
+  ingredients: [{ name: "ragi flour", quantity: 2, unit: "tbsp" }, { name: "water", quantity: 1, unit: "cup" }, { name: "banana", quantity: 0.5, unit: "pcs" }],
+  steps: ["Whisk ragi into water.", "Cook on low, stirring, until thick.", "Mash in banana and cool."], notes: "", ...o });
+
+async function fakeClaude(page, { status = 200, recipes = [claudeRecipe()] } = {}) {
+  const calls = [];
+  await page.route("https://api.anthropic.com/**", async (route) => {
+    const req = route.request();
+    calls.push({ headers: req.headers(), body: JSON.parse(req.postData() || "{}") });
+    if (status !== 200) return route.fulfill({ status, contentType: "application/json", headers: { "access-control-allow-origin": "*" }, body: JSON.stringify({ type: "error", error: { type: "authentication_error", message: "invalid x-api-key" } }) });
+    await route.fulfill({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": "*" },
+      body: JSON.stringify({ id: "msg_1", type: "message", role: "assistant", stop_reason: "end_turn", content: [{ type: "text", text: JSON.stringify({ recipes }) }] }) });
+  });
+  return calls;
+}
+
+test("E2E AIKEY-04 no AI on the site: add a key in the profile, get AI recipes from Claude, unsafe ones removed", async () => {
+  const { page, ctx, errors } = await open(off);
+  const calls = await fakeClaude(page, { recipes: [claudeRecipe(), claudeRecipe({ title: "Honey oats", ingredients: [{ name: "oats", quantity: 2, unit: "tbsp" }, { name: "honey", quantity: 1, unit: "tsp" }] })] });
+  const chip = page.locator("#ai-chip");
+  await page.waitForFunction(() => /tap to add a key/.test(document.querySelector("#ai-chip").textContent));
+  await chip.click();
+  const dlg = tid(page, "profile-dialog");
+  assert.ok(await tid(page, "ai-key-section").evaluate((d) => d.open));
+  await tid(page, "ai-key").fill("ghp_notaclaudekey");
+  await tid(page, "ai-key-save").click();
+  assert.match(await tid(page, "ai-key-status").textContent(), /sk-ant-/);
+  await tid(page, "ai-key").fill(FAKE_KEY);
+  await tid(page, "ai-key-save").click();
+  await dlg.waitFor({ state: "detached" });
+  await page.waitForFunction(() => /your key/.test(document.querySelector("#ai-chip").textContent));
+
+  await tid(page, "tab-recipes").click();
+  await tid(page, "gen-for").selectOption("baby");
+  await tid(page, "generate-recipes").click();
+  await page.locator("[data-testid=recipe-card]", { hasText: "Ragi banana porridge" }).waitFor({ timeout: 5000 });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].headers["x-api-key"], FAKE_KEY);
+  assert.equal(calls[0].headers["anthropic-dangerous-direct-browser-access"], "true");
+  assert.equal(calls[0].body.output_config.format.type, "json_schema");
+  assert.match(calls[0].body.system, /never honey/);
+  assert.match(await tid(page, "rejected-notice").textContent(), /Honey oats/);
+  assert.equal(await page.locator("[data-testid=recipe-card]", { hasText: "Honey oats" }).count(), 0);
+
+  // The key stays out of the app's data, so it never reaches backups or check-ins.
+  const saved = await page.evaluate(() => { window.dispatchEvent(new Event("pagehide")); return localStorage.getItem("familyMealPlanner.v1") || ""; });
+  assert.ok(!saved.includes("sk-ant-"));
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test("E2E AIKEY-05 a rejected key falls back to the recipe book and says to check the key; removing the key turns AI off", async () => {
+  const ctx = await newContext();
+  await ctx.addInitScript((k) => localStorage.setItem("familyMealPlanner.aiKey", k), FAKE_KEY);
+  const page = await ctx.newPage();
+  await fakeClaude(page, { status: 401 });
+  await page.goto(`${off.url}?today=${TODAY}`);
+  await page.waitForFunction(() => /your key/.test(document.querySelector("#ai-chip").textContent));
+  await tid(page, "tab-recipes").click();
+  await tid(page, "generate-recipes").click();
+  await tid(page, "ai-notice").waitFor({ timeout: 5000 });
+  assert.match(await tid(page, "ai-notice").textContent(), /key was not accepted/);
+  assert.ok((await tid(page, "recipe-card").count()) > 0);
+
+  await page.locator("#profile").click();
+  await tid(page, "ai-key-section").locator("summary").click();
+  await tid(page, "ai-key-remove").click();
+  await page.waitForFunction(() => /tap to add a key/.test(document.querySelector("#ai-chip").textContent));
+  assert.equal(await page.evaluate(() => localStorage.getItem("familyMealPlanner.aiKey")), null);
+  await ctx.close();
+});
