@@ -16,7 +16,7 @@ export function defaultState() {
     reminders: [],
     notified: {},
     settings: { schoolNutFree: false, kidName: "", babyName: "" },
-    updatedAt: null,   // last change made in the app; check-in compares it with the last sync
+    updatedAt: null,   // last change made in the app; family sync uses it to tell a used phone from a new one
   };
 }
 

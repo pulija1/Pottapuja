@@ -31,11 +31,10 @@ before(async () => {
 });
 after(async () => { await browser?.close(); mock?.proc.kill(); off?.proc.kill(); });
 
-// A browser context that skips the first-launch GitHub sign-in page (tests for it opt back in).
-async function newContext(opts = {}, { signIn = false } = {}) {
-  const ctx = await browser.newContext(opts);
-  if (!signIn) await ctx.addInitScript(() => { if (!localStorage.getItem("familyMealPlanner.sync")) localStorage.setItem("familyMealPlanner.sync", JSON.stringify({ skipped: true })); });
-  return ctx;
+// A browser context. Family sync isn't configured here, so there is no sign-in page
+// (tests/firebase/ covers sync against the Firebase emulator).
+async function newContext(opts = {}) {
+  return browser.newContext(opts);
 }
 
 // Fresh browser context per test so localStorage starts empty. Collects console errors.
@@ -52,6 +51,13 @@ async function open(server = mock, { today = TODAY, viewport } = {}) {
 const tid = (page, id) => page.getByTestId(id);
 const cell = (page, date) => tid(page, `cal-day-${date}`);
 const pendingTypes = (page) => page.locator("[data-testid=day-pending] li").evaluateAll((els) => els.map((e) => e.dataset.type));
+
+// The shopping list adds items in a bottom sheet: open it, add each item, close it.
+async function addShopItems(page, names) {
+  await tid(page, "shop-fab").click();
+  for (const n of names) { await tid(page, "shop-name").fill(n); await tid(page, "shop-add").click(); }
+  await page.keyboard.press("Escape");
+}
 
 async function openGroup(page, slot) {
   const group = tid(page, `meal-group-${slot.split("_")[0]}`);
@@ -206,8 +212,7 @@ test("E2E OFF-03 browser goes offline: calendar and lists still editable", async
   await tid(page, "approve-day").click();
   assert.equal(await cell(page, TOMORROW).getAttribute("data-status"), "approved");
   await tid(page, "tab-shopping").click();
-  await tid(page, "shop-name").fill("Curry leaves");
-  await tid(page, "shop-add").click();
+  await addShopItems(page, ["Curry leaves"]);
   assert.equal(await tid(page, "shop-item").count(), 1);
   await ctx.setOffline(false);
   await ctx.close();
@@ -216,15 +221,20 @@ test("E2E OFF-03 browser goes offline: calendar and lists still editable", async
 test("E2E SHOP-02/05 add items, merge duplicates, tick bought, survives reload", async () => {
   const { page, ctx } = await open();
   await tid(page, "tab-shopping").click();
+  await tid(page, "shop-fab").click();
   for (const [n, q, u] of [["Toor dal", "500", "g"], ["tuvar dal", "1", "kg"], ["Curry leaves", "", ""]]) {
     await tid(page, "shop-name").fill(n);
     await tid(page, "shop-qty").fill(q);
-    if (u) await tid(page, "shop-unit").fill(u).catch(() => tid(page, "shop-unit").selectOption(u));
+    if (u) await tid(page, "shop-unit").getByText(u, { exact: true }).click();
     await tid(page, "shop-add").click();
   }
+  await page.keyboard.press("Escape");
   assert.equal(await tid(page, "shop-item").count(), 2);
   assert.match(await page.locator('[data-testid=shop-item][data-name="toor dal"]').innerText(), /1\.5\s*kg/);
   await page.locator('[data-testid=shop-item][data-name="curry leaves"] input[type=checkbox]').check();
+  // A ticked item slides into the "In the cart" section
+  await tid(page, "shop-cart").waitFor({ state: "attached" });
+  assert.equal(await tid(page, "shop-cart").getByTestId("shop-item").count(), 1);
   await page.waitForTimeout(300);
   await page.reload();
   await tid(page, "tab-shopping").click();
@@ -247,11 +257,100 @@ test("E2E SHOP-01 approved day's meals feed the shopping list (only missing item
 test("E2E SHOP-08 store mode at phone width: no sideways scrolling", async () => {
   const { page, ctx } = await open(mock, { viewport: { width: 375, height: 740 } });
   await tid(page, "tab-shopping").click();
-  await tid(page, "shop-name").fill("Drumstick");
-  await tid(page, "shop-add").click();
+  await addShopItems(page, ["Drumstick"]);
   await tid(page, "store-mode").click();
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
   assert.ok(overflow <= 0, `page is ${overflow}px wider than the phone`);
+  await ctx.close();
+});
+
+async function swipeRow(page, row, dx) {
+  const box = await row.locator(".swipe-fg").boundingBox();
+  const y = box.y + box.height / 2, x = box.x + box.width / 2;
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  for (let i = 1; i <= 8; i++) await page.mouse.move(x + (dx * i) / 8, y);
+  await page.mouse.up();
+}
+
+test("E2E SHOP-14 swipe right puts an item in the cart, swipe left deletes it, both can be undone", async () => {
+  const { page, ctx, errors } = await open(mock, { viewport: { width: 390, height: 844 } });
+  await tid(page, "tab-shopping").click();
+  await addShopItems(page, ["Milk", "Eggs"]);
+  const item = (n) => page.locator(`[data-testid=shop-item][data-name="${n}"]`);
+  assert.equal(await item("egg").locator(".name").innerText(), "Eggs", "names show as typed");
+  await swipeRow(page, item("milk"), 160);
+  await tid(page, "shop-cart").waitFor({ state: "attached" });
+  assert.ok(await item("milk").locator("input[type=checkbox]").isChecked());
+  await tid(page, "toast-undo").click();
+  await page.waitForTimeout(100);
+  assert.equal(await tid(page, "shop-cart").count(), 0);
+  assert.ok(!(await item("milk").locator("input[type=checkbox]").isChecked()));
+  await swipeRow(page, item("egg"), -160);
+  assert.equal(await item("egg").count(), 0);
+  await tid(page, "toast-undo").click();
+  assert.equal(await item("egg").count(), 1);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test("E2E SHOP-15 the details sheet edits an item; store mode is full screen with Done shopping", async () => {
+  const { page, ctx } = await open(mock, { viewport: { width: 390, height: 844 } });
+  await tid(page, "tab-shopping").click();
+  await addShopItems(page, ["Paneer"]);
+  await tid(page, "shop-more").click();
+  await tid(page, "shop-edit-qty").fill("400");
+  await tid(page, "shop-edit-unit").getByText("g", { exact: true }).click();
+  await tid(page, "shop-edit-store").getByText("Costco").click();
+  await tid(page, "shop-edit-save").click();
+  assert.match(await tid(page, "shop-item").innerText(), /400 g · Costco/);
+  await tid(page, "store-mode").click();
+  assert.ok(!(await page.locator(".tabs").isVisible()), "tabs are hidden in store mode");
+  assert.match(await tid(page, "store-mode").innerText(), /Done shopping/);
+  await tid(page, "shop-item").locator("label").click();
+  await page.waitForTimeout(350);
+  assert.match(await tid(page, "shop-empty").innerText(), /Everything is in the cart/);
+  await tid(page, "store-mode").click();
+  assert.ok(await page.locator(".tabs").isVisible());
+  await ctx.close();
+});
+
+test("E2E SHOP-16 Back closes the sheet, then leaves store mode, without leaving the app", async () => {
+  const { page, ctx } = await open(mock, { viewport: { width: 390, height: 844 } });
+  await tid(page, "tab-shopping").click();
+  await tid(page, "store-mode").click();
+  await tid(page, "shop-fab").click();
+  await tid(page, "shop-sheet").waitFor();
+  await page.goBack();
+  await tid(page, "shop-sheet").waitFor({ state: "detached" });
+  assert.match(await tid(page, "store-mode").innerText(), /Done shopping/);
+  await page.goBack();
+  await page.waitForTimeout(100);
+  assert.match(await tid(page, "store-mode").innerText(), /at the store/);
+  assert.match(page.url(), /#shopping$/);
+  // Done shopping after a sheet was closed by its own ✕ leaves no stray history step behind
+  await tid(page, "store-mode").click();
+  await tid(page, "shop-fab").click();
+  await page.locator("[data-testid=shop-sheet] [data-sheet-close]").click();
+  await tid(page, "store-mode").click();
+  await page.waitForTimeout(100);
+  assert.ok(await page.locator(".tabs").isVisible());
+  assert.match(page.url(), /#shopping$/);
+  await ctx.close();
+});
+
+test("E2E TODO-05 to-dos: tap the row to tick, edit in the sheet, swipe left to delete", async () => {
+  const { page, ctx } = await open(mock, { viewport: { width: 390, height: 844 } });
+  await tid(page, "tab-todo").click();
+  await tid(page, "todo-idea").filter({ hasText: "Pack school bag" }).click();
+  await tid(page, "todo-item").locator(".name").click();
+  assert.equal(await tid(page, "todo-left").innerText(), "All done");
+  await tid(page, "todo-more").click();
+  await tid(page, "todo-input").fill("Pack school bag and water bottle");
+  await tid(page, "todo-save").click();
+  assert.match(await tid(page, "todo-list").innerText(), /water bottle/);
+  await swipeRow(page, tid(page, "todo-list").getByTestId("todo-item"), -160);
+  assert.equal(await tid(page, "todo-list").getByTestId("todo-item").count(), 0);
   await ctx.close();
 });
 
@@ -260,8 +359,9 @@ test("E2E TODO-01 the To do tab opens on tomorrow; ideas and ticks persist; the 
   await tid(page, "tab-todo").click();
   assert.equal(await tid(page, "todo-date").inputValue(), TOMORROW);
   await tid(page, "todo-idea").filter({ hasText: "Buy dresses" }).click();
+  await tid(page, "todo-fab").click();
   await tid(page, "todo-input").fill("Doctor's appointment");
-  await tid(page, "todo-who").selectOption("baby");
+  await tid(page, "todo-who").getByText("8-month-old").click();
   await tid(page, "todo-add").click();
   assert.equal(await tid(page, "todo-item").count(), 2);
   await tid(page, "todo-item").filter({ hasText: "Buy dresses" }).locator("input[type=checkbox]").check();
@@ -333,8 +433,7 @@ test("E2E DATA-04 HTML typed into fields is shown as text, never run", async () 
   const xss = `<img src=x onerror="window.__xss=1">`;
   await planSlot(page, TOMORROW, "family_dinner", xss);
   await tid(page, "tab-shopping").click();
-  await tid(page, "shop-name").fill(xss);
-  await tid(page, "shop-add").click();
+  await addShopItems(page, [xss]);
   await tid(page, "tab-reminders").click();
   await tid(page, "rem-title").fill(xss);
   await tid(page, "rem-date").fill(TOMORROW);
@@ -484,10 +583,11 @@ test("E2E SHOP-09 unticking a bought item takes back only what the tick added to
   await tid(page, "pantry-input").fill("rice");
   await page.locator("[data-form=pantry-add] button").click();
   await tid(page, "tab-shopping").click();
-  for (const n of ["paneer", "rice"]) { await tid(page, "shop-name").fill(n); await tid(page, "shop-add").click(); }
+  await addShopItems(page, ["paneer", "rice"]);
   const box = (n) => tid(page, "shop-item").filter({ hasText: n }).locator("input[type=checkbox]");
-  for (const n of ["paneer", "rice"]) await box(n).check();
-  for (const n of ["paneer", "rice"]) await box(n).uncheck();
+  for (const n of ["paneer", "rice"]) { await box(n).check(); await page.waitForTimeout(350); }
+  await tid(page, "shop-cart").locator("summary").click();
+  for (const n of ["paneer", "rice"]) { await box(n).uncheck(); await page.waitForTimeout(350); }
   await tid(page, "tab-recipes").click();
   const pantry = await tid(page, "pantry-list").innerText();
   assert.ok(!pantry.includes("paneer"), pantry);
@@ -540,8 +640,9 @@ test("E2E SUG-03 suggestions are not offered for past days", async () => {
 test("E2E SHOP-13 ticking food as bought adds it to the kitchen; diapers and napkins don't", async () => {
   const { page, ctx } = await open();
   await tid(page, "tab-shopping").click();
-  for (const n of ["Drumstick", "Diapers", "Napkins"]) { await tid(page, "shop-name").fill(n); await tid(page, "shop-add").click(); }
-  for (const n of ["drumstick", "diapers", "napkins"]) await page.locator(`[data-testid=shop-item][data-name="${n}"] input[type=checkbox]`).check();
+  await addShopItems(page, ["Drumstick", "Diapers", "Napkins"]);
+  // Taps right after a tick are ignored briefly (the next row slides under the thumb), so pause between ticks.
+  for (const n of ["drumstick", "diapers", "napkins"]) { await page.locator(`[data-testid=shop-item][data-name="${n}"] input[type=checkbox]`).check(); await page.waitForTimeout(350); }
   await page.waitForTimeout(300);
   const pantry = await page.evaluate(() => JSON.parse(localStorage.getItem("familyMealPlanner.v1")).pantry.map((x) => x.toLowerCase()));
   assert.ok(pantry.includes("drumstick"));
@@ -553,6 +654,7 @@ test("E2E TODO-03 blank to-dos are ignored and HTML is shown as text", async () 
   const { page, ctx } = await open();
   await tid(page, "tab-todo").click();
   const before = await tid(page, "todo-item").count();
+  await tid(page, "todo-fab").click();
   await tid(page, "todo-input").fill("   ");
   await tid(page, "todo-add").click();
   assert.equal(await tid(page, "todo-item").count(), before);
@@ -589,308 +691,6 @@ test("E2E TODO-04 saved data from the old 'To bring' version loads and keeps ext
   await ctx.close();
 });
 
-// A tiny in-memory GitHub (REST API) for the sign-in and check-in tests, shared by "devices".
-function fakeGitHub({ isPrivate = true } = {}) {
-  const gh = { commits: {}, trees: {}, head: null, n: 0, isPrivate };
-  const id = (p) => `${p}${++gh.n}`;
-  const b64 = (t) => Buffer.from(t, "utf8").toString("base64");
-  gh.files = () => (gh.head ? gh.trees[gh.commits[gh.head].tree] : {});
-  gh.attach = async (ctx) => ctx.route("https://api.github.com/**", async (route) => {
-    const req = route.request();
-    const url = new URL(req.url());
-    const p = decodeURIComponent(url.pathname);
-    const json = (status, body) => route.fulfill({ status, contentType: "application/json", headers: { "access-control-allow-origin": "*" }, body: JSON.stringify(body) });
-    const body = req.postData() ? JSON.parse(req.postData()) : null;
-    if (req.method() === "OPTIONS") return route.fulfill({ status: 204, headers: { "access-control-allow-origin": "*", "access-control-allow-headers": "*", "access-control-allow-methods": "*" } });
-    if (p === "/zen") return json(200, "ok");
-    if (p === "/user" && gh.expired) return json(401, {});
-    if (p.startsWith("/repos/") && gh.expired) return json(401, {});
-    if (p === "/user") return json(200, { login: "ram", name: "Ram", avatar_url: "" });
-    if (p === "/repos/fam/data") return json(200, { private: gh.isPrivate, permissions: { push: true }, default_branch: "main" });
-    if (p === "/repos/fam/data/git/ref/heads/main") return gh.head ? json(200, { object: { sha: gh.head } }) : json(409, {});
-    if (p === "/repos/fam/data/git/refs/heads/main" && req.method() === "PATCH") {
-      if (gh.commits[body.sha].parents[0] !== gh.head) return json(422, {});
-      gh.head = body.sha;
-      return json(200, {});
-    }
-    let m;
-    if ((m = p.match(/^\/repos\/fam\/data\/contents\/(.+)$/))) {
-      if (req.method() === "PUT") {
-        const tree = id("t"); gh.trees[tree] = { [m[1]]: Buffer.from(body.content, "base64").toString("utf8") };
-        const c = id("c"); gh.commits[c] = { tree, parents: [] }; gh.head = c;
-        return json(201, {});
-      }
-      const ref = url.searchParams.get("ref");
-      const text = gh.trees[gh.commits[ref]?.tree]?.[m[1]];
-      return text === undefined ? json(404, {}) : json(200, { content: b64(text), encoding: "base64", sha: "b" });
-    }
-    if ((m = p.match(/^\/repos\/fam\/data\/git\/commits\/(.+)$/))) return json(200, { tree: { sha: gh.commits[m[1]].tree } });
-    if (p === "/repos/fam/data/git/trees") {
-      gh.lastUpload = body.tree.map((f) => f.path);
-      const tree = id("t"); gh.trees[tree] = { ...gh.trees[body.base_tree] };
-      for (const f of body.tree) gh.trees[tree][f.path] = f.content;
-      return json(201, { sha: tree });
-    }
-    if (p === "/repos/fam/data/git/commits") { const c = id("c"); gh.commits[c] = { tree: body.tree, parents: body.parents }; return json(201, { sha: c }); }
-    return json(404, {});
-  });
-  return gh;
-}
-
-async function device(gh) {
-  const ctx = await newContext({}, { signIn: true });
-  await gh.attach(ctx);
-  const page = await ctx.newPage();
-  const errors = [];
-  page.on("pageerror", (e) => errors.push(e.message));
-  await page.goto(`${mock.url}?today=${TODAY}`);
-  return { ctx, page, errors };
-}
-
-async function signIn(page, repo = "fam/data") {
-  await tid(page, "login-form").waitFor();
-  await tid(page, "login-name").fill("Ram");
-  await tid(page, "login-repo").fill(repo);
-  await tid(page, "login-token").fill("github_pat_test");
-  await tid(page, "login-submit").click();
-}
-
-test("E2E SYNC-01 sign in, check in as Markdown files, load on a second device", async () => {
-  const gh = fakeGitHub();
-  const a = await device(gh);
-  await signIn(a.page);
-  await tid(a.page, "login").waitFor({ state: "hidden" });
-  await tid(a.page, "suggest-approve").click();           // plan and approve today
-  await tid(a.page, "checkin").click();
-  await a.page.waitForFunction(() => document.querySelector("#toast").textContent.includes("Checked in"));
-  const files = gh.files();
-  assert.ok(files["output/meal-plan.md"].includes("## 2026-10-22 · ✅ Approved"), files["output/meal-plan.md"]);
-  for (const f of ["README.md", "shopping-list.md", "todo.md", "reminders.md", "kitchen.md", "recipes.md"]) assert.ok(files["output/" + f], f);
-  assert.equal(Object.keys(files).filter((f) => f.startsWith("output/sessions/")).length, 1);
-
-  const b = await device(gh);
-  await signIn(b.page);
-  await b.page.waitForFunction(() => document.querySelector("#toast").textContent.includes("Loaded"));
-  assert.equal(await cell(b.page, TODAY).getAttribute("data-status"), "approved");
-  assert.deepEqual([...a.errors, ...b.errors], []);
-  await a.ctx.close(); await b.ctx.close();
-});
-
-test("E2E SYNC-02 a check-in after another device's asks which data to keep", async () => {
-  const gh = fakeGitHub();
-  const a = await device(gh);
-  await signIn(a.page);
-  await tid(a.page, "login").waitFor({ state: "hidden" });
-  await tid(a.page, "tab-todo").click();
-  await tid(a.page, "todo-idea").first().click();
-  await tid(a.page, "checkin").click();
-  await a.page.waitForFunction(() => document.querySelector("#toast").textContent.includes("Checked in"));
-  const b = await device(gh);
-  await signIn(b.page);
-  await b.page.waitForFunction(() => document.querySelector("#toast").textContent.includes("Loaded"));
-  await tid(b.page, "tab-todo").click();
-  await tid(b.page, "todo-idea").nth(1).click();
-  await tid(b.page, "checkin").click();
-  await b.page.waitForFunction(() => document.querySelector("#toast").textContent.includes("Checked in"));
-  // Device A hasn't loaded B's check-in, so its next check-in must not overwrite it silently.
-  await tid(a.page, "todo-idea").nth(2).click();
-  await tid(a.page, "checkin").click();
-  await tid(a.page, "sync-conflict").waitFor();
-  await tid(a.page, "conflict-load").click();
-  await a.page.waitForFunction(() => document.querySelector("#toast").textContent.includes("Loaded"));
-  assert.equal(await tid(a.page, "todo-item").count(), 2);
-  await a.ctx.close(); await b.ctx.close();
-});
-
-test("E2E SYNC-03 sign-in refuses a public repository; GitHub unreachable skips the sign-in page", async () => {
-  const gh = fakeGitHub({ isPrivate: false });
-  const a = await device(gh);
-  await signIn(a.page);
-  await a.page.waitForFunction(() => document.querySelector("[data-testid=login-status]").textContent.includes("public"));
-  assert.ok(await tid(a.page, "login").isVisible());
-  await a.ctx.close();
-
-  const ctx = await newContext({}, { signIn: true });
-  await ctx.route("https://api.github.com/**", (r) => r.abort());
-  const page = await ctx.newPage();
-  await page.goto(`${mock.url}?today=${TODAY}`);
-  await page.waitForTimeout(500);
-  assert.equal(await tid(page, "login").isVisible(), false);
-  await tid(page, "checkin").click();                      // asks to sign in, still usable
-  await tid(page, "login-form").waitFor();
-  await tid(page, "login-skip").click();
-  assert.equal(await tid(page, "login").isVisible(), false);
-  await ctx.close();
-});
-
-// ---- Round 8: sign-in and check-in failure cases ----
-const toastHas = (page, text, timeout = 5000) => page.waitForFunction((t) => document.querySelector("#toast")?.textContent.includes(t), text, { timeout });
-const statusText = (page) => page.evaluate(() => [...document.querySelectorAll("[data-testid=login-status],[data-testid=sync-status],#toast")].map((e) => e.textContent).join(" | "));
-
-test("E2E SYNC-04 a bad or expired token keeps the sign-in page open with a clear message", async () => {
-  const gh = fakeGitHub();
-  const a = await device(gh);
-  await a.ctx.route("https://api.github.com/user", (r) => r.fulfill({ status: 401, contentType: "application/json", headers: { "access-control-allow-origin": "*" }, body: '{"message":"Bad credentials"}' }));
-  await signIn(a.page);
-  await a.page.waitForFunction(() => /token/i.test(document.querySelector("[data-testid=login-status]").textContent));
-  assert.ok(await tid(a.page, "login").isVisible());
-  assert.equal(await a.page.evaluate(() => JSON.parse(localStorage.getItem("familyMealPlanner.sync") || "{}").token || ""), "", "a rejected token was saved");
-  await a.ctx.close();
-});
-
-test("E2E SYNC-05 GitHub rate limiting is reported as 'try again later', not as a token permission problem", async () => {
-  const gh = fakeGitHub();
-  const a = await device(gh);
-  await a.ctx.route("https://api.github.com/user", (r) => r.fulfill({ status: 403, contentType: "application/json",
-    headers: { "access-control-allow-origin": "*", "x-ratelimit-remaining": "0", "access-control-expose-headers": "x-ratelimit-remaining" },
-    body: '{"message":"API rate limit exceeded"}' }));
-  await signIn(a.page);
-  await a.page.waitForFunction(() => document.querySelector("[data-testid=login-status]").textContent.includes("⚠️"));
-  const msg = await tid(a.page, "login-status").innerText();
-  assert.match(msg, /later|limit|busy|wait/i, msg);
-  await a.ctx.close();
-});
-
-test("E2E SYNC-06 a token for the wrong repository says so", async () => {
-  const gh = fakeGitHub();
-  const a = await device(gh);
-  await signIn(a.page, "fam/other");
-  await a.page.waitForFunction(() => document.querySelector("[data-testid=login-status]").textContent.includes("⚠️"));
-  assert.match(await tid(a.page, "login-status").innerText(), /can't find fam\/other/i);
-  await a.ctx.close();
-});
-
-test("E2E SYNC-07 checking in while offline fails cleanly; the data stays and a later check-in works", async () => {
-  const gh = fakeGitHub();
-  const a = await device(gh);
-  await signIn(a.page);
-  await tid(a.page, "login").waitFor({ state: "hidden" });
-  await tid(a.page, "suggest-approve").click();
-  // Playwright's offline mode doesn't cut routed requests, so cut GitHub off with a route.
-  let offline = true;
-  await a.ctx.route("https://api.github.com/**", (r) => offline ? r.abort("internetdisconnected") : r.fallback());
-  await tid(a.page, "checkin").click();
-  await toastHas(a.page, "reach GitHub");
-  assert.equal(await tid(a.page, "checkin").isDisabled(), false, "check-in button stuck");
-  assert.equal(await cell(a.page, TODAY).getAttribute("data-status"), "approved");
-  offline = false;
-  await tid(a.page, "checkin").click();
-  await toastHas(a.page, "Checked in");
-  assert.ok(gh.files()["output/meal-plan.md"].includes("✅ Approved"));
-  await a.ctx.close();
-});
-
-test("E2E SYNC-08 if GitHub stops answering mid check-in, the app gives up with a message instead of 'Syncing…' forever", async () => {
-  const gh = fakeGitHub();
-  const a = await device(gh);
-  await signIn(a.page);
-  await tid(a.page, "login").waitFor({ state: "hidden" });
-  await a.ctx.route("https://api.github.com/repos/fam/data/git/trees", () => { /* never answer */ });
-  await tid(a.page, "tab-todo").click();
-  await tid(a.page, "todo-idea").first().click();
-  await tid(a.page, "checkin").click();
-  await a.page.waitForFunction(() => !document.querySelector("#checkin").disabled, null, { timeout: 40000 })
-    .catch(() => assert.fail("still 'Syncing…' after 40 s with no way to cancel"));
-  await a.ctx.close();
-});
-
-test("E2E SYNC-09 a failure half way through a check-in leaves GitHub unchanged, and retrying works", async () => {
-  const gh = fakeGitHub();
-  const a = await device(gh);
-  await signIn(a.page);
-  await tid(a.page, "login").waitFor({ state: "hidden" });
-  await tid(a.page, "checkin").click();
-  await toastHas(a.page, "Checked in");
-  const before = gh.head;
-  let fail = true;
-  await a.ctx.route("https://api.github.com/repos/fam/data/git/refs/heads/main", (r) => fail ? r.abort() : r.fallback());
-  await tid(a.page, "tab-todo").click();
-  await tid(a.page, "todo-idea").first().click();
-  await tid(a.page, "checkin").click();
-  await toastHas(a.page, "reach GitHub");
-  assert.equal(gh.head, before);
-  fail = false;
-  await tid(a.page, "checkin").click();
-  await toastHas(a.page, "Checked in");
-  assert.notEqual(gh.head, before);
-  await a.ctx.close();
-});
-
-test("E2E SYNC-10 'Keep mine' in a conflict replaces GitHub's copy; the other device then sees it", async () => {
-  const gh = fakeGitHub();
-  const a = await device(gh);
-  await signIn(a.page);
-  await tid(a.page, "login").waitFor({ state: "hidden" });
-  await tid(a.page, "checkin").click();
-  await toastHas(a.page, "Checked in");
-  const b = await device(gh);
-  await signIn(b.page);
-  await toastHas(b.page, "Loaded");
-  await tid(b.page, "tab-todo").click();
-  await tid(b.page, "todo-input").fill("From B");
-  await tid(b.page, "todo-add").click();
-  await tid(b.page, "checkin").click();
-  await toastHas(b.page, "Checked in");
-  await tid(a.page, "tab-todo").click();
-  await tid(a.page, "todo-input").fill("From A");
-  await tid(a.page, "todo-add").click();
-  await tid(a.page, "checkin").click();
-  await tid(a.page, "sync-conflict").waitFor();
-  await tid(a.page, "conflict-force").click();
-  for (let i = 0; i < 50 && !gh.files()["output/todo.md"].includes("From A"); i++) await a.page.waitForTimeout(100);
-  const todo = gh.files()["output/todo.md"];
-  assert.ok(todo.includes("From A") && !todo.includes("From B"));
-  await a.ctx.close(); await b.ctx.close();
-});
-
-test("E2E SYNC-11 signing in on a device that already has its own data asks before replacing anything", async () => {
-  const gh = fakeGitHub();
-  const a = await device(gh);
-  await signIn(a.page);
-  await tid(a.page, "login").waitFor({ state: "hidden" });
-  await tid(a.page, "checkin").click();
-  await toastHas(a.page, "Checked in");
-  // Device B used the app offline first, then signs in.
-  const b = await device(gh);
-  await tid(b.page, "login-skip").click();
-  await tid(b.page, "tab-todo").click();
-  await tid(b.page, "todo-input").fill("Made on B before signing in");
-  await tid(b.page, "todo-add").click();
-  await b.page.locator("#profile").click();
-  await tid(b.page, "profile-signin").click();          // signed out, the profile offers sign-in and the names
-  await signIn(b.page);
-  await tid(b.page, "sync-conflict").waitFor();
-  assert.ok(!gh.files()["output/todo.md"].includes("Made on B"), "B overwrote GitHub without asking");
-  await a.ctx.close(); await b.ctx.close();
-});
-
-test("E2E SYNC-12 the token is never written into the check-in files or the backup export", async () => {
-  const gh = fakeGitHub();
-  const a = await device(gh);
-  await signIn(a.page);
-  await tid(a.page, "login").waitFor({ state: "hidden" });
-  await tid(a.page, "checkin").click();
-  await toastHas(a.page, "Checked in");
-  for (const [p, text] of Object.entries(gh.files())) assert.ok(!text.includes("github_pat_test"), p);
-  const exported = await a.page.evaluate(async () => (await import("./store.js")).exportJson(JSON.parse(localStorage.getItem("familyMealPlanner.v1"))));
-  assert.ok(!exported.includes("github_pat_test"));
-  await a.ctx.close();
-});
-
-test("E2E SYNC-13 a bad folder name in settings gives a clear message, not 'someone else checked in'", async () => {
-  const gh = fakeGitHub();
-  const a = await device(gh);
-  await a.ctx.route("https://api.github.com/repos/fam/data/git/trees", (r) => r.fulfill({ status: 422, contentType: "application/json", headers: { "access-control-allow-origin": "*" }, body: '{"message":"tree.path contains a malformed path component"}' }));
-  await signIn(a.page);
-  await tid(a.page, "login").waitFor({ state: "hidden" });
-  await tid(a.page, "checkin").click();
-  await a.page.waitForFunction(() => document.querySelector("#toast").textContent.length > 0);
-  await a.page.waitForTimeout(300);
-  const msg = await statusText(a.page);
-  assert.ok(!/someone else checked in/i.test(msg), msg);
-  await a.ctx.close();
-});
-
 test("E2E KIDS-01 the kids' names come from the profile (not the public code) and are used across the app", async () => {
   const { page, ctx } = await open();
   await cell(page, TOMORROW).click();
@@ -904,35 +704,6 @@ test("E2E KIDS-01 the kids' names come from the profile (not the public code) an
   assert.match(text, /Kiran/);
   assert.match(text, /Tara/);
   await ctx.close();
-});
-
-test("E2E SYNC-20 unchanged files aren't re-uploaded; an expired token goes back to sign-in; names live in the data", async () => {
-  const gh = fakeGitHub();
-  const a = await device(gh);
-  await signIn(a.page);
-  await tid(a.page, "login").waitFor({ state: "hidden" });
-  await tid(a.page, "profile").click();
-  await tid(a.page, "kid-name").fill("Asha");
-  await tid(a.page, "baby-name").fill("Nila");
-  await tid(a.page, "save-names").click();
-  await a.page.keyboard.press("Escape");
-  await cell(a.page, TOMORROW).click();
-  assert.match(await tid(a.page, "meal-group-kid").locator("summary").innerText(), /Asha \(4 yrs\)/);
-  await tid(a.page, "checkin").click();
-  await a.page.waitForFunction(() => document.querySelector("#toast").textContent.includes("Checked in"));
-  assert.match(gh.files()["output/kitchen.md"], /"kidName": "Asha"/);
-  await tid(a.page, "tab-todo").click();
-  await tid(a.page, "todo-idea").first().click();
-  await a.page.evaluate(() => document.querySelector("#toast").textContent = "");
-  await tid(a.page, "checkin").click();
-  await a.page.waitForFunction(() => document.querySelector("#toast").textContent.includes("Checked in"));
-  assert.deepEqual(gh.lastUpload.filter((f) => !f.includes("/sessions/")).sort(), ["output/README.md", "output/todo.md"]);
-  gh.expired = true;
-  await tid(a.page, "checkin").click();
-  await tid(a.page, "login-form").waitFor();
-  assert.match(await tid(a.page, "login-form").innerText(), /expired/);
-  assert.equal(await tid(a.page, "login-repo").inputValue(), "fam/data");
-  await a.ctx.close();
 });
 
 test("E2E BOOT-01 if the app's scripts fail to load, the page explains and offers Reload instead of staying blank", async () => {

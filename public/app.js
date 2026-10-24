@@ -1,5 +1,5 @@
-import { load, save, exportJson, importJson, onChange, onSaveError, cancelPendingSave, STORAGE_KEY } from "./store.js";
-import { getSync, setSync, signOut, syncReady, cleanRepo, cleanFolder, verify, checkIn, loadLatest, githubReachable } from "./sync.js";
+import { load, save, exportJson, importJson, onChange, defaultState, onSaveError, cancelPendingSave, STORAGE_KEY } from "./store.js";
+import * as cloud from "./cloud.js";
 import { todayKey, addDays, addMonths, monthGrid, monthLabel, prettyDate, fromKey, isDateKey, isSchoolDay, occurrences } from "./shared/dates.js";
 import { checkRecipe, checkForAudience, isNutIngredient, isSchoolFood } from "./shared/safety.js";
 import { LIBRARY, suggestFromLibrary } from "./shared/recipes.js";
@@ -22,14 +22,13 @@ const ui = {
   rejected: [],
   shopStore: "all",
   storeMode: false,
-  hideBought: false,
+  cartOpen: false,       // the "In the cart" section on the shopping list is expanded
   todoDate: addDays(TODAY, 1),   // the To do tab opens on tomorrow
   openGroups: new Set(),          // meal sections the parent has expanded in the day panel
   suggest: {},                    // date -> { seed, picks: { slotId: recipeId } } meal suggestions shown in the day panel
   savedFilter: "",
   gen: { forWhom: "both", mealType: "", notes: "" },
   confirmUnsafe: null,    // date whose unsafe plan the parent was warned about
-  syncBusy: false,        // a check-in or load is talking to GitHub
   // recipe form values survive re-renders
 };
 
@@ -39,12 +38,67 @@ const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(
 const ESC = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ESC[c]);
 
-function toast(msg) {
+// With an undo function the toast carries an Undo button and stays up longer.
+function toast(msg, undo = null) {
   const t = $("#toast");
-  t.textContent = msg;
+  t.innerHTML = esc(msg) + (undo ? ' <button type="button" class="toast-undo" data-testid="toast-undo">Undo</button>' : "");
+  t.classList.toggle("has-undo", !!undo);
   t.classList.add("show");
+  toast.undo = undo;
   clearTimeout(toast.timer);
-  toast.timer = setTimeout(() => t.classList.remove("show"), 2600);
+  toast.timer = setTimeout(() => { t.classList.remove("show"); toast.undo = null; }, undo ? 5000 : 2600);
+}
+
+// A bottom sheet: slides up from the bottom, closes on Escape, a tap on the dimmed
+// backdrop, the ✕, or dragging the handle down. Forms inside use the global submit handler.
+let ignorePop = false;
+function sheet(testid, html) {
+  $(`dialog[data-testid=${testid}]`)?.close();
+  const dlg = document.createElement("dialog");
+  dlg.className = "sheet";
+  dlg.dataset.testid = testid;
+  dlg.innerHTML = `<div class="sheet-grip" aria-hidden="true"></div>${html}`;
+  document.body.appendChild(dlg);
+  dlg.addEventListener("click", (e) => {
+    if (e.target === dlg || e.target.closest("[data-sheet-close]")) dlg.close();
+  });
+  // The phone's Back gesture closes the sheet instead of leaving the app.
+  history.pushState({ sheet: true }, "");
+  dlg.addEventListener("close", () => {
+    dlg.remove();
+    if (history.state?.sheet) { ignorePop = true; history.back(); }
+  });
+  let startY = null;
+  const grip = dlg.querySelector(".sheet-grip");
+  grip.addEventListener("pointerdown", (e) => { startY = e.clientY; grip.setPointerCapture(e.pointerId); dlg.style.transition = "none"; });
+  grip.addEventListener("pointermove", (e) => { if (startY != null) dlg.style.transform = `translateY(${Math.max(0, e.clientY - startY)}px)`; });
+  grip.addEventListener("pointerup", (e) => {
+    const dy = e.clientY - (startY ?? e.clientY);
+    startY = null;
+    dlg.style.transition = "";
+    dlg.style.transform = "";
+    if (dy > 80) dlg.close();
+  });
+  dlg.showModal();
+  return dlg;
+}
+
+// Radio buttons drawn as big chips, for picking a unit, store or person with one tap.
+function chipRadios(name, options, selected, testid) {
+  return `<div class="seg radio-chips" role="radiogroup" data-testid="${testid}">${options.map(([v, label]) =>
+    `<label><input type="radio" name="${name}" value="${esc(v)}" ${v === selected ? "checked" : ""}><span>${esc(label)}</span></label>`).join("")}</div>`;
+}
+
+// A list row that can be ticked by a tap anywhere on it or a swipe to the right, and
+// deleted with a swipe to the left. `check` is the checkbox, `more` the details button.
+function swipeRow({ testid, cls = "", data = "", check, body, more, leftLabel, rightLabel = "Delete" }) {
+  return `<div class="swipe ${cls}" data-testid="${testid}" ${data}>
+    <div class="swipe-bg" aria-hidden="true"><span class="swipe-l">✓ ${esc(leftLabel)}</span><span class="swipe-r">${esc(rightLabel)} 🗑</span></div>
+    <div class="swipe-fg">
+      <label class="tap-main">${check}<span class="tap-text">${body}</span></label>
+      ${more || ""}
+    </div>
+  </div>`;
 }
 
 function commit() {
@@ -192,81 +246,7 @@ function renderHeader() {
   renderSyncButtons();
 }
 
-// ---------- sign-in, profile & check-in ----------
-// Changes made since the last check-in or load on this device.
-function unsynced(sync = getSync()) {
-  return !!state.updatedAt && (!sync.lastAt || state.updatedAt > sync.lastAt);
-}
-
-function renderSyncButtons() {
-  const sync = getSync();
-  const btn = $("#checkin");
-  btn.disabled = ui.syncBusy;
-  btn.textContent = ui.syncBusy ? "Syncing…" : "⬆ Check in";
-  btn.classList.toggle("dirty", syncReady(sync) && unsynced(sync));
-  btn.title = !syncReady(sync) ? "Sign in to check in to GitHub" : sync.lastAt ? `Last synced ${new Date(sync.lastAt).toLocaleString()}${unsynced(sync) ? ". Changes since then are not checked in." : ""}` : "Not checked in yet";
-  const prof = $("#profile");
-  const who = sync.name || sync.login;
-  prof.innerHTML = syncReady(sync) && sync.avatar ? `<img src="${esc(sync.avatar)}" alt="" width="32" height="32">` : who ? esc(who.trim().charAt(0).toUpperCase()) : "👤";
-  prof.setAttribute("aria-label", syncReady(sync) ? `Signed in as ${who}. Profile and check-in` : "Sign in");
-}
-
-function setStatus(text) {
-  for (const el of document.querySelectorAll("[data-testid=sync-status]")) el.textContent = text;
-}
-
-function syncError(err) {
-  ui.syncBusy = false;
-  if (err?.kind === "expired") {
-    // An expired or revoked token can't do anything: forget it and ask for a new one.
-    setSync({ token: "" });
-    renderSyncButtons();
-    $("dialog[data-testid=profile-dialog]")?.close();
-    showLogin(err.message);
-    return;
-  }
-  renderSyncButtons();
-  const msg = err?.message || "Something went wrong talking to GitHub.";
-  setStatus("⚠️ " + msg);
-  toast(msg);
-}
-
-async function doCheckIn({ force = false } = {}) {
-  if (ui.syncBusy) return;
-  if (!syncReady()) return showLogin("Sign in to check in your data to GitHub.");
-  ui.syncBusy = true;
-  renderSyncButtons();
-  try {
-    save(state, { now: true });
-    const res = await checkIn(state, { force, today: TODAY });
-    ui.syncBusy = false;
-    renderSyncButtons();
-    if (res.conflict) return conflictDialog();
-    setStatus("✅ Checked in just now.");
-    toast("Checked in to GitHub ✅");
-  } catch (err) {
-    syncError(err);
-  }
-}
-
-async function doLoadLatest() {
-  if (ui.syncBusy) return;
-  if (!syncReady()) return showLogin("Sign in to load your data from GitHub.");
-  ui.syncBusy = true;
-  renderSyncButtons();
-  try {
-    const data = await loadLatest();
-    ui.syncBusy = false;
-    if (!data) { renderSyncButtons(); setStatus("Nothing checked in yet."); toast("Nothing has been checked in yet. Tap Check in to save this device's data."); return; }
-    replaceState(importJson(JSON.stringify(data)));
-    save(state, { now: true });
-    setStatus("✅ Loaded the latest check-in.");
-    toast("Loaded the latest check-in ✅");
-  } catch (err) {
-    syncError(err);
-  }
-}
-
+// ---------- sign-in & profile ----------
 function modal(testid, html, onClick) {
   $(`dialog[data-testid=${testid}]`)?.close();
   const dlg = document.createElement("dialog");
@@ -280,42 +260,6 @@ function modal(testid, html, onClick) {
   return dlg;
 }
 
-function conflictDialog() {
-  modal("sync-conflict", `<div class="stack">
-    <h2>Another device checked in</h2>
-    <p>Someone checked in from another phone or browser since this one last synced. Choose which data to keep.</p>
-    <button class="btn primary" data-sync="load" data-testid="conflict-load">Load theirs (replaces this device's data)</button>
-    <button class="btn" data-sync="force" data-testid="conflict-force">Keep mine (replaces what's in GitHub)</button>
-    <button class="btn ghost" data-sync="cancel">Cancel</button>
-  </div>`, (act, dlg) => {
-    dlg.close();
-    if (act === "load") doLoadLatest(); else if (act === "force") doCheckIn({ force: true });
-  });
-}
-
-// Full-screen sign-in. Shown on first launch; "Use on this device only" skips it for good.
-function showLogin(note = "") {
-  const s = getSync();
-  const el = $("#login");
-  el.innerHTML = `<form class="card login-card" data-testid="login-form" novalidate>
-    <div class="brand"><span class="logo" aria-hidden="true">🍛</span><h1>Family Meal Planner</h1></div>
-    <h2>Sign in</h2>
-    <p class="small muted">Sign in with GitHub to check in your meal plans, lists, to-dos and reminders as Markdown files in your family's private repository, and to load them on other phones.</p>
-    ${note ? `<p class="small" style="color:var(--warn)">${esc(note)}</p>` : ""}
-    <label class="field"><span>Your name</span><input name="name" value="${esc(s.name)}" maxlength="40" placeholder="e.g. Ram" autocomplete="name" data-testid="login-name"></label>
-    <label class="field"><span>Private data repository</span><input name="repo" value="${esc(s.repo)}" placeholder="owner/name, e.g. pulija1/Pottapuja-data" autocapitalize="off" spellcheck="false" data-testid="login-repo"></label>
-    <label class="field"><span>GitHub access token</span><input name="token" type="password" placeholder="github_pat_…" autocomplete="current-password" data-testid="login-token"></label>
-    <p class="small muted">GitHub doesn't let apps sign in with your password. Create a <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">fine-grained token</a> for only the data repository with <b>Contents: Read and write</b> and an expiry such as 90 days, and paste it here. It stays in this browser and is never checked in.</p>
-    <label class="row small"><input type="checkbox" name="remember" ${s.remember === false ? "" : "checked"} data-testid="login-remember"> Remember me on this device (untick on a shared phone or computer)</label>
-    <p class="small sync-status" data-testid="login-status" role="status"></p>
-    <button class="btn primary" data-testid="login-submit">Sign in</button>
-    <button type="button" class="btn ghost" data-login="skip" data-testid="login-skip">Use on this device only, without signing in</button>
-  </form>`;
-  el.hidden = false;
-  document.body.classList.add("locked");
-  el.querySelector(s.repo ? "[name=token]" : "[name=name]").focus();
-}
-
 function hideLogin() {
   $("#login").hidden = true;
   $("#login").innerHTML = "";
@@ -323,122 +267,264 @@ function hideLogin() {
 }
 
 $("#login").addEventListener("click", (e) => {
-  if (e.target.closest("[data-login=skip]")) { setSync({ skipped: true }); hideLogin(); renderSyncButtons(); }
+  if (e.target.closest("[data-login=skip]")) { cloud.setCloudSkipped(true); hideLogin(); renderSyncButtons(); }
+  if (e.target.closest("[data-login=google]")) cloudSignIn(e.target.closest("button"));
 });
 
-$("#login").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const f = e.target.elements;
-  const status = $("[data-testid=login-status]");
-  const btn = $("[data-testid=login-submit]");
-  btn.disabled = true;
-  status.textContent = "Checking with GitHub…";
-  try {
-    const repo = cleanRepo(f.repo.value);
-    const token = f.token.value.trim();
-    const user = await verify({ token, repo });
-    const old = getSync();
-    const sameRepo = old.repo === repo;
-    setSync({ name: f.name.value.trim() || user.name, login: user.login, avatar: user.avatar, repo, token, remember: f.remember.checked, branch: sameRepo ? old.branch : user.branch, skipped: false, ...(sameRepo ? {} : { lastSha: "", lastAt: "", lastSummary: null }) });
-    hideLogin();
-    renderSyncButtons();
-    toast(`Signed in as ${user.login}`);
-    // A fresh device picks up the family's data; a device with its own data checks in,
-    // which asks what to keep if another device already checked in.
-    if (state.updatedAt) doCheckIn(); else doLoadLatest();
-  } catch (err) {
-    btn.disabled = false;
-    // GitHub can't be reached at all: don't hold the family up, open the app and sign in later.
-    if (err?.kind === "network") { hideLogin(); renderSyncButtons(); toast("Couldn't reach GitHub, so you're using the app on this device. Sign in later from the 👤 button."); return; }
-    status.textContent = "⚠️ " + (err?.message || "Couldn't sign in.");
-  }
-});
-
-// First launch: offer sign-in, but only when GitHub can be reached; otherwise just open the app.
+// First launch: offer Google sign-in when family sync is set up and nobody is signed in.
 async function maybeShowLogin() {
-  const s = getSync();
-  if (syncReady(s) || s.skipped || !navigator.onLine) return;
-  if (await githubReachable()) showLogin();
+  if (!cloud.cloudConfigured()) return;
+  await cloud.cloudAuthSettled();
+  if (cloud.getCloud().status === "signed-out" && !cloud.cloudSkipped()) showCloudLogin();
+}
+
+function downloadBackup() {
+  const blob = new Blob([exportJson(state)], { type: "application/json" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = `meal-planner-backup-${TODAY}.json`;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+}
+
+// ---------- family sync (Firebase) ----------
+const CLOUD_LABEL = {
+  loading: "☁ Starting…", connecting: "☁ Connecting…", synced: "☁ Synced", saving: "☁ Saving…",
+  offline: "☁ Offline", error: "☁ Sync problem", "no-family": "☁ Set up sync", choose: "☁ Set up sync", "signed-out": "☁ Sign in", unavailable: "☁ Sync off",
+};
+const CLOUD_TEXT = {
+  loading: "Starting family sync…",
+  connecting: "Connecting to your family's data…",
+  synced: "Everything is synced with your family.",
+  saving: "Saving your changes to the family…",
+  offline: "Offline. Changes are saved on this phone and sync when it's back online.",
+  "no-family": "Signed in, but not in a family space yet.",
+  choose: "Signed in. Choose the family space to join.",
+  "signed-out": "Not signed in. Your data is saved on this phone only.",
+};
+
+function cloudStatusText(c = cloud.getCloud()) {
+  return c.error && (c.status === "error" || c.status === "unavailable") ? "⚠️ " + c.error : CLOUD_TEXT[c.status] || "";
+}
+
+function renderSyncButtons() {
+  const c = cloud.getCloud();
+  const btn = $("#cloud");
+  btn.hidden = !c.configured;
+  btn.textContent = CLOUD_LABEL[c.status] || "☁ Sync";
+  btn.dataset.status = c.status;
+  btn.title = cloudStatusText(c);
+  const prof = $("#profile");
+  prof.innerHTML = c.user?.photo ? `<img src="${esc(c.user.photo)}" alt="" width="32" height="32" referrerpolicy="no-referrer">` : c.user ? esc((c.user.name || c.user.email).trim().charAt(0).toUpperCase()) : "👤";
+  prof.setAttribute("aria-label", c.user ? `Signed in as ${c.user.email}. Profile and family sync` : "Profile and family sync");
+  for (const el of document.querySelectorAll("[data-testid=cloud-status-text]")) el.textContent = cloudStatusText(c);
+}
+
+function showCloudLogin(note = "") {
+  const el = $("#login");
+  el.innerHTML = `<div class="card login-card" data-testid="cloud-login">
+    <div class="brand"><span class="logo" aria-hidden="true">🍛</span><h1>Family Meal Planner</h1></div>
+    <h2>Sign in</h2>
+    <p class="small muted">Sign in with Google to keep the meal plans, shopping list, to-dos and reminders the same on every phone in the family. Changes save on their own, and the app still works with no signal.</p>
+    ${note ? `<p class="small" style="color:var(--warn)">${esc(note)}</p>` : ""}
+    <p class="small sync-status" data-testid="login-status" role="status"></p>
+    <button type="button" class="btn primary" data-login="google" data-testid="google-signin">Sign in with Google</button>
+    <button type="button" class="btn ghost" data-login="skip" data-testid="login-skip">Use on this device only, without signing in</button>
+  </div>`;
+  el.hidden = false;
+  document.body.classList.add("locked");
+  el.querySelector("[data-login=google]").focus();
+}
+
+async function cloudSignIn(btn) {
+  const status = $("[data-testid=login-status]") || $("[data-testid=cloud-status-text]");
+  if (btn) btn.disabled = true;
+  if (status) status.textContent = "Opening Google sign-in…";
+  try {
+    await cloud.signIn();
+    cloud.setCloudSkipped(false);
+    hideLogin();
+    $("dialog[data-testid=profile-dialog]")?.close();
+  } catch (err) {
+    if (btn) btn.disabled = false;
+    if (status) status.textContent = "⚠️ " + (err?.message || "Couldn't sign in.");
+  }
+}
+
+// Signed in, but this Google account isn't in a family space: start one, or wait to be added.
+function noFamilyDialog(c = cloud.getCloud(), { removed = false } = {}) {
+  hideLogin();
+  modal("no-family", `<div class="stack">
+    <h2>${removed ? "You're no longer in the family space" : "Set up family sync"}</h2>
+    <p>${removed ? "Someone took" : "There's no family space for"} <strong>${esc(c.user?.email || "")}</strong>${removed ? " out of the family space. Your data stays on this phone." : " yet."}</p>
+    ${c.otherAccountData ? `<p class="small" style="color:var(--warn)">The lists on this phone were synced by a different Google account. Start fresh to keep them out of your space; they stay in that account's family space.</p>
+    <button class="btn primary" data-sync="start-fresh" data-testid="family-start-fresh">Start our family space, fresh</button>
+    <button class="btn" data-sync="start" data-testid="family-start">Start it with this phone's lists</button>` : `<button class="btn primary" data-sync="start" data-testid="family-start">Start our family space</button>
+    <p class="small muted">Starts a new space with this phone's data in it.</p>`}
+    <p class="small muted">Then add the rest of the family in 👤 Profile by their Google email.</p>
+    <p class="small muted">If someone in the family already started one, ask them to add <strong>${esc(c.user?.email || "")}</strong> in their 👤 Profile, then tap Check again.</p>
+    <p class="small sync-status" data-testid="no-family-status" role="status"></p>
+    <button class="btn" data-sync="again" data-testid="family-check">Check again</button>
+    <button class="btn ghost" data-sync="signout" data-testid="family-signout">Sign out</button>
+  </div>`, async (act, dlg, b) => {
+    const st = dlg.querySelector("[data-testid=no-family-status]");
+    if (act === "start" || act === "start-fresh") {
+      b.disabled = true;
+      st.textContent = "Starting your family space…";
+      try { await cloud.startFamily({ fresh: act === "start-fresh" }); dlg.close(); } catch (err) { b.disabled = false; st.textContent = "⚠️ " + (err?.message || "Couldn't start it."); }
+    } else if (act === "again") {
+      dlg.close();
+      // Opens the join question, or this dialog again when nobody has added this account yet.
+      if (!(await cloud.checkFamilyAgain())) $("dialog[data-testid=no-family] [data-testid=no-family-status]")?.replaceChildren(`Not added yet. Ask them to add ${c.user?.email || "your email"} in 👤 Profile.`);
+    } else if (act === "signout") {
+      await cloud.signOutCloud();
+      dlg.close();
+    }
+  });
+}
+
+// This account is listed in one or more family spaces. Anyone can list any email in their own
+// space, so show who started each one and join only when the person says so.
+function chooseFamilyDialog(c, list) {
+  hideLogin();
+  const used = !!state.updatedAt;
+  const rows = list.map((f) => {
+    const takeFamily = f.otherFamilyData || c.otherAccountData;
+    const buttons = !used
+      ? `<button class="btn primary" data-sync="join" data-id="${esc(f.id)}" data-testid="family-join">Join</button>`
+      : takeFamily
+        ? `<button class="btn primary" data-sync="join-family" data-id="${esc(f.id)}" data-testid="family-join-theirs">Join and use the family's lists</button>
+           <button class="btn" data-sync="join" data-id="${esc(f.id)}" data-testid="family-join">Join and add this phone's lists</button>`
+        : `<button class="btn primary" data-sync="join" data-id="${esc(f.id)}" data-testid="family-join">Join and add this phone's lists</button>
+           <button class="btn" data-sync="join-family" data-id="${esc(f.id)}" data-testid="family-join-theirs">Join and use only the family's lists</button>`;
+    return `<div class="card family-choice" data-testid="family-choice">
+      <strong>${esc(f.name)}</strong>
+      <span class="small">Started by <strong>${esc(f.ownerEmail)}</strong> · ${f.emails.length} ${f.emails.length === 1 ? "person" : "people"}</span>
+      ${takeFamily && used ? `<span class="small muted">The lists on this phone came from ${c.otherAccountData ? "a different Google account" : "another family space"}.</span>` : ""}
+      ${buttons}
+    </div>`;
+  }).join("");
+  modal("choose-family", `<div class="stack">
+    <h2>Join a family space?</h2>
+    <p class="small">${list.length === 1 ? "A family space lists" : "These family spaces list"} <strong>${esc(c.user?.email || "")}</strong>. Join only if you know who started it: everyone in it sees the lists.</p>
+    ${rows}
+    <button class="btn ghost" data-sync="none" data-testid="family-decline">None of these</button>
+    <button class="btn ghost" data-sync="signout" data-testid="family-signout">Sign out</button>
+  </div>`, async (act, dlg, b) => {
+    if (act === "join" || act === "join-family") { dlg.close(); cloud.joinFamily(b.dataset.id, { useFamilyData: act === "join-family" }); }
+    else if (act === "none") { dlg.close(); noFamilyDialog(cloud.getCloud()); }
+    else if (act === "signout") { dlg.close(); await cloud.signOutCloud(); }
+  });
 }
 
 function profileDialog() {
-  const s = getSync();
-  const signedIn = syncReady(s);
-  const family = `<details ${state.settings.kidName ? "" : "open"} data-testid="family-names"><summary class="small">Children's names</summary>
-      <p class="small muted">Saved with your data (and checked in to your private repository), not in the app's public code.</p>
+  const c = cloud.getCloud();
+  const names = `<details ${state.settings.kidName ? "" : "open"} data-testid="family-names"><summary class="small">Children's names</summary>
+      <p class="small muted">Saved with the family's data, not in the app's public code.</p>
       <label class="field"><span>4-year-old</span><input name="kidName" value="${esc(state.settings.kidName || "")}" maxlength="30" data-testid="kid-name"></label>
       <label class="field"><span>8-month-old</span><input name="babyName" value="${esc(state.settings.babyName || "")}" maxlength="30" data-testid="baby-name"></label>
       <button type="button" class="btn sm" data-sync="names" data-testid="save-names">Save names</button>
     </details>`;
-  const onNames = (dlg) => {
-    const f = dlg.querySelector("form").elements;
-    state.settings = { ...state.settings, kidName: f.kidName.value.trim(), babyName: f.babyName.value.trim() };
-    commit();
-    toast("Names saved.");
-  };
-  if (!signedIn) {
-    modal("profile-dialog", `<form class="stack">
-      <h2>Profile</h2>
-      <p class="small muted">Not signed in. Your data is saved on this device only.</p>
-      <button type="button" class="btn primary" data-sync="signin" data-testid="profile-signin">Sign in to check in to GitHub</button>
-      ${family}
-      <button type="button" class="btn ghost sm" data-sync="close">Close</button>
-    </form>`, (act, dlg) => {
-      if (act === "signin") { dlg.close(); showLogin(); }
-      else if (act === "names") onNames(dlg);
-      else if (act === "close") dlg.close();
-    });
-    return;
-  }
+  const fam = c.family;
+  const members = fam ? `<div class="stack" data-testid="family-members">
+      <strong class="small">Family members</strong>
+      <ul class="members">${fam.emails.map((e) => `<li data-testid="family-member"><span class="grow">${esc(e)}${e === fam.ownerEmail ? ' <span class="muted">(started it)</span>' : ""}${e === c.user?.email ? ' <span class="muted">(you)</span>' : ""}</span>${e !== fam.ownerEmail ? `<button type="button" class="btn ghost sm" data-sync="remove" data-email="${esc(e)}" aria-label="Remove ${esc(e)}" data-testid="member-remove">Remove</button>` : ""}</li>`).join("")}</ul>
+      <label class="field"><span>Add someone by their Google email</span><input name="member" type="email" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="name@gmail.com" data-testid="member-email"></label>
+      <button type="button" class="btn sm" data-sync="add" data-testid="member-add">Add to family</button>
+      <p class="small muted">They sign in on their phone with that Google account and see the same lists.</p>
+    </div>` : "";
+  const top = !c.configured
+    ? `<p class="small muted">Family sync isn't set up in this copy of the app, so your data is saved on this phone only. Download a backup to move it to another phone.</p>`
+    : !c.user
+    ? `<p class="small muted">Not signed in. Your data is saved on this device only.</p>
+       <button type="button" class="btn primary" data-sync="google" data-testid="profile-google">Sign in with Google to sync</button>`
+    : `<div class="row">${c.user.photo ? `<img class="avatar-img" src="${esc(c.user.photo)}" alt="" width="40" height="40" referrerpolicy="no-referrer">` : ""}<div class="grow"><strong data-testid="profile-name">${esc(c.user.name || c.user.email)}</strong><div class="small muted">${esc(c.user.email)}</div></div></div>
+       ${c.status === "no-family" || c.status === "choose" ? '<button type="button" class="btn primary" data-sync="setup" data-testid="profile-setup">Set up family sync</button>' : ""}`;
   modal("profile-dialog", `<form class="stack">
-    <div class="row">${s.avatar ? `<img class="avatar-img" src="${esc(s.avatar)}" alt="" width="40" height="40">` : ""}<div class="grow"><strong data-testid="profile-name">${esc(s.name || s.login)}</strong><div class="small muted">Signed in as ${esc(s.login)} · ${esc(s.repo)}</div></div></div>
-    <p class="small sync-status" data-testid="sync-status">${s.lastAt ? `Last synced ${esc(new Date(s.lastAt).toLocaleString())}.${unsynced(s) ? " This device has changes that aren't checked in." : " Everything is checked in."}` : "Not synced yet."}</p>
-    <div class="row">
-      <button type="button" class="btn ok" data-sync="checkin" data-testid="sync-checkin">⬆ Check in</button>
-      <button type="button" class="btn" data-sync="load" data-testid="sync-load">⬇ Load latest</button>
-    </div>
-    <p class="small"><a href="https://github.com/${esc(s.repo)}/tree/${esc(s.branch)}/${esc(s.folder)}" target="_blank" rel="noopener">Open the Markdown files on GitHub</a></p>
-    ${family}
-    <details><summary class="small">More settings</summary>
-      <label class="field"><span>Your name</span><input name="name" value="${esc(s.name)}" maxlength="40" data-testid="sync-name"></label>
-      <label class="field"><span>Branch</span><input name="branch" value="${esc(s.branch)}" data-testid="sync-branch"></label>
-      <label class="field"><span>Folder</span><input name="folder" value="${esc(s.folder)}" data-testid="sync-folder"></label>
-      <button type="button" class="btn sm" data-sync="save">Save settings</button>
-    </details>
+    <h2>Profile</h2>
+    ${top}
+    ${c.configured ? `<p class="small sync-status" data-testid="cloud-status-text" role="status">${esc(cloudStatusText(c))}</p>` : ""}
+    ${members}
+    ${names}
+    <p class="small muted">A backup file is still handy: <button type="button" class="linkish" data-sync="export" data-testid="profile-export">Export backup</button></p>
     <div class="row between">
-      <button type="button" class="btn ghost sm" data-sync="signout" data-testid="sync-signout">Sign out of this device</button>
+      ${c.user ? '<button type="button" class="btn ghost sm" data-sync="signout" data-testid="cloud-signout">Sign out of this phone</button>' : ""}
       <button type="button" class="btn ghost sm" data-sync="close">Close</button>
     </div>
-  </form>`, (act, dlg, b) => {
+  </form>`, async (act, dlg, b) => {
+    const st = dlg.querySelector("[data-testid=cloud-status-text]");
     switch (act) {
-      case "checkin": doCheckIn(); break;
-      case "load":
-        if (unsynced() && !b.dataset.armed) {
-          b.dataset.armed = "1";
-          setStatus("⚠️ This device has changes that aren't checked in. Loading will replace them. Tap Load latest again to go ahead.");
-          break;
-        }
-        doLoadLatest();
-        break;
-      case "save": {
+      case "google": cloudSignIn(b); break;
+      case "setup": dlg.close(); cloud.checkFamilyAgain(); break;
+      case "names": {
         const f = dlg.querySelector("form").elements;
-        const patch = { name: f.name.value.trim(), branch: f.branch.value.trim() || "main", folder: cleanFolder(f.folder.value) };
-        const old = getSync();
-        if (patch.branch !== old.branch || patch.folder !== old.folder) Object.assign(patch, { lastSha: "", lastAt: "", lastSummary: null });
-        setSync(patch);
-        renderSyncButtons();
-        toast("Settings saved.");
+        state.settings = { ...state.settings, kidName: f.kidName.value.trim(), babyName: f.babyName.value.trim() };
+        commit();
+        toast("Names saved.");
         break;
       }
-      case "names": onNames(dlg); break;
-      case "signout": signOut(); dlg.close(); renderSyncButtons(); showLogin("Signed out. Your data is still on this device."); break;
+      case "add": {
+        const input = dlg.querySelector("[name=member]");
+        try { await cloud.addMember(input.value); toast(`Added ${input.value.trim().toLowerCase()} to the family.`); profileDialog(); }
+        catch (err) { st.textContent = "⚠️ " + err.message; }
+        break;
+      }
+      case "remove":
+        if (b.dataset.armed !== "1") { b.dataset.armed = "1"; b.textContent = "Tap again to remove"; break; }
+        try { await cloud.removeMember(b.dataset.email); toast(`Removed ${b.dataset.email}.`); profileDialog(); }
+        catch (err) { st.textContent = "⚠️ " + err.message; }
+        break;
+      case "export": downloadBackup(); break;
+      case "signout": await cloud.signOutCloud(); dlg.close(); toast("Signed out. Your data is still on this phone."); break;
       case "close": dlg.close(); break;
     }
   });
 }
 
+// Other phones' changes were merged into `state`: save them here and redraw, but not while
+// someone is typing in the page (the redraw would wipe what they're typing).
+let redrawWaiting = false;
+function onRemoteChange() {
+  save(state, { now: true });
+  clearCaches();
+  const typing = document.activeElement?.matches?.("#main input, #main textarea, #main select");
+  if (!typing) { render(); return; }
+  if (redrawWaiting) return;
+  redrawWaiting = true;
+  document.activeElement.addEventListener("blur", () => { redrawWaiting = false; setTimeout(render, 0); }, { once: true });
+}
+
+function startFamilySync() {
+  cloud.startCloud({
+    getState: () => state,
+    onRemoteChange,
+    onStatus: (c) => {
+      if (c.user && $("[data-testid=cloud-login]")) hideLogin();   // signed in (also after a redirect sign-in)
+      renderSyncButtons();
+    },
+    onNoFamily: (c, opts) => noFamilyDialog(c, opts),
+    onChooseFamily: (c, list) => chooseFamilyDialog(c, list),
+    // Start a family space clean: this phone's lists belong to another account's family.
+    resetLocal: () => {
+      const fresh = defaultState();
+      for (const k of Object.keys(state)) delete state[k];
+      Object.assign(state, fresh);
+    },
+    // Two phones' lists can both have "ghee": combine same-name items after the first sync.
+    tidyAfterFirstSync: (st) => {
+      const before = JSON.stringify(st.shopping);
+      st.shopping = mergeItems(st.shopping).map((i) => ({ ...i, id: i.id || uid() }));
+      return JSON.stringify(st.shopping) !== before;
+    },
+    onFirstSync: ({ hadFamilyData, uploaded }) => {
+      toast(hadFamilyData ? (uploaded ? "Synced: this phone's data was added to the family's." : "Synced with your family ✅") : "Family sync is on. This phone's data is now in the cloud ✅");
+    },
+  });
+}
+
 function setTab(tab) {
   ui.tab = tab;
+  if (tab !== "shopping") document.body.classList.remove("in-store");
   for (const b of document.querySelectorAll(".tabs button")) b.setAttribute("aria-selected", String(b.dataset.tab === tab));
   for (const v of document.querySelectorAll(".view")) v.hidden = v.id !== "view-" + tab;
   try { history.replaceState(null, "", location.pathname + location.search + "#" + tab); } catch {}
@@ -529,7 +615,7 @@ function renderUpcomingPending() {
 
 function renderBackupCard() {
   return `<div class="card"><h2>Backup</h2>
-    <p class="small muted">Everything is saved on this device. Download a backup to move it to another phone or browser.</p>
+    <p class="small muted">${cloud.getCloud().ready ? "Everything syncs with your family on its own. A backup file is a copy you keep yourself." : "Everything is saved on this device. Download a backup to move it to another phone or browser."}</p>
     <div class="row">
       <button class="btn sm" data-action="export" data-testid="export">Download backup</button>
       <label class="btn sm">Restore backup<input type="file" accept="application/json" data-action="import" hidden data-testid="import"></label>
@@ -625,12 +711,34 @@ function slotRow(s, day, issues) {
 }
 
 function todoRow(t, { showDate = false } = {}) {
-  return `<div class="chk todo ${t.done ? "done" : ""}" data-testid="todo-item">
-    <input type="checkbox" data-action="todo-toggle" data-id="${esc(t.id)}" ${t.done ? "checked" : ""} aria-label="Done: ${esc(t.text)}">
-    <span class="txt grow">${t.time ? `<strong>${esc(t.time)}</strong> ` : ""}${esc(t.text)}${showDate ? ` <span class="small muted">· ${esc(prettyDate(t.date))}</span>` : ""}</span>
-    ${whoPill(t.who)}
-    <button type="button" class="iconbtn" data-action="todo-del" data-id="${esc(t.id)}" aria-label="Delete ${esc(t.text)}">✕</button>
-  </div>`;
+  const meta = [t.time ? `🕒 ${esc(t.time)}` : "", showDate ? esc(prettyDate(t.date)) : ""].filter(Boolean).join(" · ");
+  return swipeRow({
+    testid: "todo-item",
+    cls: `todo ${t.done ? "done" : ""}`,
+    data: `data-kind="todo" data-id="${esc(t.id)}"`,
+    leftLabel: t.done ? "Not done" : "Done",
+    check: `<input type="checkbox" class="big-check" data-action="todo-toggle" data-id="${esc(t.id)}" ${t.done ? "checked" : ""} aria-label="Done: ${esc(t.text)}">`,
+    body: `<span class="txt name">${esc(t.text)}</span><span class="meta">${whoPill(t.who)}${meta ? ` <span>${meta}</span>` : ""}</span>`,
+    more: `<button type="button" class="iconbtn lg" data-action="todo-more" data-id="${esc(t.id)}" aria-label="Edit ${esc(t.text)}" data-testid="todo-more">⋯</button>`,
+  });
+}
+
+function todoSheet(t = null) {
+  const date = t?.date || ui.todoDate;
+  const quick = [[TODAY, "Today"], [addDays(TODAY, 1), "Tomorrow"]];
+  sheet(t ? "todo-edit-sheet" : "todo-sheet", `<form data-form="${t ? "todo-edit" : "todo-add"}" class="stack" ${t ? `data-id="${esc(t.id)}"` : ""}>
+    <div class="row between"><h2>${t ? "Edit to do" : "Add a to do"}</h2><button type="button" class="iconbtn lg" data-sheet-close aria-label="Close">✕</button></div>
+    <label class="field"><span>What needs doing</span><input type="text" name="text" required maxlength="120" value="${esc(t?.text || "")}" placeholder="e.g. Pack the water bottle" data-testid="todo-input" enterkeyhint="done"></label>
+    <div class="field"><span>For</span>${chipRadios("who", ["kid", "baby", "family"].map((v) => [v, whoLabel(v, state.settings, { age: true })]), t?.who || "kid", "todo-who")}</div>
+    <div class="field"><span>When</span>
+      <div class="row">${quick.map(([k, l]) => `<button type="button" class="btn sm ${k === date ? "primary" : ""}" data-action="todo-sheet-date" data-date="${k}">${l}</button>`).join("")}
+        <input type="date" name="date" value="${esc(date)}" required data-testid="todo-input-date" class="grow" aria-label="Date"></div>
+    </div>
+    <label class="field"><span>Time (optional)</span><input type="time" name="time" value="${esc(t?.time || "")}"></label>
+    <button class="btn primary big" data-testid="${t ? "todo-save" : "todo-add"}">${t ? "Save" : "Add to do"}</button>
+    ${t ? `<button type="button" class="btn danger big" data-action="todo-del" data-id="${esc(t.id)}" data-testid="todo-delete">Delete</button>` : ""}
+  </form>`);
+  if (!t) $("[data-testid=todo-input]")?.focus();
 }
 
 const WHO_OPTIONS = (sel = "kid") => ["kid", "baby", "family"].map((v) => [v, whoLabel(v, state.settings)])
@@ -859,7 +967,7 @@ function addToShopping(items, source) {
   const onList = new Set(state.shopping.filter((i) => !i.bought).flatMap((i) => i.keys || []));
   const fresh = items
     .filter((i) => !i.key || !onList.has(i.key))
-    .map((i) => ({ id: uid(), name: i.name, quantity: i.quantity ?? null, unit: normUnit(i.unit), store: i.store || "", bought: false, source: i.source || source, keys: i.key ? [i.key] : [] }));
+    .map((i) => ({ id: uid(), name: i.name, label: String(i.name).trim(), quantity: i.quantity ?? null, unit: normUnit(i.unit), store: i.store || "", bought: false, source: i.source || source, keys: i.key ? [i.key] : [] }));
   state.shopping = mergeItems([...state.shopping, ...fresh]).map((i) => ({ ...i, id: i.id || uid() }));
   return fresh.length;
 }
@@ -901,53 +1009,201 @@ function recipeDialog(r) {
 }
 
 // ---------- shopping ----------
-function renderShopping() {
-  const items = state.shopping.filter((i) => (ui.shopStore === "all" || (i.store || "") === ui.shopStore || (ui.shopStore === "" && !i.store)) && (!ui.hideBought || !i.bought));
-  const groups = groupByAisle(items);
-  const left = state.shopping.filter((i) => !i.bought).length;
+const AISLE_ICONS = {
+  "Vegetables": "🥬", "Fruits": "🍎", "Rice, dals & flours": "🌾", "Dairy & eggs": "🥚", "Spices & tempering": "🧂",
+  "Oil, nuts & dry fruits": "🥜", "Baby care": "🍼", "School & household": "🧻", "Other": "🛍️",
+};
+const UNITS = ["pcs", "g", "kg", "ml", "l", "packet", "bunch", "dozen"];
+// One-tap items offered in the add sheet when they aren't already on the list.
+const SHOP_STAPLES = ["milk", "egg", "curd", "banana", "bread", "paneer", "spinach", "tomato", "onion", "almond", "diapers", "wipes"];
 
+// Quantity as people say it: "4" not "4 pcs", and nothing for a single piece.
+function shopQty(i) {
+  if (i.unit === "pcs" || !i.unit) return i.quantity == null || i.quantity === 1 ? "" : `× ${i.quantity}`;
+  return formatQty(i);
+}
+
+function shopRow(i) {
+  const meta = [shopQty(i), i.store].filter(Boolean).map(esc).join(" · ");
+  return swipeRow({
+    testid: "shop-item",
+    cls: `shop-item ${i.bought ? "bought" : ""}`,
+    data: `data-kind="shop" data-id="${esc(i.id)}" data-name="${esc(i.name)}"`,
+    leftLabel: i.bought ? "Put back" : "Got it",
+    check: `<input type="checkbox" class="big-check" data-action="shop-toggle" data-id="${esc(i.id)}" ${i.bought ? "checked" : ""} aria-label="Got ${esc(i.name)}">`,
+    body: `<span class="name">${esc(i.label || i.name)}</span>${meta ? `<span class="meta" data-testid="shop-qty-label">${meta}</span>` : ""}`,
+    more: `<button type="button" class="iconbtn lg" data-action="shop-more" data-id="${esc(i.id)}" aria-label="Details for ${esc(i.name)}" data-testid="shop-more">⋯</button>`,
+  });
+}
+
+function renderShopping() {
+  const inStore = (i) => ui.shopStore === "all" || (i.store || "") === ui.shopStore;
+  const items = state.shopping.filter(inStore);
+  const toBuy = items.filter((i) => !i.bought);
+  const inCart = items.filter((i) => i.bought);
+  const groups = groupByAisle(toBuy);
+  const left = state.shopping.filter((i) => !i.bought).length;
+  const pct = items.length ? Math.round((inCart.length / items.length) * 100) : 0;
+
+  document.body.classList.toggle("in-store", ui.storeMode);
   $("#view-shopping").innerHTML = `
-    <div class="card ${ui.storeMode ? "store-mode" : ""}">
+    <div class="card shop-head ${ui.storeMode ? "store-mode" : ""}">
       <div class="row between">
-        <h2>Shopping list <span class="pill" data-testid="shop-left">${left} to buy</span></h2>
-        <button class="btn sm ${ui.storeMode ? "primary" : ""}" data-action="store-mode" aria-pressed="${ui.storeMode}" data-testid="store-mode">${ui.storeMode ? "🛒 In store mode" : "🛒 I'm at the store"}</button>
+        <h2>${ui.storeMode ? "At the store" : "Shopping list"} <span class="pill" data-testid="shop-left">${left} to buy</span></h2>
+        <button class="btn ${ui.storeMode ? "primary" : ""}" data-action="store-mode" aria-pressed="${ui.storeMode}" data-testid="store-mode">${ui.storeMode ? "✓ Done shopping" : "🛒 I'm at the store"}</button>
       </div>
-      ${ui.storeMode ? "" : `<form data-form="shop-add" class="row" style="margin:10px 0">
-        <input type="text" name="name" class="grow" placeholder="Item (e.g. toor dal)" required aria-label="Item" data-testid="shop-name">
-        <input type="number" name="qty" min="0" step="any" placeholder="Qty" style="width:80px" aria-label="Quantity" data-testid="shop-qty">
-        <select name="unit" style="width:90px" aria-label="Unit" data-testid="shop-unit"><option value="">unit</option>${["g", "kg", "ml", "l", "pcs", "packet", "bunch", "dozen"].map((u) => `<option>${u}</option>`).join("")}</select>
-        <select name="store" style="width:150px" aria-label="Store" data-testid="shop-store"><option value="">Any store</option>${state.stores.map((s) => `<option>${esc(s)}</option>`).join("")}</select>
-        <button class="btn primary" data-testid="shop-add">Add</button>
-      </form>`}
-      <div class="row" style="margin:8px 0">
-        <div class="seg" role="group" aria-label="Store filter" data-testid="store-filter">
-          <button data-action="shop-store" data-store="all" aria-pressed="${ui.shopStore === "all"}">All</button>
-          ${state.stores.map((s) => `<button data-action="shop-store" data-store="${esc(s)}" aria-pressed="${ui.shopStore === s}">${esc(s)}</button>`).join("")}
-        </div>
-        <label class="chk small" style="min-height:0"><input type="checkbox" data-action="hide-bought" ${ui.hideBought ? "checked" : ""} data-testid="hide-bought"> Hide bought</label>
+      ${items.length ? `<div class="progress big" aria-hidden="true"><div style="width:${pct}%"></div></div>
+      <p class="small muted" style="margin:4px 0 0" data-testid="shop-progress">${inCart.length} of ${items.length} in the cart${ui.storeMode ? " · tap an item when it's in the cart" : ""}</p>` : ""}
+      <div class="seg scroll-x" role="group" aria-label="Store filter" data-testid="store-filter">
+        <button data-action="shop-store" data-store="all" aria-pressed="${ui.shopStore === "all"}">All stores</button>
+        ${state.stores.map((s) => `<button data-action="shop-store" data-store="${esc(s)}" aria-pressed="${ui.shopStore === s}">${esc(s)}</button>`).join("")}
       </div>
-      <div data-testid="shop-list">
-      ${groups.length ? groups.map(([aisle, list]) => `<div class="aisle"><h3>${esc(aisle)}</h3>${list.map((i) => `
-        <div class="shop-item ${i.bought ? "bought" : ""}" data-testid="shop-item" data-name="${esc(i.name)}">
-          <label><input type="checkbox" data-action="shop-toggle" data-id="${esc(i.id)}" ${i.bought ? "checked" : ""}><span class="name">${esc(i.name)}</span></label>
-          <span class="qty" data-testid="shop-qty-label">${esc(formatQty(i))}</span>
-          ${i.store ? `<span class="pill store">${esc(i.store)}</span>` : ""}
-          ${ui.storeMode ? "" : `<button class="iconbtn" data-action="shop-del" data-id="${esc(i.id)}" aria-label="Delete ${esc(i.name)}">✕</button>`}
-        </div>`).join("")}</div>`).join("") : '<p class="empty-state">The list is empty. Add items, or pull them from your meal plan.</p>'}
-      </div>
+    </div>
+    <div data-testid="shop-list" class="${ui.storeMode ? "store-mode" : ""}">
+      ${groups.map(([aisle, list]) => `<section class="aisle card" data-testid="aisle">
+        <h3><span class="aisle-icon" aria-hidden="true">${AISLE_ICONS[aisle] || "🛍️"}</span>${esc(aisle)}<span class="aisle-count">${list.length}</span></h3>
+        ${list.map(shopRow).join("")}
+      </section>`).join("")}
+      ${!toBuy.length ? `<div class="card empty-state" data-testid="shop-empty">${items.length ? `🎉 Everything is in the cart.${ui.storeMode ? '<button class="btn primary big" style="display:flex;width:100%;margin-top:12px" data-action="store-mode" data-testid="store-done">✓ Done shopping</button>' : ""}` : "The list is empty. Tap <strong>+ Add item</strong>, or pull items from your meal plan."}</div>` : ""}
+      ${inCart.length ? `<details class="card cart" data-testid="shop-cart" data-cart ${ui.cartOpen ? "open" : ""}>
+        <summary><span class="aisle-icon" aria-hidden="true">🛒</span>In the cart <span class="aisle-count">${inCart.length}</span></summary>
+        ${inCart.sort((a, b) => a.name.localeCompare(b.name)).map(shopRow).join("")}
+        ${ui.storeMode ? "" : `<button class="btn danger" style="margin-top:8px" data-action="clear-bought" data-testid="clear-bought">Clear the cart</button>`}
+      </details>` : ""}
+      ${items.length ? '<p class="small muted swipe-hint">Tip: swipe an item right when you have it, or left to delete.</p>' : ""}
     </div>
     ${ui.storeMode ? "" : `<div class="card">
       <h2>Fill the list</h2>
       <div class="row">
         <button class="btn" data-action="plan-to-shopping" data-testid="plan-to-shopping">From next 7 days of meals</button>
         <button class="btn" data-action="copy-list" data-testid="copy-list">Copy list as text</button>
-        <button class="btn danger" data-action="clear-bought" data-testid="clear-bought">Clear bought</button>
       </div>
-      <details style="margin-top:10px"><summary>Stores</summary>
+      <details class="shop-extra" style="margin-top:10px"><summary>Stores</summary>
         <div class="chips" style="margin-top:8px">${state.stores.map((s) => `<span class="chip">${esc(s)}<button data-action="store-del" data-store="${esc(s)}" aria-label="Remove ${esc(s)}">✕</button></span>`).join("")}</div>
         <form data-form="store-add" class="row" style="margin-top:8px"><input type="text" name="store" class="grow" placeholder="Add a store" required><button class="btn sm">Add</button></form>
       </details>
-    </div>`}`;
+    </div>`}
+    <button class="fab" data-action="shop-fab" data-testid="shop-fab" aria-label="Add item"><span aria-hidden="true">＋</span> Add item</button>`;
+}
+
+function shopAddSheet() {
+  const onList = new Set(state.shopping.filter((i) => !i.bought).map((i) => normName(i.name)));
+  const again = [...new Set([...state.shopping.filter((i) => i.bought).map((i) => i.name), ...SHOP_STAPLES])].filter((n) => !onList.has(normName(n))).slice(0, 12);
+  const store = ui.shopStore === "all" ? "" : ui.shopStore;
+  sheet("shop-sheet", `<form data-form="shop-add" class="stack">
+    <div class="row between"><h2>Add to the list</h2><button type="button" class="iconbtn lg" data-sheet-close aria-label="Close">✕</button></div>
+    <input type="text" name="name" placeholder="Item (e.g. toor dal)" required aria-label="Item" data-testid="shop-name" class="big-input" autocomplete="off" enterkeyhint="done">
+    ${again.length ? `<div class="field"><span>Tap to add</span><div class="chips scroll-x" data-testid="shop-quick-list">${again.map((n) => `<button type="button" class="chip add big" data-action="shop-quick" data-name="${esc(n)}" data-testid="shop-quick">+ ${esc(n)}</button>`).join("")}</div></div>` : ""}
+    <div class="field"><span>How much</span>
+      <div class="stepper">
+        <button type="button" class="btn big" data-action="qty-step" data-delta="-1" aria-label="Less">−</button>
+        <input type="number" name="qty" min="0" step="any" placeholder="Qty" inputmode="decimal" aria-label="Quantity" data-testid="shop-qty">
+        <button type="button" class="btn big" data-action="qty-step" data-delta="1" aria-label="More">+</button>
+      </div>
+    </div>
+    <div class="field"><span>Unit</span>${chipRadios("unit", UNITS.map((u) => [u, u]), "", "shop-unit")}</div>
+    <div class="field"><span>Store</span>${chipRadios("store", [["", "Any store"], ...state.stores.map((s) => [s, s])], store, "shop-store")}</div>
+    <button class="btn primary big" data-testid="shop-add">Add to list</button>
+  </form>`);
+  $("[data-testid=shop-name]")?.focus();
+}
+
+function shopItemSheet(it) {
+  const units = UNITS.includes(it.unit) || !it.unit ? UNITS : [...UNITS, it.unit];
+  sheet("shop-item-sheet", `<form data-form="shop-edit" class="stack" data-id="${esc(it.id)}">
+    <div class="row between"><h2>${AISLE_ICONS[aisleFor(it.name)] || "🛍️"} ${esc(it.label || it.name)}</h2><button type="button" class="iconbtn lg" data-sheet-close aria-label="Close">✕</button></div>
+    ${it.sources?.length ? `<p class="small muted" style="margin:0">For: ${esc(it.sources.join(", "))}</p>` : ""}
+    <label class="field"><span>Name</span><input type="text" name="name" required value="${esc(it.label || it.name)}" data-testid="shop-edit-name"></label>
+    <div class="field"><span>How much</span>
+      <div class="stepper">
+        <button type="button" class="btn big" data-action="qty-step" data-delta="-1" aria-label="Less">−</button>
+        <input type="number" name="qty" min="0" step="any" value="${it.quantity ?? ""}" inputmode="decimal" aria-label="Quantity" data-testid="shop-edit-qty">
+        <button type="button" class="btn big" data-action="qty-step" data-delta="1" aria-label="More">+</button>
+      </div>
+    </div>
+    <div class="field"><span>Unit</span>${chipRadios("unit", units.map((u) => [u, u]), it.unit || "", "shop-edit-unit")}</div>
+    <div class="field"><span>Store</span>${chipRadios("store", [["", "Any store"], ...state.stores.map((s) => [s, s])], it.store || "", "shop-edit-store")}</div>
+    <button class="btn primary big" data-testid="shop-edit-save">Save</button>
+    <div class="row">
+      <button type="button" class="btn big grow" data-action="shop-sheet-toggle" data-id="${esc(it.id)}">${it.bought ? "↩ Put back on the list" : "✓ Got it"}</button>
+      <button type="button" class="btn danger big grow" data-action="shop-del" data-id="${esc(it.id)}" data-testid="shop-edit-delete">Delete</button>
+    </div>
+  </form>`);
+}
+
+// Ticks or unticks an item. Bought food goes straight into the kitchen so meal suggestions
+// can use it; unticking takes back only what the tick added. Returns the message to show.
+function setBought(it, bought) {
+  it.bought = bought;
+  const name = it.label || it.name;
+  if (bought && aisleFor(it.name) !== "Baby care" && aisleFor(it.name) !== "School & household" && !state.pantry.some((p) => normName(p) === normName(it.name))) {
+    state.pantry.push(it.name);
+    it.addedToPantry = true;
+    clearCaches();
+    return `Got ${name} · added to your kitchen`;
+  }
+  if (!bought && it.addedToPantry) {
+    state.pantry = state.pantry.filter((p) => normName(p) !== normName(it.name));
+    delete it.addedToPantry;
+    clearCaches();
+    return `${name} is back on the list and out of your kitchen`;
+  }
+  return bought ? `Got ${name}` : `${name} is back on the list`;
+}
+
+function toggleShopItem(id, bought) {
+  const it = state.shopping.find((i) => i.id === id);
+  if (!it) return;
+  const msg = setBought(it, bought);
+  save(state);
+  // Let the tick show, then slide the row away into (or out of) the cart.
+  const row = $(`.swipe[data-kind=shop][data-id="${CSS.escape(id)}"]`);
+  row?.classList.toggle("bought", bought);
+  row?.classList.add("leaving");
+  clearTimeout(toggleShopItem.timer);
+  rowChangedAt = Date.now();
+  toggleShopItem.timer = setTimeout(() => { if (ui.tab === "shopping") renderShopping(); }, 260);
+  // Look the item up again: a change from another phone may have replaced the object since.
+  toast(msg, () => { const cur = state.shopping.find((i) => i.id === id); if (!cur) return; setBought(cur, !bought); save(state); if (ui.tab === "shopping") renderShopping(); });
+}
+
+function deleteShopItem(id) {
+  const idx = state.shopping.findIndex((i) => i.id === id);
+  if (idx < 0) return;
+  const [it] = state.shopping.splice(idx, 1);
+  commit();
+  toast(`Deleted ${it.label || it.name}`, () => { if (!state.shopping.some((i) => i.id === it.id)) state.shopping.splice(idx, 0, it); commit(); });
+}
+
+function deleteTodo(id) {
+  const idx = state.todos.findIndex((x) => x.id === id);
+  if (idx < 0) return;
+  const [t] = state.todos.splice(idx, 1);
+  const done = () => { if (ui.tab === "calendar") commitDay(t.date); else commit(); };
+  done();
+  toast(`Deleted “${t.text}”`, () => { if (!state.todos.some((x) => x.id === t.id)) state.todos.splice(idx, 0, t); done(); });
+}
+
+function toggleTodo(id, doneNow) {
+  const t = state.todos.find((x) => x.id === id);
+  if (!t) return;
+  t.done = doneNow;
+  if (ui.tab === "calendar") { commitDay(t.date); return; }
+  if (ui.tab !== "todo") { commit(); return; }
+  // On the To do tab, tick the row in place instead of rebuilding a long list.
+  save(state);
+  pendCache.delete(t.date);
+  for (const row of document.querySelectorAll(`.swipe[data-kind=todo][data-id="${CSS.escape(id)}"]`)) {
+    row.classList.toggle("done", doneNow);
+    const box = row.querySelector("input[type=checkbox]");
+    if (box) box.checked = doneNow;
+    const l = row.querySelector(".swipe-l");
+    if (l) l.textContent = doneNow ? "✓ Not done" : "✓ Done";
+  }
+  const list = todosOn(state, ui.todoDate);
+  const left = list.filter((x) => !x.done).length;
+  const pill = $("[data-testid=todo-left]");
+  if (pill) { pill.textContent = left ? `${left} left` : "All done"; pill.className = `pill ${left ? "warn" : "ok"}`; }
 }
 
 function plannedRecipes(fromKey_, days) {
@@ -985,22 +1241,16 @@ function renderTodo() {
         <button class="btn sm" data-action="todo-day" data-delta="1" aria-label="Next day">›</button>
       </div>
       <div class="row between" style="margin-top:10px"><h2 style="margin:0">To do: ${esc(dayName)}</h2><span class="pill ${left ? "warn" : "ok"}" data-testid="todo-left">${left ? `${left} left` : list.length ? "All done" : "Nothing yet"}</span></div>
-      <div data-testid="todo-list" style="margin-top:6px">${list.length ? list.map((t) => todoRow(t)).join("") : '<p class="empty-state">Nothing planned for the kids on this day. Add something below or tap an idea.</p>'}</div>
-      <form data-form="todo-add" class="form-grid" style="margin-top:10px">
-        <label class="field full"><span>What needs doing</span><input type="text" name="text" required maxlength="120" placeholder="e.g. Buy dresses for the school function" data-testid="todo-input"></label>
-        <label class="field"><span>For</span><select name="who" data-testid="todo-who">${WHO_OPTIONS()}</select></label>
-        <label class="field"><span>Date</span><input type="date" name="date" value="${key}" required data-testid="todo-input-date"></label>
-        <label class="field"><span>Time (optional)</span><input type="time" name="time"></label>
-        <div class="field" style="justify-content:flex-end"><button class="btn primary" data-testid="todo-add">Add to do</button></div>
-      </form>
+      <div data-testid="todo-list" style="margin-top:6px">${list.length ? list.map((t) => todoRow(t)).join("") : '<p class="empty-state">Nothing planned for the kids on this day. Tap <strong>+ Add to do</strong> or an idea below.</p>'}</div>
       <h3>Quick ideas for ${esc(dayName.toLowerCase() === "today" || dayName.toLowerCase() === "tomorrow" ? dayName.toLowerCase() : prettyDate(key))}</h3>
-      <div class="chips">${TODO_IDEAS.map((i) => `<button class="chip add" data-action="todo-idea" data-text="${esc(i.text)}" data-who="${i.who}" data-testid="todo-idea">+ ${esc(i.text)}</button>`).join("")}</div>
+      <div class="chips">${TODO_IDEAS.map((i) => `<button class="chip add big" data-action="todo-idea" data-text="${esc(i.text)}" data-who="${i.who}" data-testid="todo-idea">+ ${esc(i.text)}</button>`).join("")}</div>
     </div>
     ${allMissed.length ? `<div class="card" data-testid="todo-missed"><h2>⚠️ Not done yet</h2>${missed.map((t) => todoRow(t, { showDate: true })).join("")}
       ${older ? `<button class="btn ghost sm" data-action="todo-older" data-testid="todo-older">Show ${older} older</button>` : ""}</div>` : ""}
     <div class="card" data-testid="todo-upcoming"><h2>Coming up this week</h2>
       ${soon.length ? soon.map((t) => todoRow(t, { showDate: true })).join("") : '<p class="small muted">Nothing else in the next 7 days.</p>'}
-    </div>`;
+    </div>
+    <button class="fab" data-action="todo-fab" data-testid="todo-fab" aria-label="Add to do"><span aria-hidden="true">＋</span> Add to do</button>`;
 }
 
 // ---------- reminders ----------
@@ -1078,7 +1328,7 @@ document.addEventListener("click", (e) => {
   const tab = e.target.closest(".tabs button");
   if (tab) return setTab(tab.dataset.tab);
   if (e.target.closest("#ai-chip")) { ui.ai = "unknown"; renderHeader(); return checkAi(); }
-  if (e.target.closest("#checkin")) return doCheckIn();
+  if (e.target.closest("#cloud")) return profileDialog();
   if (e.target.closest("#profile")) return profileDialog();
   const el = e.target.closest("[data-action]");
   if (!el || el.tagName === "INPUT" && el.type !== "button") return;
@@ -1175,22 +1425,17 @@ document.addEventListener("click", (e) => {
       commitDay();
       break;
     }
-    case "todo-del": {
-      const t = state.todos.find((x) => x.id === el.dataset.id);
-      state.todos = state.todos.filter((x) => x !== t);
-      if (t && ui.tab === "calendar") commitDay(t.date); else commit();
+    case "todo-del": el.closest("dialog")?.close(); deleteTodo(el.dataset.id); break;
+    case "todo-fab": todoSheet(); break;
+    case "todo-more": { const t = state.todos.find((x) => x.id === el.dataset.id); if (t) todoSheet(t); break; }
+    case "todo-sheet-date": {
+      const f = el.closest("form");
+      f.date.value = el.dataset.date;
+      for (const b of f.querySelectorAll("[data-action=todo-sheet-date]")) b.classList.toggle("primary", b === el);
       break;
     }
     case "new-reminder": setTab("reminders"); renderReminders(el.dataset.date); $("[data-testid=rem-title]")?.focus(); break;
-    case "export": {
-      const blob = new Blob([exportJson(state)], { type: "application/json" });
-      const link = document.createElement("a");
-      link.href = URL.createObjectURL(blob);
-      link.download = `meal-planner-backup-${TODAY}.json`;
-      link.click();
-      setTimeout(() => URL.revokeObjectURL(link.href), 1000);
-      break;
-    }
+    case "export": downloadBackup(); break;
 
     case "pantry-del": state.pantry = state.pantry.filter((p) => p !== el.dataset.name); commit(); break;
     case "pantry-quick": if (!state.pantry.some((p) => normName(p) === normName(el.dataset.name))) state.pantry.push(el.dataset.name); commit(); break;
@@ -1214,9 +1459,30 @@ document.addEventListener("click", (e) => {
       break;
     }
 
-    case "store-mode": ui.storeMode = !ui.storeMode; if (ui.storeMode) ui.hideBought = false; render(); break;
+    case "store-mode": setStoreMode(!ui.storeMode); break;
+    case "shop-fab": shopAddSheet(); break;
+    case "shop-more": { const it = state.shopping.find((i) => i.id === el.dataset.id); if (it) shopItemSheet(it); break; }
+    case "shop-sheet-toggle": {
+      const it = state.shopping.find((i) => i.id === el.dataset.id);
+      el.closest("dialog")?.close();
+      if (it) toggleShopItem(it.id, !it.bought);
+      break;
+    }
+    case "shop-quick": {
+      addToShopping([{ name: el.dataset.name }], "manual");
+      commit();
+      el.remove();
+      toast(`Added ${el.dataset.name}`);
+      break;
+    }
+    case "qty-step": {
+      const inp = el.parentElement.querySelector("input[name=qty]");
+      const n = Math.max(0, (Number(inp.value) || 0) + Number(el.dataset.delta));
+      inp.value = n || "";
+      break;
+    }
     case "shop-store": ui.shopStore = el.dataset.store; render(); break;
-    case "shop-del": state.shopping = state.shopping.filter((i) => i.id !== el.dataset.id); commit(); break;
+    case "shop-del": el.closest("dialog")?.close(); deleteShopItem(el.dataset.id); break;
     case "plan-to-shopping": {
       const needs = plannedRecipes(TODAY, 7).flatMap(({ date, slot, recipe }) => shoppingNeeds(recipe).map((i) => ({ ...i, source: prettyDate(date), key: `${date}|${slot}|${recipe.id}|${normName(i.name)}` })));
       if (!needs.length) { toast("Nothing missing for the next 7 days of planned meals."); break; }
@@ -1225,7 +1491,18 @@ document.addEventListener("click", (e) => {
       toast(added ? `Added ${added} ingredient${added > 1 ? "s" : ""} from the meal plan.` : "Everything for the next 7 days is already on the list.");
       break;
     }
-    case "clear-bought": state.shopping = state.shopping.filter((i) => !i.bought); commit(); break;
+    case "clear-bought": {
+      const cleared = state.shopping.filter((i) => i.bought);
+      const n = cleared.length;
+      state.shopping = state.shopping.filter((i) => !i.bought);
+      commit();
+      // Put back only what was cleared, so items another phone added meanwhile stay.
+      toast(`Cleared ${n} item${n === 1 ? "" : "s"} from the cart`, () => {
+        state.shopping = [...state.shopping, ...cleared.filter((c) => !state.shopping.some((i) => i.id === c.id))];
+        commit();
+      });
+      break;
+    }
     case "copy-list": {
       const text = groupByAisle(state.shopping.filter((i) => !i.bought)).map(([aisle, list]) => `${aisle}\n${list.map((i) => `- ${i.name}${formatQty(i) ? " (" + formatQty(i) + ")" : ""}`).join("\n")}`).join("\n\n");
       navigator.clipboard?.writeText(text).then(() => toast("Copied. Paste it into WhatsApp or notes."), () => toast("Couldn't copy on this browser."));
@@ -1269,22 +1546,7 @@ document.addEventListener("change", (e) => {
       commitDay();
       break;
     }
-    case "todo-toggle": {
-      const t = state.todos.find((x) => x.id === el.dataset.id);
-      if (!t) return;
-      t.done = el.checked;
-      if (ui.tab === "calendar") { commitDay(t.date); break; }
-      if (ui.tab !== "todo") { commit(); break; }
-      // On the To do tab, tick the row in place instead of rebuilding a long list.
-      save(state);
-      pendCache.delete(t.date);
-      el.closest(".chk")?.classList.toggle("done", t.done);
-      const list = todosOn(state, ui.todoDate);
-      const left = list.filter((x) => !x.done).length;
-      const pill = $("[data-testid=todo-left]");
-      if (pill) { pill.textContent = left ? `${left} left` : "All done"; pill.className = `pill ${left ? "warn" : "ok"}`; }
-      break;
-    }
+    case "todo-toggle": toggleTodo(el.dataset.id, el.checked); break;
     case "rem-done": {
       const r = state.reminders.find((x) => x.id === el.dataset.id);
       if (!r) return;
@@ -1293,31 +1555,7 @@ document.addEventListener("change", (e) => {
       if (ui.tab === "calendar") commitDay(el.dataset.date); else commit();
       break;
     }
-    case "shop-toggle": {
-      const it = state.shopping.find((i) => i.id === el.dataset.id);
-      if (it) it.bought = el.checked;
-      // Bought food goes straight into the kitchen, so meal suggestions can use it.
-      if (it && el.checked && aisleFor(it.name) !== "Baby care" && aisleFor(it.name) !== "School & household" && !state.pantry.some((p) => normName(p) === normName(it.name))) {
-        state.pantry.push(it.name);
-        it.addedToPantry = true;
-        clearCaches();
-        toast(`${it.name} added to your kitchen`);
-      } else if (it && !el.checked && it.addedToPantry) {
-        // Unticked by mistake: take back only what this tick added, not food already in the kitchen.
-        state.pantry = state.pantry.filter((p) => normName(p) !== normName(it.name));
-        delete it.addedToPantry;
-        clearCaches();
-        toast(`${it.name} taken out of your kitchen`);
-      }
-      el.closest(".shop-item")?.classList.toggle("bought", el.checked);
-      save(state);
-      const left = state.shopping.filter((i) => !i.bought).length;
-      const pill = $("[data-testid=shop-left]");
-      if (pill) pill.textContent = `${left} to buy`;
-      if (ui.hideBought) setTimeout(render, 250);
-      break;
-    }
-    case "hide-bought": ui.hideBought = el.checked; render(); break;
+    case "shop-toggle": toggleShopItem(el.dataset.id, el.checked); break;
     case "nut-free":
       state.settings = { ...state.settings, schoolNutFree: el.checked };
       ui.results = ui.results.filter((r) => !el.checked || checkForAudience(r, { schoolNutFree: true }).safe || !isSchoolFood(r));
@@ -1332,7 +1570,8 @@ document.addEventListener("change", (e) => {
         try {
           replaceState(importJson(text));
           save(state, { now: true });
-          toast("Backup restored.");
+          cloud.pushSoon();
+          toast(cloud.getCloud().ready ? "Backup restored and synced to the family." : "Backup restored.");
         } catch (err) {
           toast(err.message || "That file couldn't be read.");
         }
@@ -1385,7 +1624,33 @@ document.addEventListener("submit", (e) => {
       const qty = f.qty.value === "" ? null : Number(f.qty.value);
       addToShopping([{ name, quantity: qty, unit: f.unit.value, store: f.store.value }], "manual");
       commit();
+      // The sheet stays open for the next item.
+      f.name.value = "";
+      f.qty.value = "";
+      for (const r of form.querySelectorAll("input[name=unit]")) r.checked = false;
+      toast(`Added ${name}`);
       $("[data-testid=shop-name]")?.focus();
+      break;
+    }
+    case "shop-edit": {
+      const it = state.shopping.find((i) => i.id === form.dataset.id);
+      const name = f.name.value.trim();
+      if (!it || !name) return;
+      Object.assign(it, { name, label: name, quantity: f.qty.value === "" ? null : Number(f.qty.value), unit: normUnit(f.unit.value), store: f.store.value });
+      delete it.aisle;
+      state.shopping = mergeItems(state.shopping).map((i) => ({ ...i, id: i.id || uid() }));
+      form.closest("dialog")?.close();
+      commit();
+      toast(`Saved ${name}`);
+      break;
+    }
+    case "todo-edit": {
+      const t = state.todos.find((x) => x.id === form.dataset.id);
+      const text = f.text.value.trim();
+      if (!t || !text || !isDateKey(f.date.value)) return;
+      Object.assign(t, { text, who: f.who.value, date: f.date.value, time: f.time.value });
+      form.closest("dialog")?.close();
+      commit();
       break;
     }
     case "store-add": {
@@ -1400,9 +1665,8 @@ document.addEventListener("submit", (e) => {
       const date = kind === "todo-add" ? f.date.value : ui.selected;
       if (!text || !isDateKey(date)) return;
       state.todos.push({ id: uid(), text, who: f.who.value, date, time: f.time?.value || "", done: false });
-      if (kind === "todo-add") ui.todoDate = date;
-      if (kind === "todo-add-day") commitDay(date); else commit();
-      $(kind === "todo-add" ? "[data-testid=todo-input]" : "[data-testid=day-todo-input]")?.focus();
+      if (kind === "todo-add") { ui.todoDate = date; form.closest("dialog")?.close(); toast(`Added for ${prettyDate(date)}.`); }
+      if (kind === "todo-add-day") { commitDay(date); $("[data-testid=day-todo-input]")?.focus(); } else commit();
       break;
     }
     case "rem-add": {
@@ -1432,10 +1696,95 @@ document.addEventListener("toggle", (e) => {
   if (e.target.open) ui.openGroups.add(g); else ui.openGroups.delete(g);
 }, true);
 
-window.addEventListener("pagehide", () => save(state, { now: true }));
+document.addEventListener("toggle", (e) => { if (e.target?.dataset && "cart" in e.target.dataset) ui.cartOpen = e.target.open; }, true);
+
+$("#toast").addEventListener("click", (e) => {
+  if (!e.target.closest(".toast-undo")) return;
+  const undo = toast.undo;
+  toast.undo = null;
+  $("#toast").classList.remove("show");
+  undo?.();
+});
+
+// Swipe a shopping or to-do row: right ticks it, left deletes it (both can be undone from the toast).
+// Vertical drags scroll the page as usual; a swipe never also counts as a tap.
+const SWIPE_AT = 90;
+let swipe = null;
+let swipedAt = 0;
+let rowChangedAt = 0;
+// Swallow the click the browser may send after the finger lifts from a swipe, and a quick
+// second tap just after a tick, when the next row has slid up under the thumb.
+document.addEventListener("click", (e) => {
+  const now = Date.now();
+  if ((now - swipedAt < 400 || now - rowChangedAt < 300) && e.target.closest?.(".swipe")) { e.preventDefault(); e.stopPropagation(); }
+}, true);
+document.addEventListener("pointerdown", (e) => {
+  const fg = e.target.closest?.(".swipe-fg");
+  // Starts at the very left edge belong to the phone's own Back swipe.
+  if (!fg || e.button > 0 || e.target.closest("button") || e.clientX < 20) return;
+  swipe = { row: fg.parentElement, fg, x: e.clientX, y: e.clientY, dx: 0, active: false };
+});
+document.addEventListener("pointermove", (e) => {
+  if (!swipe) return;
+  const dx = e.clientX - swipe.x, dy = e.clientY - swipe.y;
+  if (!swipe.active) {
+    if (Math.abs(dy) > 12 && Math.abs(dy) > Math.abs(dx)) { swipe = null; return; }
+    if (Math.abs(dx) < 12) return;
+    swipe.active = true;
+    swipe.row.classList.add("swiping");
+  }
+  swipe.dx = dx;
+  swipe.fg.style.transform = `translateX(${dx}px)`;
+  swipe.row.classList.toggle("go-l", dx > SWIPE_AT);
+  swipe.row.classList.toggle("go-r", dx < -SWIPE_AT);
+});
+function endSwipe() {
+  if (!swipe) return;
+  const { row, fg, dx, active } = swipe;
+  swipe = null;
+  if (!active) return;
+  row.classList.remove("swiping", "go-l", "go-r");
+  fg.style.transform = "";
+  swipedAt = Date.now();
+  const { kind, id } = row.dataset;
+  if (dx > SWIPE_AT) {
+    if (kind === "shop") toggleShopItem(id, !row.classList.contains("bought"));
+    else toggleTodo(id, !row.classList.contains("done"));
+  } else if (dx < -SWIPE_AT) {
+    if (kind === "shop") deleteShopItem(id); else deleteTodo(id);
+  }
+}
+document.addEventListener("pointerup", endSwipe);
+document.addEventListener("pointercancel", () => { if (swipe) { swipe.fg.style.transform = ""; swipe.row.classList.remove("swiping", "go-l", "go-r"); swipe = null; } });
+
+// Store mode is a history step, so the phone's Back gesture leaves it instead of the app.
+function setStoreMode(on) {
+  ui.storeMode = on;
+  keepScreenOn(on);
+  if (on) history.pushState({ store: true }, "");
+  else if (history.state?.store) { ignorePop = true; history.back(); }
+  render();
+}
+window.addEventListener("popstate", () => {
+  if (ignorePop) { ignorePop = false; return; }
+  const open = document.querySelector("dialog.sheet[open]");
+  if (open) open.close();
+  else if (ui.storeMode) setStoreMode(false);
+});
+
+// In store mode the phone screen stays on, so the list doesn't lock between aisles.
+let wakeLock = null;
+async function keepScreenOn(on) {
+  try {
+    if (on && !wakeLock && navigator.wakeLock) wakeLock = await navigator.wakeLock.request("screen");
+    else if (!on && wakeLock) { await wakeLock.release(); wakeLock = null; }
+  } catch { wakeLock = null; }
+}
+
+window.addEventListener("pagehide", () => { save(state, { now: true }); cloud.syncNow(); });
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "hidden") save(state, { now: true });
-  else refreshToday();
+  if (document.visibilityState === "hidden") { save(state, { now: true }); cloud.syncNow(); wakeLock = null; }
+  else { refreshToday(); if (ui.storeMode && ui.tab === "shopping") keepScreenOn(true); }
 });
 // Another tab or window of the planner saved: take its data instead of overwriting it with ours later.
 window.addEventListener("storage", (e) => {
@@ -1452,7 +1801,8 @@ window.addEventListener("offline", () => { ui.ai = "unreachable"; renderHeader()
 // ---------- start ----------
 const initialTab = location.hash.replace("#", "");
 setTab(["calendar", "recipes", "shopping", "todo", "reminders"].includes(initialTab) ? initialTab : "calendar");
-onChange(() => renderSyncButtons());
+onChange(() => { renderSyncButtons(); cloud.pushSoon(); });
+startFamilySync();
 maybeShowLogin();
 checkAi();
 checkDueReminders();
@@ -1461,4 +1811,4 @@ navigator.storage?.persist?.().catch(() => {});
 setInterval(() => { refreshToday(); checkDueReminders(); }, 30000);
 
 // Exposed for tests and debugging in the console.
-window.__mealPlanner = { state, ui, TODAY };
+window.__mealPlanner = { state, ui, TODAY, cloud };
