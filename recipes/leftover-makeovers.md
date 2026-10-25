@@ -121,16 +121,16 @@ Curries worth cooking double: half for dinner, half for tomorrow's makeover.
 
 **Ingredients**
 
-- 2 roti
-- ½ cup leftover chicken curry, boneless and shredded
-- ¼ cup cheese, grated
+- 1 roti
+- ¼ cup leftover chicken curry, boneless and shredded
+- 2 tbsp cheese, grated
 - 1 tbsp coriander leaves, chopped
-- 1 tsp butter
+- ½ tsp butter
 
 **Steps**
 
 1. Heat the leftover curry until steaming hot, take the chicken out of the gravy and shred it, keeping it fairly dry.
-2. Lay one roti in a pan, spread half the cheese, the chicken and coriander, top with the rest of the cheese and the second roti.
+2. Lay the roti in a pan, spread the cheese, chicken and coriander over one half and fold it over.
 3. Toast in butter 2 minutes a side until the cheese melts, then cut into wedges.
 
 **Notes:** Pick out any bones before shredding. Pack it in an insulated lunchbox with a spoon of curd to dip.
@@ -146,15 +146,15 @@ Curries worth cooking double: half for dinner, half for tomorrow's makeover.
 
 **Ingredients**
 
-- 2 roti
-- ½ cup leftover paneer curry, mashed
-- 2 tbsp cheese, grated
-- 1 tsp butter
+- 1 roti
+- ¼ cup leftover paneer curry, mashed
+- 1 tbsp cheese, grated
+- ½ tsp butter
 
 **Steps**
 
 1. Heat the leftover paneer curry until steaming hot and mash it with a fork so it spreads.
-2. Spread it on one roti, sprinkle the cheese and cover with the second roti.
+2. Spread it over half the roti, sprinkle the cheese and fold it over.
 3. Toast in butter 2 minutes a side and cut into wedges.
 
 ### Dal paratha (pappu paratha)
@@ -162,6 +162,7 @@ Curries worth cooking double: half for dinner, half for tomorrow's makeover.
 - **For:** kid
 - **Meal:** lunchbox
 - **Cuisine:** North Indian / Telugu
+- **Serves:** 2 (2 small parathas each)
 - **Time:** 20 min
 - **Leftover:** dal
 - **Good for:** 🥛 Milk/dairy
@@ -232,6 +233,7 @@ Curries worth cooking double: half for dinner, half for tomorrow's makeover.
 - **For:** kid
 - **Meal:** lunchbox
 - **Cuisine:** North Indian / Mexican fusion
+- **Serves:** 2 (1 roll each)
 - **Time:** 10 min
 - **Leftover:** beans curry
 - **Good for:** 🥛 Milk/dairy
