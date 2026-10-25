@@ -629,3 +629,47 @@ dialog::backdrop { background: rgb(30 15 5 / .45); -webkit-backdrop-filter: blur
 .key-steps { border-radius: 10px; background: var(--brand-soft); padding: 10px 12px; margin-bottom: 8px; }
 .key-steps ol { margin: 4px 0 8px; padding-left: 20px; }
 .key-steps a.btn { text-decoration: none; }
+
+/* Shopping list as one card, aisles as small headers inside it, like a paper list sorted by aisle */
+.aisles { padding: 2px 14px 6px; }
+.aisles .aisle { padding: 0; }
+.aisles .aisle + .aisle { border-top: 1px solid var(--line); margin-top: 2px; }
+.aisles .aisle h3 { padding: 12px 0 2px; font-size: .9rem; color: var(--muted); font-weight: 700; }
+.aisles .aisle h3 .aisle-icon { width: 28px; height: 28px; border-radius: 9px; font-size: 1rem; }
+.aisles .tap-main { min-height: 56px; }
+.store-mode .aisles .tap-main { min-height: 76px; }
+.store-mode .aisles .aisle h3 { font-size: 1rem; }
+/* Always-there add bar: type and press Enter */
+.quick-add { display: flex; gap: 8px; margin-top: 12px; }
+.quick-add input { flex: 1; min-width: 0; min-height: 48px; }
+.quick-add .btn { min-height: 48px; flex: none; }
+
+/* Each person's meals show the dish names while folded, so the day reads like a menu without opening anything */
+.meal-group > summary .grow { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.meal-group .menu { display: block; min-width: 0; font-size: .85rem; color: var(--muted); font-weight: 400; }
+.meal-group .menu span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cal-layout > * { min-width: 0; }
+.meal-group .menu span::before { content: "· "; }
+/* The approval bar stays on one line: the words wrap, the button keeps its place on the right */
+.status-banner { flex-wrap: nowrap; }
+.status-banner .btn { flex: none; }
+/* The banner already says the day waits for approval; don't say it twice in the list below */
+.day-panel:has(.status-banner.pending) .pending-list li[data-type=approval] { display: none; }
+.day-panel:has(.status-banner.pending) .pending-list:not(:has(li:not([data-type=approval]))) { display: none; }
+/* The two week buttons sit side by side so the chosen day starts higher up */
+.week-plan { flex-wrap: nowrap; }
+.week-plan .btn { flex: 1 1 0; min-width: 0; white-space: nowrap; padding-inline: 8px; }
+/* A shorter day header on phones: the day's meals matter more than the picture */
+@media (max-width: 520px) {
+  .day-hero { min-height: 0; padding: 12px 16px; }
+  .day-hero h2 { font-size: 1.25rem; margin-bottom: 6px; }
+  .hero-art { width: 64px; height: 64px; }
+  .hero-art span, .hero-art.n3 span { font-size: 2rem; }
+  .hero-art.n1 span { font-size: 3rem; }
+  .hero-art.n3 span:nth-child(3) { left: 12px; }
+}
+/* With the add bar on top, the round + only opens the full form (amount, unit, store) */
+.view:has(.quick-add) > .fab { width: 60px; height: 60px; padding: 0; justify-content: center; font-size: 0; gap: 0; }
+.view:has(.quick-add) > .fab span { font-size: 1.8rem; }
+/* Name and count share the top line so the dish names below get the full width */
+.meal-group .group-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
