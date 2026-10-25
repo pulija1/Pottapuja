@@ -4,7 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { parseApplianceLine, ownedAppliances, methodsFor, fastestMinutes, basketPairs, appliancePrompt, applianceRequest } from "../public/shared/appliances.js";
 import { parseRecipeMarkdown, recipeToMarkdown } from "../public/shared/recipe-book.js";
-import { LIBRARY, suggestFromLibrary } from "../public/shared/recipes.js";
+import { LIBRARY, suggestFromLibrary, cookByVegetables } from "../public/shared/recipes.js";
 import { buildPrompt, parseRequest } from "../public/shared/ai-prompt.js";
 
 const MD = `
@@ -87,6 +87,13 @@ test("APPL-06 quick mode counts the air fryer time", () => {
   const quick = withFryer.filter((r) => fastestMinutes(r, ["airFryer"]) <= 20);
   assert.ok(quick.some((r) => r.id === okra.id));
   assert.deepEqual(withFryer.slice(0, quick.length), quick, "the recipes ready in 20 minutes come first");
+});
+
+test("APPL-06b Cook by vegetable counts the air fryer time for quick fries", () => {
+  const titles = (res) => res.fry.map((x) => x.recipe.title);
+  const opt = { maxMinutes: 20, onlyQuick: true };
+  assert.ok(!titles(cookByVegetables(["okra"], opt)).some((t) => t.startsWith("Bendakaya vepudu")));
+  assert.ok(titles(cookByVegetables(["okra"], { ...opt, appliances: ["airFryer"] })).some((t) => t.startsWith("Bendakaya vepudu")));
 });
 
 test("APPL-07 a two-basket air fryer pairs two dishes, longest first", () => {

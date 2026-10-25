@@ -606,3 +606,1368 @@ How to read and edit this file: see [README.md](README.md).
 4. Take the kid's portion out, then add chilli powder, coriander powder, garam masala and salt to the rest and simmer 5 minutes. Finish with coriander leaves.
 
 **Notes:** For the kid, shred the chicken and mix it into rice with a spoon of the mild gravy.
+
+## Quick vepudu (fries in 20 minutes or less)
+
+For a busy evening: one vegetable, a tadka, done. Serve with rice and pappu or perugu (curd).
+
+### Quick bendakaya vepudu (15-minute okra fry)
+
+- **For:** family
+- **Meal:** dinner
+- **Cuisine:** Telugu
+- **Time:** 15 min
+- **Dish:** fry
+- **Air fryer:** 12 min at 200°C. Toss the okra with 2 tsp oil, spread it over both baskets and shake every 4 minutes until crisp. Take the kid's portion out, then toss the rest in the mustard and curry leaf tadka with turmeric, chilli and salt.
+
+**Ingredients**
+
+- 250 g okra (bendakaya), dried well and cut in thin rounds
+- 1 tsp mustard seeds
+- 8 curry leaves
+- 1 tsp red chilli powder
+- 2 tbsp oil
+- ½ tsp turmeric
+- 1 tsp salt
+
+**Steps**
+
+1. Heat the oil in the widest pan you have, splutter mustard seeds and curry leaves, then add the okra in one layer.
+2. Fry on high, uncovered, stirring every minute, until it stops being sticky and the edges brown (about 10 minutes).
+3. Baby portion: steam a handful of the cut okra separately until very soft and mash it into plain rice.
+4. Take the kid's portion out, then add turmeric, chilli powder and salt to the rest and toss 1 minute.
+
+**Notes:** A wide pan and high heat are what make it quick. Don't cover it.
+
+### Aloo bendakaya vepudu (potato and okra fry)
+
+- **For:** family
+- **Meal:** dinner
+- **Cuisine:** Telugu
+- **Time:** 20 min
+- **Dish:** fry
+- **Air fryer:** 14 min at 200°C. Both baskets at once: the microwaved potato cubes with 1 tsp oil in basket 1 for 14 minutes, the okra with 1 tsp oil in basket 2 for 12 minutes, with Sync and a shake halfway. Take the kid's portion out, then toss everything into the mustard and curry leaf tadka with turmeric, chilli and salt.
+
+**Ingredients**
+
+- 200 g okra (bendakaya), cut in rounds
+- 1 potato (bangaladumpa), cut in small cubes
+- 1 tsp mustard seeds
+- 8 curry leaves
+- 1 tsp red chilli powder
+- 2 tbsp oil
+- ½ tsp turmeric
+- 1 tsp salt
+
+**Steps**
+
+1. Microwave the potato cubes with 2 tbsp water, covered, for 4 minutes.
+2. Heat oil, splutter mustard seeds and curry leaves, add the okra and fry on high for 6 minutes.
+3. Add the potato and fry together until both are golden, about 6 minutes more.
+4. Baby portion: mash a few soft potato cubes and steamed okra with no salt.
+5. Take the kid's portion out, then add turmeric, chilli powder and salt and toss.
+
+### Vankaya vepudu (quick brinjal slice fry)
+
+- **For:** family
+- **Meal:** dinner
+- **Cuisine:** Telugu
+- **Time:** 15 min
+- **Dish:** fry
+- **Air fryer:** 10 min at 200°C. Lay the dusted rounds in one layer over both baskets (kid's plain rounds in one corner), brush with oil and turn at 5 minutes, until soft inside and crisp outside.
+
+**Ingredients**
+
+- 4 brinjals (vankaya), long ones, cut in thin rounds
+- 1 tsp red chilli powder
+- 2 tbsp rice flour
+- 3 tbsp oil
+- ½ tsp turmeric
+- 1 tsp salt
+
+**Steps**
+
+1. Mix chilli powder, rice flour, turmeric and salt on a plate.
+2. Baby portion: steam 4 or 5 brinjal rounds until very soft, peel and mash them with rice.
+3. For the kid, dust a few rounds in rice flour and salt only.
+4. Dust the rest in the spice mix and shallow fry in a hot pan with the oil, 3 minutes a side, until soft inside.
+
+**Notes:** Thin rounds cook through in minutes.
+
+### Quick dondakaya vepudu (thin-sliced ivy gourd fry)
+
+- **For:** family
+- **Meal:** dinner
+- **Cuisine:** Telugu
+- **Time:** 20 min
+- **Dish:** fry
+- **Air fryer:** 14 min at 190°C. Toss the slices with 2 tsp oil and turmeric, spread over both baskets and shake every 5 minutes. Take the kid's portion out, then toss the rest in the mustard tadka with chilli powder, roasted gram powder and salt.
+
+**Ingredients**
+
+- 250 g ivy gourd (dondakaya), sliced thin lengthwise
+- 1 tsp mustard seeds
+- 8 curry leaves
+- 1 tsp red chilli powder
+- 1 tbsp roasted gram powder
+- 2 tbsp oil
+- ½ tsp turmeric
+- 1 tsp salt
+
+**Steps**
+
+1. Heat oil, splutter mustard seeds and curry leaves, add the ivy gourd and turmeric.
+2. Cover and cook on medium 8 minutes, then uncover and fry on high until the edges crisp, about 6 minutes.
+3. Baby portion: steam a few slices until very soft and mash them with rice.
+4. Take the kid's portion out, then add chilli powder, roasted gram powder and salt and toss 1 minute.
+
+**Notes:** Slicing thin lengthwise halves the usual time.
+
+### Potlakaya vepudu (snake gourd fry)
+
+- **For:** family
+- **Meal:** dinner
+- **Cuisine:** Telugu
+- **Time:** 15 min
+- **Dish:** fry
+
+**Ingredients**
+
+- 1 snake gourd (potlakaya), seeds out and cut in half-rounds
+- 1 onion (ullipaya), chopped
+- 1 tsp mustard seeds
+- 8 curry leaves
+- 2 tbsp besan
+- 2 tbsp oil
+- ½ tsp turmeric
+- 1 tsp salt
+
+**Steps**
+
+1. Heat oil, splutter mustard seeds and curry leaves, add onion and snake gourd and cook on high, uncovered, 6 minutes.
+2. Baby portion: take out a few soft pieces before salt and mash them with rice.
+3. Take the kid's portion out, then sprinkle besan, turmeric and salt over the rest and fry until dry and golden, 4 minutes.
+
+**Notes:** Besan soaks up the water snake gourd lets out.
+
+### Kakarakaya vepudu (thin bitter gourd fry)
+
+- **For:** family
+- **Meal:** dinner
+- **Cuisine:** Telugu
+- **Time:** 20 min
+- **Dish:** fry
+- **Air fryer:** 12 min at 190°C. After squeezing, toss with 2 tsp oil and spread thin over both baskets, shaking every 4 minutes until crisp. Add the onion for the last 4 minutes, then season the adults' share.
+
+**Ingredients**
+
+- 2 bitter gourds (kakarakaya), sliced paper thin
+- 1 onion (ullipaya), sliced
+- 1 tsp red chilli powder
+- 1 tsp jaggery
+- 3 tbsp oil
+- ½ tsp turmeric
+- 1 tsp salt
+
+**Steps**
+
+1. Rub the bitter gourd with salt and turmeric, wait 5 minutes and squeeze out the juice.
+2. Fry it in hot oil on high, uncovered, until crisp, about 10 minutes. Add the onion for the last 4 minutes.
+3. Baby portion: skip the bitter gourd for the baby; give plain rice and dal with a drop of ghee.
+4. Sprinkle chilli powder and jaggery over the adults' share; the kid can try a little without chilli.
+
+**Notes:** Squeezing out the juice takes away most of the bitterness.
+
+### Sorakaya podi kura (bottle gourd stir-fry)
+
+- **For:** family
+- **Meal:** dinner
+- **Cuisine:** Telugu
+- **Time:** 15 min
+- **Dish:** fry
+
+**Ingredients**
+
+- ½ bottle gourd (sorakaya), peeled and cut in small cubes
+- 1 tbsp chana dal (senaga pappu)
+- 1 tsp mustard seeds
+- 8 curry leaves
+- 2 green chillies (pachi mirapakaya), slit
+- 2 tbsp oil
+- ½ tsp turmeric
+- 1 tsp salt
+- 2 tbsp coconut (kobbari), grated
+
+**Steps**
+
+1. Heat oil, fry the chana dal and mustard seeds, then curry leaves and green chillies.
+2. Add the bottle gourd and turmeric, cover and cook 8 minutes until soft.
+3. Baby portion: take out a few soft cubes before salt and mash them.
+4. Add salt and coconut and fry uncovered until dry, 2 minutes. Pick the chillies out of the kid's share.
+
+### Beerakaya palli podi kura (ridge gourd with peanut powder)
+
+- **For:** family
+- **Meal:** dinner
+- **Cuisine:** Telugu
+- **Time:** 15 min
+- **Dish:** fry
+
+**Ingredients**
+
+- 2 ridge gourds (beerakaya), peeled and cubed
+- 2 tbsp peanut powder
+- 1 tsp mustard seeds
+- 8 curry leaves
+- 1 tsp red chilli powder
+- 2 tbsp oil
+- ½ tsp turmeric
+- 1 tsp salt
+
+**Steps**
+
+1. Heat oil, splutter mustard seeds and curry leaves, add the ridge gourd and turmeric and cook on high 6 minutes.
+2. Baby portion: take out a few soft pieces before salt and mash them.
+3. Take the kid's portion out and stir a pinch of peanut powder into it.
+4. Add chilli powder, salt and the rest of the peanut powder and fry until dry, 3 minutes.
+
+**Notes:** The peanuts are ground, so it's fine for the 4-year-old.
+
+### Munagakaya vepudu (drumstick masala fry)
+
+- **For:** family
+- **Meal:** dinner
+- **Cuisine:** Telugu
+- **Time:** 20 min
+- **Dish:** fry
+
+**Ingredients**
+
+- 3 drumsticks (munagakaya), cut in 3-inch pieces
+- 1 onion (ullipaya), chopped
+- 1 tsp mustard seeds
+- 8 curry leaves
+- 1 tsp red chilli powder
+- 1 tsp coriander powder
+- 2 tbsp oil
+- ½ tsp turmeric
+- 1 tsp salt
+
+**Steps**
+
+1. Pressure cook the drumsticks with turmeric and ½ cup water for 1 whistle.
+2. Heat oil, splutter mustard seeds and curry leaves, fry the onion, add the drained drumsticks.
+3. Baby portion: scrape the soft flesh out of 2 pieces and mash it with rice.
+4. Take the kid's pieces out, then add chilli, coriander powder and salt and fry until coated, 4 minutes.
+
+### Aratikaya podi kura (grated raw banana stir-fry)
+
+- **For:** family
+- **Meal:** dinner
+- **Cuisine:** Telugu
+- **Time:** 20 min
+- **Dish:** fry
+
+**Ingredients**
+
+- 2 raw bananas (aratikaya)
+- 1 tsp urad dal
+- 1 tsp mustard seeds
+- 8 curry leaves
+- 2 green chillies (pachi mirapakaya), chopped
+- 2 tbsp oil
+- ½ tsp turmeric
+- 1 tsp salt
+- ½ lemon, juiced
+
+**Steps**
+
+1. Pressure cook the raw bananas whole with water for 1 whistle, peel and grate them.
+2. Heat oil, fry urad dal and mustard seeds, then curry leaves and green chillies.
+3. Baby portion: mash a spoon of the plain cooked banana with no salt.
+4. Add the grated banana, turmeric and salt, toss 3 minutes and finish with lemon juice. Kid's share before the chillies go in, or pick them out.
+
+### Chamadumpa vepudu (crispy taro fry)
+
+- **For:** family
+- **Meal:** dinner
+- **Cuisine:** Telugu
+- **Time:** 20 min
+- **Dish:** fry
+- **Air fryer:** 12 min at 200°C. Toss the boiled, coated rounds with 2 tsp oil and air fry in one layer, turning at 6 minutes, until crisp on both sides.
+
+**Ingredients**
+
+- 300 g taro root (chamadumpa)
+- 1 tsp red chilli powder
+- 1 tbsp rice flour
+- 3 tbsp oil
+- ½ tsp turmeric
+- 1 tsp salt
+
+**Steps**
+
+1. Pressure cook the taro with water for 2 whistles, peel and cut in thick rounds.
+2. Baby portion: mash a piece of plain taro before anything is added.
+3. Toss the rest with rice flour, turmeric and salt (chilli for the adults' share).
+4. Shallow fry in hot oil until crisp on both sides, about 8 minutes.
+
+### Gummadikaya podi kura (pumpkin stir-fry)
+
+- **For:** family
+- **Meal:** dinner
+- **Cuisine:** Telugu
+- **Time:** 15 min
+- **Dish:** fry
+
+**Ingredients**
+
+- 300 g pumpkin (gummadikaya), peeled and cubed
+- 1 onion (ullipaya), chopped
+- 1 tsp mustard seeds
+- 8 curry leaves
+- 1 tsp red chilli powder
+- 2 tbsp oil
+- ½ tsp turmeric
+- 1 tsp salt
+- 1 tsp jaggery
+
+**Steps**
+
+1. Heat oil, splutter mustard seeds and curry leaves, fry the onion, add the pumpkin and turmeric.
+2. Cover and cook 8 minutes until the pumpkin is just soft.
+3. Baby portion: take out a few cubes before salt and mash them.
+4. Take the kid's portion out, then add chilli, salt and jaggery and toss uncovered 2 minutes.
+
+### Chilagada dumpa vepudu (sweet potato fry)
+
+- **For:** family
+- **Meal:** dinner
+- **Cuisine:** Telugu
+- **Time:** 15 min
+- **Dish:** fry
+- **Air fryer:** 12 min at 200°C. Toss the microwaved cubes with 2 tsp oil and air fry, shaking at 6 minutes, until golden. Take the kid's portion out, then toss the rest in the tadka with chilli, turmeric and salt.
+
+**Ingredients**
+
+- 2 sweet potatoes (chilagada dumpa), cut in small cubes
+- 1 tsp mustard seeds
+- 8 curry leaves
+- 1 tsp red chilli powder
+- ½ tsp jeera
+- 2 tbsp oil
+- ½ tsp turmeric
+- 1 tsp salt
+
+**Steps**
+
+1. Microwave the cubes with 2 tbsp water, covered, for 4 minutes.
+2. Baby portion: mash a few plain cubes with no salt.
+3. Heat oil, splutter mustard seeds, jeera and curry leaves, add the sweet potato and fry until golden, 6 minutes.
+4. Take the kid's portion out, then add chilli powder, turmeric and salt.
+
+### Chikkudukaya podi kura (broad beans stir-fry)
+
+- **For:** family
+- **Meal:** dinner
+- **Cuisine:** Telugu
+- **Time:** 15 min
+- **Dish:** fry
+
+**Ingredients**
+
+- 250 g broad beans (chikkudukaya), strings off and chopped
+- 1 onion (ullipaya), chopped
+- 1 tsp mustard seeds
+- 8 curry leaves
+- 1 tsp red chilli powder
+- 2 tbsp oil
+- ½ tsp turmeric
+- 1 tsp salt
+- 2 tbsp coconut (kobbari), grated
+
+**Steps**
+
+1. Heat oil, splutter mustard seeds and curry leaves, fry the onion, add the beans, turmeric and 3 tbsp water.
+2. Cover and cook 8 minutes until tender.
+3. Baby portion: take out a spoon of soft beans before salt and mash them well.
+4. Take the kid's portion out, then add chilli, salt and coconut and fry until dry.
+
+### Goruchikkudu kobbari vepudu (cluster beans with coconut)
+
+- **For:** family
+- **Meal:** dinner
+- **Cuisine:** Telugu
+- **Time:** 20 min
+- **Dish:** fry
+
+**Ingredients**
+
+- 250 g cluster beans (goruchikkudu), chopped
+- 1 tsp urad dal
+- 1 tsp mustard seeds
+- 8 curry leaves
+- 2 dry red chillies
+- 2 tbsp oil
+- ½ tsp turmeric
+- 1 tsp salt
+- 3 tbsp coconut (kobbari), grated
+
+**Steps**
+
+1. Pressure cook the cluster beans with turmeric and ¼ cup water for 1 whistle, then drain.
+2. Heat oil, fry urad dal, mustard seeds, red chillies and curry leaves.
+3. Baby portion: take out a spoon of the plain cooked beans and mash them very well.
+4. Add the beans, salt and coconut and fry until dry, 3 minutes. Pick the chillies out of the kid's share.
+
+### Mullangi vepudu (radish stir-fry)
+
+- **For:** family
+- **Meal:** dinner
+- **Cuisine:** Telugu
+- **Time:** 15 min
+- **Dish:** fry
+
+**Ingredients**
+
+- 2 radishes (mullangi), peeled and grated
+- 1 tbsp chana dal (senaga pappu)
+- 1 tsp mustard seeds
+- 8 curry leaves
+- 2 green chillies (pachi mirapakaya), slit
+- 2 tbsp oil
+- ½ tsp turmeric
+- 1 tsp salt
+
+**Steps**
+
+1. Heat oil, fry chana dal and mustard seeds, then curry leaves and green chillies.
+2. Add the radish and turmeric and cook uncovered on high until the water dries up, 8 minutes.
+3. Baby portion: take out a spoon of soft radish before salt and mash it with rice.
+4. Add salt and toss. Pick the chillies out of the kid's share.
+
+### Kandagadda vepudu (yam fry)
+
+- **For:** family
+- **Meal:** dinner
+- **Cuisine:** Telugu
+- **Time:** 20 min
+- **Dish:** fry
+- **Air fryer:** 12 min at 200°C. Toss the drained yam cubes with 2 tsp oil and air fry, shaking at 6 minutes, until golden. Take the kid's share out, then add salt and chilli powder.
+
+**Ingredients**
+
+- 300 g yam (kandagadda), peeled and cubed
+- 1 tsp red chilli powder
+- 1 tsp tamarind, soaked
+- 3 tbsp oil
+- ½ tsp turmeric
+- 1 tsp salt
+
+**Steps**
+
+1. Pressure cook the yam with tamarind, turmeric and water to cover for 1 whistle, then drain.
+2. Baby portion: mash 2 plain cubes with no salt.
+3. Fry the rest in hot oil until golden, 8 minutes, then add salt (and chilli powder after taking the kid's share out).
+
+**Notes:** Tamarind in the cooking water stops yam itching the throat.
+
+### Cabbage batani vepudu (cabbage and peas fry)
+
+- **For:** family
+- **Meal:** dinner
+- **Cuisine:** Telugu
+- **Time:** 15 min
+- **Dish:** fry
+
+**Ingredients**
+
+- ¼ cabbage, shredded
+- ½ cup peas (pachi batani)
+- 1 tsp urad dal
+- 1 tsp mustard seeds
+- 8 curry leaves
+- 2 green chillies (pachi mirapakaya), slit
+- 2 tbsp oil
+- ½ tsp turmeric
+- 1 tsp salt
+
+**Steps**
+
+1. Heat oil, fry urad dal and mustard seeds, then curry leaves and green chillies.
+2. Add cabbage, peas and turmeric and cook on high, stirring, for 8 minutes.
+3. Baby portion: take out a spoon of soft peas and cabbage before salt and mash them very well (no whole peas).
+4. Add salt and toss. Pick the chillies out of the kid's share.
+
+### Cauliflower batani vepudu (cauliflower and peas fry)
+
+- **For:** family
+- **Meal:** dinner
+- **Cuisine:** Telugu
+- **Time:** 20 min
+- **Dish:** fry
+- **Air fryer:** 10 min at 200°C. Toss the microwaved florets with 2 tsp oil and turmeric and air fry, shaking at 5 minutes; stir in the peas at the end. Take the kid's portion out, then toss the rest in the tadka with chilli, coriander powder and salt.
+
+**Ingredients**
+
+- 1 cauliflower, in small florets
+- ½ cup peas (pachi batani)
+- 1 tsp mustard seeds
+- 8 curry leaves
+- 1 tsp red chilli powder
+- 1 tsp coriander powder
+- 2 tbsp oil
+- ½ tsp turmeric
+- 1 tsp salt
+
+**Steps**
+
+1. Microwave the florets and peas with 3 tbsp water, covered, for 4 minutes.
+2. Baby portion: mash a few plain florets and peas until smooth.
+3. Heat oil, splutter mustard seeds and curry leaves, add the vegetables and turmeric and fry on high until golden, 8 minutes.
+4. Take the kid's portion out, then add chilli, coriander powder and salt.
+
+### Capsicum bangaladumpa vepudu (capsicum and potato fry)
+
+- **For:** family
+- **Meal:** dinner
+- **Cuisine:** Telugu
+- **Time:** 20 min
+- **Dish:** fry
+- **Air fryer:** 12 min at 200°C. Both baskets at once: microwaved potato in basket 1 for 12 minutes, capsicum in basket 2 for 8 minutes, each with 1 tsp oil, with Sync. Take the kid's portion out, then toss in the tadka with chilli, turmeric and salt.
+
+**Ingredients**
+
+- 2 capsicums, cubed
+- 2 potatoes (bangaladumpa), cubed
+- 1 tsp mustard seeds
+- 8 curry leaves
+- 1 tsp red chilli powder
+- ½ tsp jeera
+- 2 tbsp oil
+- ½ tsp turmeric
+- 1 tsp salt
+
+**Steps**
+
+1. Microwave the potato cubes with 2 tbsp water, covered, for 4 minutes.
+2. Baby portion: mash a few plain potato cubes with no salt.
+3. Heat oil, splutter mustard seeds, jeera and curry leaves, add potato and capsicum and fry on high 8 minutes.
+4. Take the kid's portion out, then add chilli, turmeric and salt.
+
+### Vankaya bangaladumpa vepudu (brinjal and potato fry)
+
+- **For:** family
+- **Meal:** dinner
+- **Cuisine:** Telugu
+- **Time:** 20 min
+- **Dish:** fry
+- **Air fryer:** 15 min at 200°C. Both baskets at once: potato cubes in basket 1 for 15 minutes, brinjal cubes in basket 2 for 10 minutes, each tossed with 1 tsp oil and turmeric, with Sync. Take the kid's portion out, then fold into the onion tadka with chilli and salt.
+
+**Ingredients**
+
+- 3 brinjals (vankaya), cubed
+- 1 potato (bangaladumpa), cubed
+- 1 onion (ullipaya), chopped
+- 1 tsp mustard seeds
+- 8 curry leaves
+- 1 tsp red chilli powder
+- 2 tbsp oil
+- ½ tsp turmeric
+- 1 tsp salt
+
+**Steps**
+
+1. Heat oil, splutter mustard seeds and curry leaves, add onion, potato and brinjal with turmeric.
+2. Cover and cook on medium 10 minutes, stirring twice, then uncover and fry 3 minutes.
+3. Baby portion: take out some soft brinjal and potato before salt and mash it.
+4. Take the kid's portion out, then add chilli powder and salt.
+
+### Thotakura vepudu (amaranth stir-fry)
+
+- **For:** family
+- **Meal:** dinner
+- **Cuisine:** Telugu
+- **Time:** 10 min
+- **Dish:** fry
+
+**Ingredients**
+
+- 1 bunch amaranth leaves (thotakura), washed and chopped
+- 1 onion (ullipaya), chopped
+- 2 cloves garlic (vellulli), crushed
+- 1 tsp mustard seeds
+- 8 curry leaves
+- 1 dry red chilli
+- 2 tbsp oil
+- ½ tsp turmeric
+- 1 tsp salt
+
+**Steps**
+
+1. Heat oil, splutter mustard seeds, red chilli and curry leaves, add garlic and onion and fry 2 minutes.
+2. Add the leaves and turmeric and stir until wilted, 4 minutes.
+3. Baby portion: take out a spoon of wilted leaves before salt and blend or mash them into dal and rice.
+4. Add salt and toss.
+
+### Palakura vepudu (garlic spinach stir-fry)
+
+- **For:** family
+- **Meal:** dinner
+- **Cuisine:** Telugu
+- **Time:** 10 min
+- **Dish:** fry
+
+**Ingredients**
+
+- 1 bunch spinach (palakura), chopped
+- 3 cloves garlic (vellulli), sliced
+- 1 tsp mustard seeds
+- 8 curry leaves
+- 1 dry red chilli
+- 2 tbsp oil
+- ½ tsp turmeric
+- 1 tsp salt
+
+**Steps**
+
+1. Heat oil, splutter mustard seeds, red chilli and curry leaves, add garlic and fry until golden.
+2. Add spinach and turmeric and stir until wilted, 3 minutes.
+3. Baby portion: take out a spoon before salt and mash it into plain dal and rice.
+4. Add salt and toss.
+
+## Quick kura, pulusu and pappu (curries in 20 minutes or less)
+
+Most of these are made in the pressure cooker. Serve with rice.
+
+### Bendakaya tomato kura (okra tomato curry)
+
+- **For:** family
+- **Meal:** dinner
+- **Cuisine:** Telugu
+- **Time:** 20 min
+- **Dish:** curry
+
+**Ingredients**
+
+- 200 g okra (bendakaya), cut in pieces
+- 2 tomatoes (tamata), chopped
+- 1 onion (ullipaya), chopped
+- 1 tsp mustard seeds
+- 8 curry leaves
+- 1 tsp red chilli powder
+- 1 tbsp oil
+- ½ tsp turmeric
+- 1 tsp salt
+
+**Steps**
+
+1. Fry the okra in the oil on high until not sticky, 6 minutes, and keep aside.
+2. In the same pan splutter mustard seeds and curry leaves, fry the onion, add tomato and turmeric and cook to a soft gravy.
+3. Baby portion: take out a spoon of gravy and some soft okra before salt and mash them with rice.
+4. Take the kid's portion out, then add chilli powder, salt and the okra and simmer 3 minutes.
+
+### Vankaya tomato kura (brinjal tomato curry)
+
+- **For:** family
+- **Meal:** dinner
+- **Cuisine:** Telugu
+- **Time:** 20 min
+- **Dish:** curry
+
+**Ingredients**
+
+- 4 brinjals (vankaya), cubed
+- 2 tomatoes (tamata), chopped
+- 1 onion (ullipaya), chopped
+- 1 tsp mustard seeds
+- 8 curry leaves
+- 1 tsp red chilli powder
+- 1 tbsp oil
+- ½ tsp turmeric
+- 1 tsp salt
+
+**Steps**
+
+1. Splutter mustard seeds and curry leaves, fry the onion, add brinjal, tomato, turmeric and ¼ cup water.
+2. Cover and cook 12 minutes until the brinjal is soft.
+3. Baby portion: take out soft brinjal and tomato before salt and mash it.
+4. Take the kid's portion out, then add chilli powder and salt and simmer 2 minutes.
+
+### Vankaya bangaladumpa kura (brinjal and potato curry)
+
+- **For:** family
+- **Meal:** dinner
+- **Cuisine:** Telugu
+- **Time:** 20 min
+- **Dish:** curry
+
+**Ingredients**
+
+- 3 brinjals (vankaya), cubed
+- 2 potatoes (bangaladumpa), cubed
+- 1 onion (ullipaya), chopped
+- 1 tomato (tamata), chopped
+- 1 tsp mustard seeds
+- 8 curry leaves
+- 1 tsp red chilli powder
+- 1 tsp coriander powder
+- 1 tbsp oil
+- ½ tsp turmeric
+- 1 tsp salt
+
+**Steps**
+
+1. In the pressure cooker splutter mustard seeds and curry leaves, fry the onion and tomato, then add brinjal, potato, turmeric and ½ cup water.
+2. Pressure cook for 2 whistles.
+3. Baby portion: take out soft potato and brinjal before salt and mash them.
+4. Take the kid's portion out, then stir in chilli, coriander powder and salt and simmer 2 minutes.
+
+### Sorakaya pappu (bottle gourd dal, one pot)
+
+- **For:** family
+- **Meal:** dinner
+- **Cuisine:** Telugu
+- **Time:** 20 min
+- **Dish:** curry
+
+**Ingredients**
+
+- ½ cup toor dal (kandi pappu)
+- ½ bottle gourd (sorakaya), cubed
+- 1 tomato (tamata), chopped
+- 2 green chillies (pachi mirapakaya), slit
+- 1 tsp mustard seeds
+- 8 curry leaves
+- 1 tsp jeera
+- 1 tbsp oil
+- ½ tsp turmeric
+- 1 tsp salt
+
+**Steps**
+
+1. Pressure cook toor dal, bottle gourd, tomato, green chillies and turmeric with 2 cups water for 3 whistles.
+2. Baby portion: take out a ladle before salt, pick out any chilli and mash it with rice.
+3. Mash the rest with salt. Heat oil, splutter mustard seeds, jeera and curry leaves and pour over.
+
+### Beerakaya pappu (ridge gourd dal, one pot)
+
+- **For:** family
+- **Meal:** dinner
+- **Cuisine:** Telugu
+- **Time:** 20 min
+- **Dish:** curry
+
+**Ingredients**
+
+- ½ cup toor dal (kandi pappu)
+- 2 ridge gourds (beerakaya), peeled and cubed
+- 1 tomato (tamata), chopped
+- 1 tsp mustard seeds
+- 8 curry leaves
+- 1 tsp jeera
+- 1 dry red chilli
+- 1 tbsp oil
+- ½ tsp turmeric
+- 1 tsp salt
+
+**Steps**
+
+1. Pressure cook toor dal, ridge gourd, tomato and turmeric with 2 cups water for 3 whistles.
+2. Baby portion: take out a ladle before salt and mash it with rice.
+3. Mash the rest with salt. Fry mustard seeds, jeera, red chilli and curry leaves in the oil and pour over.
+
+### Dondakaya tomato kura (ivy gourd tomato curry)
+
+- **For:** family
+- **Meal:** dinner
+- **Cuisine:** Telugu
+- **Time:** 20 min
+- **Dish:** curry
+
+**Ingredients**
+
+- 250 g ivy gourd (dondakaya), sliced
+- 2 tomatoes (tamata), chopped
+- 1 onion (ullipaya), chopped
+- 1 tsp mustard seeds
+- 8 curry leaves
+- 1 tsp red chilli powder
+- 1 tbsp oil
+- ½ tsp turmeric
+- 1 tsp salt
+
+**Steps**
+
+1. In the pressure cooker splutter mustard seeds and curry leaves, fry the onion, add ivy gourd, tomato, turmeric and ¼ cup water.
+2. Pressure cook for 2 whistles.
+3. Baby portion: take out a few soft pieces with gravy before salt and mash them.
+4. Take the kid's portion out, then add chilli powder and salt and simmer until thick.
+
+### Potlakaya pappu (snake gourd dal, one pot)
+
+- **For:** family
+- **Meal:** dinner
+- **Cuisine:** Telugu
+- **Time:** 20 min
+- **Dish:** curry
+
+**Ingredients**
+
+- ½ cup moong dal (pesara pappu)
+- 1 snake gourd (potlakaya), seeds out and chopped
+- 2 green chillies (pachi mirapakaya), slit
+- 1 tsp mustard seeds
+- 8 curry leaves
+- 1 tsp jeera
+- 1 tbsp oil
+- ½ tsp turmeric
+- 1 tsp salt
+
+**Steps**
+
+1. Pressure cook moong dal, snake gourd, green chillies and turmeric with 2 cups water for 2 whistles.
+2. Baby portion: take out a ladle before salt, pick out any chilli and mash it.
+3. Mash the rest with salt. Fry mustard seeds, jeera and curry leaves in the oil and pour over.
+
+### Kakarakaya pulusu (bitter gourd tamarind stew)
+
+- **For:** family
+- **Meal:** dinner
+- **Cuisine:** Telugu
+- **Time:** 20 min
+- **Dish:** curry
+
+**Ingredients**
+
+- 2 bitter gourds (kakarakaya), sliced
+- 1 onion (ullipaya), sliced
+- 1 tbsp tamarind, soaked
+- 1 tbsp jaggery
+- 1 tsp mustard seeds
+- 8 curry leaves
+- 1 tsp red chilli powder
+- 1 tbsp oil
+- ½ tsp turmeric
+- 1 tsp salt
+
+**Steps**
+
+1. Splutter mustard seeds and curry leaves, fry onion and bitter gourd on high 5 minutes.
+2. Add tamarind, jaggery, turmeric, chilli, salt and 1 cup water and boil 10 minutes until thick.
+3. Baby portion: skip the bitter gourd for the baby; give plain rice and dal with a drop of ghee.
+
+**Notes:** Jaggery balances the bitterness. The 4-year-old can try a spoon with rice.
+
+### Munagakaya tomato kura (drumstick tomato curry)
+
+- **For:** family
+- **Meal:** dinner
+- **Cuisine:** Telugu
+- **Time:** 20 min
+- **Dish:** curry
+
+**Ingredients**
+
+- 3 drumsticks (munagakaya), cut in pieces
+- 2 tomatoes (tamata), chopped
+- 1 onion (ullipaya), chopped
+- 1 tsp mustard seeds
+- 8 curry leaves
+- 1 tsp red chilli powder
+- 1 tbsp oil
+- ½ tsp turmeric
+- 1 tsp salt
+
+**Steps**
+
+1. In the pressure cooker splutter mustard seeds and curry leaves, fry the onion, add tomato, drumsticks, turmeric and ¾ cup water.
+2. Pressure cook for 2 whistles.
+3. Baby portion: scrape the soft flesh out of 2 pieces with some plain gravy before salt and mash it.
+4. Take the kid's portion out, then add chilli powder and salt and simmer 3 minutes.
+
+### Aratikaya pulusu (raw banana tamarind stew)
+
+- **For:** family
+- **Meal:** dinner
+- **Cuisine:** Telugu
+- **Time:** 20 min
+- **Dish:** curry
+
+**Ingredients**
+
+- 2 raw bananas (aratikaya), peeled and cubed
+- 1 onion (ullipaya), chopped
+- 1 tbsp tamarind, soaked
+- 1 tsp mustard seeds
+- 8 curry leaves
+- 1 tsp red chilli powder
+- 1 tbsp oil
+- ½ tsp turmeric
+- 1 tsp salt
+
+**Steps**
+
+1. Splutter mustard seeds and curry leaves, fry the onion, add raw banana, turmeric and 1½ cups water and cook covered 8 minutes.
+2. Baby portion: take out a few soft cubes before tamarind and salt and mash them.
+3. Add tamarind, chilli powder and salt and boil 5 minutes until thick. The kid's share before the chilli.
+
+### Chamadumpa pulusu (taro tamarind stew)
+
+- **For:** family
+- **Meal:** dinner
+- **Cuisine:** Telugu
+- **Time:** 20 min
+- **Dish:** curry
+
+**Ingredients**
+
+- 300 g taro root (chamadumpa)
+- 1 onion (ullipaya), chopped
+- 1 tbsp tamarind, soaked
+- 1 tsp jaggery
+- 1 tsp mustard seeds
+- 8 curry leaves
+- 1 tsp red chilli powder
+- 1 tbsp oil
+- ½ tsp turmeric
+- 1 tsp salt
+
+**Steps**
+
+1. Pressure cook the taro with water for 2 whistles, peel and cut in pieces.
+2. Baby portion: mash a piece of plain taro with no salt.
+3. Splutter mustard seeds and curry leaves, fry the onion, add taro, tamarind, jaggery, turmeric, salt and 1 cup water and boil 5 minutes.
+4. Take the kid's portion out, then stir in chilli powder.
+
+### Gummadikaya pulusu (sweet and sour pumpkin stew)
+
+- **For:** family
+- **Meal:** dinner
+- **Cuisine:** Telugu
+- **Time:** 20 min
+- **Dish:** curry
+
+**Ingredients**
+
+- 300 g pumpkin (gummadikaya), cubed
+- 1 onion (ullipaya), chopped
+- 1 tbsp tamarind, soaked
+- 1 tbsp jaggery
+- 1 tsp mustard seeds
+- 8 curry leaves
+- 1 tsp red chilli powder
+- 1 tbsp oil
+- ½ tsp turmeric
+- 1 tsp salt
+
+**Steps**
+
+1. Splutter mustard seeds and curry leaves, fry the onion, add pumpkin, turmeric and 1 cup water and cook covered 8 minutes.
+2. Baby portion: take out a few soft cubes before tamarind and salt and mash them.
+3. Add tamarind, jaggery, salt and chilli (after the kid's share) and boil 5 minutes.
+
+### Capsicum senagapindi kura (capsicum besan curry)
+
+- **For:** family
+- **Meal:** dinner
+- **Cuisine:** Telugu
+- **Time:** 15 min
+- **Dish:** curry
+
+**Ingredients**
+
+- 3 capsicums, chopped
+- 1 onion (ullipaya), chopped
+- 3 tbsp besan
+- 1 tsp mustard seeds
+- 8 curry leaves
+- 1 tsp red chilli powder
+- 1 tbsp oil
+- ½ tsp turmeric
+- 1 tsp salt
+
+**Steps**
+
+1. Splutter mustard seeds and curry leaves, fry onion and capsicum on high 5 minutes.
+2. Baby portion: take out a few soft capsicum pieces before salt and mash them with rice.
+3. Sprinkle besan, turmeric and salt with 3 tbsp water and stir on low until it coats the capsicum, 4 minutes.
+4. Take the kid's portion out, then add chilli powder.
+
+### Chilagada dumpa kobbari kura (sweet potato coconut curry)
+
+- **For:** family
+- **Meal:** dinner
+- **Cuisine:** Telugu
+- **Time:** 20 min
+- **Dish:** curry
+
+**Ingredients**
+
+- 2 sweet potatoes (chilagada dumpa), cubed
+- 1 onion (ullipaya), chopped
+- ¼ cup coconut (kobbari), grated
+- 1 tsp mustard seeds
+- 8 curry leaves
+- 1 tsp jeera
+- 1 tsp red chilli powder
+- 1 tbsp oil
+- ½ tsp turmeric
+- 1 tsp salt
+
+**Steps**
+
+1. Splutter mustard seeds, jeera and curry leaves, fry the onion, add sweet potato, turmeric and ¾ cup water and cook covered 10 minutes.
+2. Baby portion: take out a few soft cubes before salt and mash them.
+3. Add coconut and salt and simmer 3 minutes. Stir chilli powder in after the kid's share is out.
+
+### Chikkudukaya tomato kura (broad beans tomato curry)
+
+- **For:** family
+- **Meal:** dinner
+- **Cuisine:** Telugu
+- **Time:** 20 min
+- **Dish:** curry
+
+**Ingredients**
+
+- 250 g broad beans (chikkudukaya), chopped
+- 2 tomatoes (tamata), chopped
+- 1 onion (ullipaya), chopped
+- 1 tsp mustard seeds
+- 8 curry leaves
+- 1 tsp red chilli powder
+- 1 tbsp oil
+- ½ tsp turmeric
+- 1 tsp salt
+
+**Steps**
+
+1. In the pressure cooker splutter mustard seeds and curry leaves, fry the onion, add tomato, beans, turmeric and ½ cup water.
+2. Pressure cook for 2 whistles.
+3. Baby portion: take out soft beans and gravy before salt and mash very well.
+4. Take the kid's portion out, then add chilli powder and salt and simmer until thick.
+
+### Goruchikkudu tomato kura (cluster beans tomato curry)
+
+- **For:** family
+- **Meal:** dinner
+- **Cuisine:** Telugu
+- **Time:** 20 min
+- **Dish:** curry
+
+**Ingredients**
+
+- 250 g cluster beans (goruchikkudu), chopped
+- 2 tomatoes (tamata), chopped
+- 1 onion (ullipaya), chopped
+- 1 tsp mustard seeds
+- 8 curry leaves
+- 1 tsp red chilli powder
+- 1 tbsp oil
+- ½ tsp turmeric
+- 1 tsp salt
+
+**Steps**
+
+1. In the pressure cooker splutter mustard seeds and curry leaves, fry the onion, add tomato, cluster beans, turmeric and ½ cup water.
+2. Pressure cook for 2 whistles.
+3. Baby portion: take out a spoon of soft beans and gravy before salt and mash very well.
+4. Take the kid's portion out, then add chilli powder and salt and simmer 3 minutes.
+
+### Mullangi pulusu (radish tamarind stew)
+
+- **For:** family
+- **Meal:** dinner
+- **Cuisine:** Telugu
+- **Time:** 20 min
+- **Dish:** curry
+
+**Ingredients**
+
+- 2 radishes (mullangi), in rounds
+- 1 onion (ullipaya), chopped
+- 1 tbsp tamarind, soaked
+- 1 tsp jaggery
+- 1 tsp mustard seeds
+- 8 curry leaves
+- 1 tsp red chilli powder
+- 1 tbsp oil
+- ½ tsp turmeric
+- 1 tsp salt
+
+**Steps**
+
+1. Splutter mustard seeds and curry leaves, fry onion and radish 3 minutes, add turmeric and 1½ cups water and cook covered 8 minutes.
+2. Baby portion: take out a few soft rounds before tamarind and salt and mash them.
+3. Add tamarind, jaggery and salt and boil 5 minutes. Chilli powder after the kid's share.
+
+### Kandagadda pulusu (yam tamarind stew)
+
+- **For:** family
+- **Meal:** dinner
+- **Cuisine:** Telugu
+- **Time:** 20 min
+- **Dish:** curry
+
+**Ingredients**
+
+- 300 g yam (kandagadda), peeled and cubed
+- 1 onion (ullipaya), chopped
+- 1 tbsp tamarind, soaked
+- 1 tsp mustard seeds
+- 8 curry leaves
+- 1 tsp red chilli powder
+- 1 tbsp oil
+- ½ tsp turmeric
+- 1 tsp salt
+
+**Steps**
+
+1. Pressure cook the yam with turmeric and water for 1 whistle.
+2. Baby portion: mash 2 plain cubes with no salt.
+3. Splutter mustard seeds and curry leaves, fry the onion, add yam with its water, tamarind and salt and boil 6 minutes.
+4. Take the kid's portion out, then stir in chilli powder.
+
+### Cabbage pappu (cabbage dal, one pot)
+
+- **For:** family
+- **Meal:** dinner
+- **Cuisine:** Telugu
+- **Time:** 20 min
+- **Dish:** curry
+
+**Ingredients**
+
+- ½ cup toor dal (kandi pappu)
+- ¼ cabbage, shredded
+- 2 green chillies (pachi mirapakaya), slit
+- 1 tsp mustard seeds
+- 8 curry leaves
+- 1 tsp jeera
+- 1 tbsp oil
+- ½ tsp turmeric
+- 1 tsp salt
+
+**Steps**
+
+1. Pressure cook toor dal, cabbage, green chillies and turmeric with 2 cups water for 3 whistles.
+2. Baby portion: take out a ladle before salt, pick out any chilli and mash it.
+3. Mash the rest with salt. Fry mustard seeds, jeera and curry leaves in the oil and pour over.
+
+### Cauliflower batani kura (cauliflower and peas curry)
+
+- **For:** family
+- **Meal:** dinner
+- **Cuisine:** Telugu
+- **Time:** 20 min
+- **Dish:** curry
+
+**Ingredients**
+
+- 1 cauliflower, in florets
+- ½ cup peas (pachi batani)
+- 2 tomatoes (tamata), chopped
+- 1 onion (ullipaya), chopped
+- 1 tsp mustard seeds
+- 8 curry leaves
+- 1 tsp red chilli powder
+- 1 tsp coriander powder
+- 1 tbsp oil
+- ½ tsp turmeric
+- 1 tsp salt
+
+**Steps**
+
+1. In the pressure cooker splutter mustard seeds and curry leaves, fry the onion and tomato, add cauliflower, peas, turmeric and ½ cup water.
+2. Pressure cook for 1 whistle.
+3. Baby portion: take out soft florets and peas before salt and mash them smooth (no whole peas).
+4. Take the kid's portion out, then add chilli, coriander powder and salt and simmer 2 minutes.
+
+### Aloo batani kura (potato and peas curry)
+
+- **For:** family
+- **Meal:** dinner
+- **Cuisine:** Telugu
+- **Time:** 20 min
+- **Dish:** curry
+
+**Ingredients**
+
+- 2 potatoes (bangaladumpa), cubed
+- ½ cup peas (pachi batani)
+- 1 tomato (tamata), chopped
+- 1 onion (ullipaya), chopped
+- 1 tsp mustard seeds
+- 8 curry leaves
+- 1 tsp red chilli powder
+- 1 tbsp oil
+- ½ tsp turmeric
+- 1 tsp salt
+
+**Steps**
+
+1. In the pressure cooker splutter mustard seeds and curry leaves, fry onion and tomato, add potato, peas, turmeric and ¾ cup water.
+2. Pressure cook for 2 whistles.
+3. Baby portion: take out potato and peas before salt and mash them smooth (no whole peas).
+4. Take the kid's portion out, then add chilli powder and salt and simmer 2 minutes.
+
+### Thotakura pappu (amaranth dal, one pot)
+
+- **For:** family
+- **Meal:** dinner
+- **Cuisine:** Telugu
+- **Time:** 20 min
+- **Dish:** curry
+
+**Ingredients**
+
+- ½ cup toor dal (kandi pappu)
+- 1 bunch amaranth leaves (thotakura), chopped
+- 1 tomato (tamata), chopped
+- 2 cloves garlic (vellulli)
+- 1 tsp mustard seeds
+- 8 curry leaves
+- 1 tsp jeera
+- 1 tbsp oil
+- ½ tsp turmeric
+- 1 tsp salt
+
+**Steps**
+
+1. Pressure cook toor dal, leaves, tomato, garlic and turmeric with 2 cups water for 3 whistles.
+2. Baby portion: take out a ladle before salt and mash it smooth with rice.
+3. Mash the rest with salt. Fry mustard seeds, jeera and curry leaves in the oil and pour over.
+
+### Gongura pappu (sorrel leaves dal, one pot)
+
+- **For:** family
+- **Meal:** dinner
+- **Cuisine:** Telugu
+- **Time:** 20 min
+- **Dish:** curry
+
+**Ingredients**
+
+- ½ cup toor dal (kandi pappu)
+- 1 bunch gongura (sorrel leaves), leaves only
+- 2 green chillies (pachi mirapakaya), slit
+- 3 cloves garlic (vellulli)
+- 1 tsp mustard seeds
+- 8 curry leaves
+- 1 tsp jeera
+- 1 tbsp oil
+- ½ tsp turmeric
+- 1 tsp salt
+
+**Steps**
+
+1. Pressure cook toor dal, gongura, green chillies and turmeric with 2 cups water for 3 whistles.
+2. Baby portion: gongura is very sour, so cook 2 tbsp of plain dal separately or take it from the family dal before the leaves go in, and mash it.
+3. Mash the rest with salt. Fry garlic, mustard seeds, jeera and curry leaves in the oil and pour over.
+
+### Menthikura pappu (methi leaves dal, one pot)
+
+- **For:** family
+- **Meal:** dinner
+- **Cuisine:** Telugu
+- **Time:** 20 min
+- **Dish:** curry
+
+**Ingredients**
+
+- ½ cup moong dal (pesara pappu)
+- 1 bunch methi leaves (menthikura), chopped
+- 1 tomato (tamata), chopped
+- 1 tsp mustard seeds
+- 8 curry leaves
+- 1 tsp jeera
+- 1 tbsp oil
+- ½ tsp turmeric
+- 1 tsp salt
+
+**Steps**
+
+1. Pressure cook moong dal, methi, tomato and turmeric with 2 cups water for 2 whistles.
+2. Baby portion: take out a ladle before salt and mash it with rice.
+3. Mash the rest with salt. Fry mustard seeds, jeera and curry leaves in the oil and pour over.
+
+### Palakura tomato kura (spinach tomato curry)
+
+- **For:** family
+- **Meal:** dinner
+- **Cuisine:** Telugu
+- **Time:** 15 min
+- **Dish:** curry
+
+**Ingredients**
+
+- 1 bunch spinach (palakura), chopped
+- 2 tomatoes (tamata), chopped
+- 1 onion (ullipaya), chopped
+- 1 tsp mustard seeds
+- 8 curry leaves
+- 1 tsp red chilli powder
+- 1 tbsp oil
+- ½ tsp turmeric
+- 1 tsp salt
+
+**Steps**
+
+1. Splutter mustard seeds and curry leaves, fry the onion, add tomato and turmeric and cook soft.
+2. Add spinach and cook until wilted, 4 minutes.
+3. Baby portion: take out a spoon before salt and mash it into plain rice.
+4. Take the kid's portion out, then add chilli powder and salt.
+
+### Mamidikaya pachi pulusu (raw mango no-cook pulusu)
+
+- **For:** family
+- **Meal:** dinner
+- **Cuisine:** Telugu
+- **Time:** 10 min
+- **Dish:** curry
+
+**Ingredients**
+
+- 1 raw mango (mamidikaya), grated
+- 1 onion (ullipaya), finely chopped
+- 1 tbsp jaggery
+- 1 tsp mustard seeds
+- 1 dry red chilli
+- 8 curry leaves
+- 1 tsp oil
+- 1 tsp salt
+
+**Steps**
+
+1. Mix the grated mango, onion, jaggery and salt with 1½ cups water.
+2. Fry mustard seeds, red chilli and curry leaves in the oil and pour over.
+3. Baby portion: raw mango is too sour for the baby; give plain rice and dal with a drop of ghee.
+
+**Notes:** Eaten with hot rice and pappu. The 4-year-old usually likes a spoon with extra jaggery.
+
+### Dosakaya tomato kura (yellow cucumber tomato curry)
+
+- **For:** family
+- **Meal:** dinner
+- **Cuisine:** Telugu
+- **Time:** 20 min
+- **Dish:** curry
+
+**Ingredients**
+
+- 1 dosakaya (yellow cucumber), peeled and cubed
+- 2 tomatoes (tamata), chopped
+- 1 onion (ullipaya), chopped
+- 1 tsp mustard seeds
+- 8 curry leaves
+- 1 tsp red chilli powder
+- 1 tbsp oil
+- ½ tsp turmeric
+- 1 tsp salt
+
+**Steps**
+
+1. Splutter mustard seeds and curry leaves, fry the onion, add cucumber, tomato and turmeric, cover and cook 10 minutes.
+2. Baby portion: take out soft cucumber and tomato before salt and mash them.
+3. Take the kid's portion out, then add chilli powder and salt and simmer 2 minutes.
