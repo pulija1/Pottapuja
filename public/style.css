@@ -183,6 +183,14 @@ input[type=date], input[type=time] { height: 42px; }
 .chip button { border: 0; background: none; width: 36px; height: 36px; border-radius: 50%; color: var(--muted); }
 .chip button:hover { background: var(--card); color: var(--bad); }
 .chip.add { background: var(--bg); border: 1px dashed var(--line); padding: 4px 12px; cursor: pointer; }
+.kitchen-groups { display: flex; flex-direction: column; }
+.kitchen-group { border-bottom: 1px solid var(--line); }
+.kitchen-group:last-child { border-bottom: 0; }
+.kitchen-group > summary { display: flex; align-items: center; gap: 6px; min-height: 44px; color: var(--ink); min-width: 0; }
+.kitchen-group > summary .count { background: var(--brand-soft); color: var(--brand); border-radius: 999px; padding: 0 8px; font-size: .8rem; font-weight: 600; }
+.kitchen-group > summary .preview { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 400; }
+.kitchen-group[open] > summary .preview { visibility: hidden; }
+.kitchen-group > .chips { padding: 2px 0 10px; }
 .recipe-grid { display: grid; gap: 12px; }
 @media (min-width: 700px) { .recipe-grid { grid-template-columns: repeat(2, 1fr); } }
 .recipe { display: flex; flex-direction: column; gap: 8px; }

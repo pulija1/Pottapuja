@@ -1025,3 +1025,61 @@ test("E2E CUI-01 cuisines picked in the profile steer suggestions and top picks;
   assert.deepEqual(errors, []);
   await ctx.close();
 });
+
+test("E2E BRK-01 Whole family + Breakfast with the AI off shows family breakfasts, the night-before and no-cook ones first", async () => {
+  const { page, ctx, errors } = await open(off);
+  await tid(page, "tab-recipes").click();
+  await tid(page, "gen-for").selectOption("family");
+  await tid(page, "gen-meal").selectOption("breakfast");
+  assert.ok(await tid(page, "gen-busy").isChecked(), "a Thursday is a busy morning");
+  await tid(page, "generate-recipes").click();
+  await tid(page, "ai-notice").waitFor({ timeout: 5000 });
+  const cards = tid(page, "recipe-card");
+  assert.ok((await cards.count()) >= 4, "recipes, not an empty result");
+  const titles = await cards.locator("h3").allInnerTexts();
+  assert.ok(titles.some((t) => /overnight oats|peanut butter banana toast|avocado toast|idli/i.test(t)), titles.join(" | "));
+  // The weekend: untick it and a cooked breakfast can show up again.
+  await tid(page, "gen-busy").uncheck();
+  await tid(page, "generate-recipes").click();
+  assert.ok((await cards.count()) > 0);
+  assert.deepEqual(errors.filter((e) => !/503/.test(e)), []);
+  await ctx.close();
+});
+
+test("E2E BRK-02 fruits can be added to the kitchen, and the kitchen shows collapsed groups", async () => {
+  const { page, ctx, errors } = await open();
+  await tid(page, "tab-recipes").click();
+  await tid(page, "pantry-input").fill("okra, peanut butter, bread, biscuits");
+  await tid(page, "pantry-add").click();
+  const fruits = tid(page, "quick-fruits");
+  await fruits.locator("summary").click();
+  assert.equal(await fruits.getByRole("button", { name: "+ Arati pandu (banana)" }).count(), 0, "banana is in the kitchen already");
+  await fruits.getByRole("button", { name: "+ Mamidi pandu (mango)" }).click();
+  await fruits.getByRole("button", { name: "+ Apple" }).click();
+  const groups = tid(page, "kitchen-group");
+  assert.deepEqual((await groups.evaluateAll((els) => els.map((e) => e.dataset.kitchen))).slice(0, 5), ["vegetables", "fruits", "dips", "bread", "snacks"]);
+  const fruit = page.locator("[data-kitchen=fruits]");
+  assert.equal(await fruit.evaluate((d) => d.open), false, "collapsed");
+  assert.match(await fruit.locator("summary").innerText(), /Fruits\s*3[\s\S]*banana[\s\S]*mango[\s\S]*Apple/);
+  await fruit.locator("summary").click();
+  await fruit.getByRole("button", { name: "Remove Apple" }).click();
+  assert.equal(await page.locator("[data-kitchen=fruits]").evaluate((d) => d.open), true, "stays open after a change");
+  assert.match(await page.locator("[data-kitchen=fruits] summary").innerText(), /Fruits\s*2/);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test("E2E BRK-03 weekday suggestions: breakfast made the night before or no-cook, and a fruit for the baby", async () => {
+  const { page, ctx, errors } = await open();
+  await cell(page, "2026-10-26").click();   // a Monday
+  const kid = page.locator("[data-testid=suggestion][data-slot=kid_breakfast]");
+  assert.match(await kid.innerText(), /Make the night before|No cooking/);
+  const baby = page.locator("[data-testid=suggestion][data-slot=baby_breakfast]");
+  const text = await baby.innerText();
+  assert.ok(/banana|avocado|papaya|mango|chikoo|apple|pear/i.test(text), text);
+  assert.match(await baby.innerText(), /Make the night before|No cooking/);
+  await cell(page, "2026-10-24").click();   // a Saturday: no rush
+  assert.equal(await tid(page, "busy-morning").count(), 0);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});

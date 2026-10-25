@@ -69,6 +69,10 @@ const SYNONYMS = {
   "pachi mirapakaya": "green chilli", "green chillies": "green chilli", "allam": "ginger", "vellulli": "garlic",
   "kothimeera": "coriander leaves", "pudina": "mint leaves", "pachi batani": "peas", "mokkajonna": "sweet corn", "kobbari": "coconut",
   "dosakaya": "cucumber", "cabbage": "cabbage", "cauliflower": "cauliflower", "capsicum": "capsicum",
+  // Telugu fruit names (pandlu).
+  "arati pandu": "banana", "mamidi pandu": "mango", "boppayi": "papaya", "boppayi pandu": "papaya", "sapota": "chikoo", "chiku": "chikoo",
+  "jama pandu": "guava", "jama kaya": "guava", "danimma": "pomegranate", "danimma pandu": "pomegranate", "kamala pandu": "orange",
+  "draksha": "grapes", "drakshalu": "grapes", "puchakaya": "watermelon", "seethaphalam": "custard apple", "sitaphal": "custard apple", "anasa pandu": "pineapple",
   "ladies finger": "okra", "lady's finger": "okra", "ladys finger": "okra", "lady finger": "okra", "ladyfinger": "okra", "ladies fingers": "okra",
 };
 

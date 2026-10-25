@@ -6,6 +6,7 @@ import { todayKey, addDays, addMonths, monthGrid, monthLabel, prettyDate, fromKe
 import { checkRecipe, checkForAudience, isNutIngredient, isSchoolFood } from "./shared/safety.js";
 import { LIBRARY, suggestFromLibrary, readyToCook, RECIPE_BOOK_STATUS, cookByVegetables, missingForRecipe, CUISINES, inCuisines, topPicks, leftoverKind, leftoverRecipesFor, freezerSet } from "./shared/recipes.js";
 import { nutritionTags, TAG_LABELS } from "./shared/recipe-book.js";
+import { groupKitchen, babyFruitFor, recipeHasFruit } from "./shared/kitchen.js";
 import { APPLIANCES, ownedAppliances, methodsFor, fastestMinutes, basketPairs, applianceRequest } from "./shared/appliances.js";
 import { NUTRIENTS, DAILY_NEEDS, estimateNutrition, dailyShare } from "./shared/nutrition.js";
 import { mergeItems, groupByAisle, formatQty, missingFromPantry, normName, normUnit, aisleFor } from "./shared/shopping.js";
@@ -787,10 +788,15 @@ function suggestionsFor(key) {
         continue;
       }
     }
-    const candidates = suggestFromLibrary(state.pantry, { ...opt, mealType: meal })
+    // School-day mornings are rushed: breakfast is made the night before or needs no cooking.
+    const busyMorning = meal === "breakfast" && isSchoolDay(key);
+    // The 4-year-old eats the family breakfast too (overnight oats, peanut butter toast).
+    const fits = (r) => r.forWhom === s.who || (s.id === "kid_breakfast" && r.forWhom === "family" && r.mealType === "breakfast");
+    let candidates = suggestFromLibrary(state.pantry, { ...opt, mealType: meal, busyMorning })
       .concat(suggestFromLibrary(state.pantry, opt))
-      .filter((r) => r.forWhom === s.who && !r.leftover && !seen.has(r.id) && seen.add(r.id))
+      .filter((r) => fits(r) && !r.leftover && !seen.has(r.id) && seen.add(r.id))
       .filter(safe);
+    if (busyMorning && candidates.some((r) => r.busyMorning)) candidates = candidates.filter((r) => r.busyMorning);
     let fresh = candidates.filter((r) => !used.has(r.id) && !avoid.has(r.id));
     // Steer the 4-year-old's empty slots toward the daily goal: an egg at breakfast, milk in the lunchbox, nuts in the snack.
     if (s.who === "kid") {
@@ -860,6 +866,14 @@ function fromFreezer(recipe) {
   return [...new Set((recipe?.ingredients || []).map((i) => normName(i.name)).filter((n) => cold.has(n) && !fresh.has(n)))];
 }
 
+// The baby has a fruit every morning: one from the kitchen, or a ripe banana to buy.
+function babyFruitNote(seed = 0, inline = false) {
+  const f = babyFruitFor(state.pantry, seed);
+  const name = String(state.settings?.babyName || "").trim() || "the baby";
+  const text = `🍌 Plus a fruit for ${name}: ${f.how}${f.inKitchen ? "" : " (add bananas to the shopping list)"}`;
+  return inline ? `<span class="small" data-testid="baby-fruit">${esc(text)}</span>` : `<div class="notice info small" data-testid="baby-fruit">${esc(text)}</div>`;
+}
+
 function renderSuggestions(key) {
   if (key < TODAY) return "";
   const picks = suggestionsFor(key);
@@ -875,7 +889,7 @@ function renderSuggestions(key) {
       const cold = fromFreezer(r);
       return `<div class="suggest-row" data-testid="suggestion" data-slot="${s.id}">
         <span class="small muted">${esc(slotLabel(s, state.settings))}</span>
-        <span class="grow">${from ? `<span class="small" data-testid="leftover-idea">♻️ Uses yesterday's ${esc(from)}</span><br>` : ""}${esc(r.title)}${r.familyFavorite ? " ⭐" : ""}${tagIcons(r) ? ` <span aria-hidden="true">${tagIcons(r)}</span>` : ""}${applianceNote(r)}${need.length ? ` <span class="small" style="color:var(--warn)">· need ${esc(need.map((i) => i.name).join(", "))}</span>` : ' <span class="small" style="color:var(--ok)">· all in the kitchen</span>'}${cold.length ? ` <span class="small" data-testid="from-freezer">· 🧊 ${esc(cold.join(", "))} from the freezer</span>` : ""}</span>
+        <span class="grow">${from ? `<span class="small" data-testid="leftover-idea">♻️ Uses yesterday's ${esc(from)}</span><br>` : ""}${r.busyMorning && isSchoolDay(key) ? `<span class="small muted" data-testid="busy-morning">${r.busyMorning === "make-ahead" ? "🌙 Make the night before" : "⏱️ No cooking"}</span><br>` : ""}${esc(r.title)}${r.familyFavorite ? " ⭐" : ""}${tagIcons(r) ? ` <span aria-hidden="true">${tagIcons(r)}</span>` : ""}${applianceNote(r)}${need.length ? ` <span class="small" style="color:var(--warn)">· need ${esc(need.map((i) => i.name).join(", "))}</span>` : ' <span class="small" style="color:var(--ok)">· all in the kitchen</span>'}${cold.length ? ` <span class="small" data-testid="from-freezer">· 🧊 ${esc(cold.join(", "))} from the freezer</span>` : ""}${s.id === "baby_breakfast" && !recipeHasFruit(r) ? `<br>${babyFruitNote(ui.suggest[key]?.seed || 0, true)}` : ""}</span>
         <button type="button" class="iconbtn" data-action="suggest-swap" data-slot="${s.id}" title="Another idea" aria-label="Another idea for ${esc(slotLabel(s, state.settings))}">🔀</button>
       </div>`;
     }).join("")}
@@ -1025,6 +1039,22 @@ const TELUGU_VEG = ["Vankaya (brinjal)", "Bendakaya (okra)", "Sorakaya (bottle g
 const TELUGU_LEAVES = ["Palakura (spinach)", "Thotakura (amaranth leaves)", "Gongura (sorrel leaves)", "Menthikura (methi leaves)",
   "Kothimeera (coriander leaves)", "Pudina (mint leaves)", "Karivepaku (curry leaves)"];
 
+const FRUITS = ["Arati pandu (banana)", "Mamidi pandu (mango)", "Boppayi (papaya)", "Sapota (chikoo)", "Jama pandu (guava)", "Danimma (pomegranate)",
+  "Kamala pandu (orange)", "Draksha (grapes)", "Puchakaya (watermelon)", "Apple", "Pear", "Avocado", "Strawberries", "Blueberries", "Kiwi", "Peach", "Plum", "Pineapple"];
+
+// The kitchen list in collapsed groups (vegetables, fruits, dips, bread, snacks, ...). Each group's
+// heading shows how many there are and their names, so a glance is enough; open it to remove one.
+function renderKitchenGroups() {
+  return groupKitchen(state.pantry).map((g) => {
+    const id = `kitchen-${g.id}`;
+    return `<details class="kitchen-group" data-testid="kitchen-group" data-kitchen="${g.id}" data-group="${id}" ${ui.openGroups.has(id) ? "open" : ""}>
+      <summary><span aria-hidden="true">${g.icon}</span> <strong>${esc(g.label)}</strong> <span class="count">${g.items.length}</span>
+        <span class="preview small muted">${esc(g.items.join(", "))}</span></summary>
+      <div class="chips">${g.items.map((p) => `<span class="chip" data-testid="pantry-item">${esc(p)}<button data-action="pantry-del" data-name="${esc(p)}" aria-label="Remove ${esc(p)}">✕</button></span>`).join("")}</div>
+    </details>`;
+  }).join("");
+}
+
 function quickAddGroup(label, items, have, testid) {
   const left = items.filter((s) => !have.has(normName(s)));
   return left.length ? `<details style="margin-top:8px" data-testid="${testid}" data-group="${testid}" ${ui.openGroups.has(testid) ? "open" : ""}><summary>${esc(label)}</summary><div class="chips" style="margin-top:8px">${left.map((s) => `<button class="chip add" data-action="pantry-quick" data-name="${esc(s)}">+ ${esc(s)}</button>`).join("")}</div></details>` : "";
@@ -1038,14 +1068,15 @@ function renderRecipes() {
   $("#view-recipes").innerHTML = `
     <div class="card">
       <h2>What's in the kitchen</h2>
-      <div class="chips" data-testid="pantry-list">
-        ${state.pantry.map((p) => `<span class="chip" data-testid="pantry-item">${esc(p)}<button data-action="pantry-del" data-name="${esc(p)}" aria-label="Remove ${esc(p)}">✕</button></span>`).join("") || '<span class="muted small">Add what you have at home.</span>'}
+      <div class="kitchen-groups" data-testid="pantry-list">
+        ${renderKitchenGroups() || '<span class="muted small">Add what you have at home.</span>'}
       </div>
       <form class="row" data-form="pantry-add" style="margin-top:10px">
         <input type="text" name="items" class="grow" placeholder="Add items, comma separated (e.g. drumstick, paneer)" aria-label="Add pantry items" data-testid="pantry-input">
         <button class="btn primary" data-testid="pantry-add">Add</button>
       </form>
       ${quickAddGroup("Quick add common items", STAPLES, pantrySet, "quick-common")}
+      ${quickAddGroup("Pandlu (fruits)", FRUITS, pantrySet, "quick-fruits")}
       ${quickAddGroup("Kuragayalu (Telugu vegetables)", TELUGU_VEG, pantrySet, "quick-telugu-veg")}
       ${quickAddGroup("Aakukuralu (leafy greens)", TELUGU_LEAVES, pantrySet, "quick-telugu-leaves")}
     </div>
@@ -1066,6 +1097,7 @@ function renderRecipes() {
             ${[["", "Any"], ["breakfast", "Breakfast"], ["lunchbox", "School lunchbox"], ["lunch", "Lunch"], ["snack", "Snack"], ["dinner", "Dinner"]].map(([v, l]) => `<option value="${v}" ${ui.gen.mealType === v ? "selected" : ""}>${l}</option>`).join("")}
           </select></label>
         <label class="chk full" style="min-height:0"><input type="checkbox" name="quick" data-action="gen-field" ${ui.gen.quick ? "checked" : ""} data-testid="gen-quick"> ⚡ Quick: just one recipe, ready in ${QUICK_MINUTES} minutes${appliancesOwned().length ? ` (${appliancesOwned().map((k) => APPLIANCES[k].label.toLowerCase()).join(" and ")} count)` : ""}</label>
+        <label class="chk full" style="min-height:0"><input type="checkbox" name="busy" data-action="gen-field" ${genBusy() ? "checked" : ""} data-testid="gen-busy"> 🌙 Busy morning: breakfasts made the night before or with no cooking first</label>
         <label class="chk full" style="min-height:0"><input type="checkbox" data-action="nut-free" ${nutFreeOn() ? "checked" : ""} data-testid="school-nut-free"> School is nut-free (no peanuts or tree nuts in the lunchbox or snack box)</label>
         <label class="field full"><span>Anything else? (optional)</span>
           <input type="text" name="notes" maxlength="300" value="${esc(ui.gen.notes)}" placeholder="e.g. baby just started eggs, no onion today" data-testid="gen-notes" data-action="gen-field"></label>
@@ -1079,6 +1111,7 @@ function renderRecipes() {
 
     <div data-testid="recipe-results">
       ${ui.aiNotice ? `<div class="notice" data-testid="ai-notice">${esc(ui.aiNotice)}</div>` : ""}
+      ${ui.results.length && ui.gen.mealType === "breakfast" && ["baby", "both"].includes(ui.gen.forWhom) ? babyFruitNote() : ""}
       ${ui.rejected.length ? `<div class="notice info small" data-testid="rejected-notice">Removed ${ui.rejected.length} AI suggestion${ui.rejected.length > 1 ? "s" : ""} that failed the age-safety check: ${ui.rejected.map((r) => esc(r.title) + " (" + esc(r.errors.map((e) => e.rule).join(", ")) + ")").join("; ")}</div>` : ""}
       <div class="recipe-grid">${ui.results.map((r) => recipeCard(r)).join("")}</div>
     </div>
@@ -1206,7 +1239,7 @@ function recipeCard(r, { saved = false } = {}) {
   return `<article class="card recipe" data-testid="recipe-card" data-recipe-id="${esc(r.id)}" data-safe="${safety.safe}">
     <div class="row between"><h3>${esc(r.title)}</h3><span>${r.familyFavorite ? '<span class="pill warn" data-testid="family-favorite">⭐ Family favorite</span> ' : ""}${whoPill(r.forWhom)}</span></div>
     ${hasNuts && !nutFreeOn() ? `<div class="small muted" data-testid="contains-nuts">🥜 Contains nuts${r.nutFreeSwap ? ". Nut-free swap: " + esc(r.nutFreeSwap) : ""}</div>` : ""}
-    <div class="small muted">${r.cuisine ? esc(r.cuisine) + " · " : ""}${esc(r.mealType || "")}${r.prepMinutes ? " · " + esc(r.prepMinutes) + " min" : ""}${r.texture ? " · " + esc(r.texture) : ""}${r.source === "ai" ? " · ✨ AI" : r.source === "library" ? " · Family recipe book" : ""}</div>
+    <div class="small muted">${r.cuisine ? esc(r.cuisine) + " · " : ""}${esc(r.mealType || "")}${r.prepMinutes ? " · " + esc(r.prepMinutes) + " min" : ""}${r.busyMorning ? ` · <span data-testid="busy-morning-tag">${r.busyMorning === "make-ahead" ? "🌙 Make the night before" : "⏱️ No cooking"}</span>` : ""}${r.texture ? " · " + esc(r.texture) : ""}${r.source === "ai" ? " · ✨ AI" : r.source === "library" ? " · Family recipe book" : ""}</div>
     ${methods.length ? `<div class="appliance-methods" data-testid="appliance-methods">${methods.map((m) => `<p class="small" data-appliance="${m.key}"><strong>${m.icon} ${esc(m.label)}${m.key === "airFryer" && state.settings.airFryer === "dual" ? " (two baskets)" : ""}:</strong> ${esc(m.text)}</p>`).join("")}</div>` : ""}
     ${r.tags?.length ? `<div class="small" data-testid="recipe-tags">${r.tags.map((t) => esc(TAG_LABELS[t])).join(" · ")}</div>` : ""}
     <div class="safety ${safety.safe && !safety.warnings.length ? "ok" : safety.safe ? "warn" : "warn"}" data-testid="safety-badge">
@@ -1226,13 +1259,18 @@ function recipeCard(r, { saved = false } = {}) {
   </article>`;
 }
 
+// Weekdays are busy mornings unless the parent unticks it.
+const genBusy = () => ui.gen.busy ?? isSchoolDay(TODAY);
+const BUSY_NOTE = "Busy weekday morning: only breakfasts made the night before (overnight oats, idlis steamed in the evening, boiled eggs) or with no cooking (bread with peanut butter or avocado).";
+
 async function generate(form) {
-  ui.gen = { forWhom: form.forWhom.value, mealType: form.mealType.value, notes: form.notes.value, quick: form.quick.checked };
+  ui.gen = { forWhom: form.forWhom.value, mealType: form.mealType.value, notes: form.notes.value, quick: form.quick.checked, busy: form.busy.checked };
+  const busyMorning = ui.gen.busy && ui.gen.mealType === "breakfast";
   const body = {
     ingredients: state.pantry,
     forWhom: form.forWhom.value,
     mealType: form.mealType.value,
-    notes: [form.notes.value.trim(), cuisinePicks().length ? `The family mostly cooks ${cuisinePicks().map((id) => CUISINES.find((x) => x.id === id).label).join(", ")}.` : ""].filter(Boolean).join(" ").slice(0, 300),
+    notes: [form.notes.value.trim(), busyMorning ? BUSY_NOTE : "", cuisinePicks().length ? `The family mostly cooks ${cuisinePicks().map((id) => CUISINES.find((x) => x.id === id).label).join(", ")}.` : ""].filter(Boolean).join(" ").slice(0, 300),
     count: ui.gen.quick ? 1 : 4,
     quick: ui.gen.quick,
     schoolNutFree: nutFreeOn(),
@@ -1241,8 +1279,9 @@ async function generate(form) {
   ui.aiNotice = "";
   ui.rejected = [];
   const fallback = (why) => {
-    ui.results = suggestFromLibrary(state.pantry, { forWhom: body.forWhom, mealType: body.mealType, limit: body.quick ? 1 : 6, schoolNutFree: body.schoolNutFree, maxMinutes: body.quick ? QUICK_MINUTES : 0, cuisines: cuisinePicks(), frozen: frozenOnHand(), appliances: appliancesOwned() });
-    ui.aiNotice = `${why} Showing recipes from the built-in family recipe book that best match your kitchen.`;
+    ui.results = suggestFromLibrary(state.pantry, { forWhom: body.forWhom, mealType: body.mealType, limit: body.quick ? 1 : 6, schoolNutFree: body.schoolNutFree, maxMinutes: body.quick ? QUICK_MINUTES : 0, cuisines: cuisinePicks(), frozen: frozenOnHand(), appliances: appliancesOwned(), busyMorning });
+    ui.aiNotice = ui.results.length ? `${why} Showing recipes from the built-in family recipe book that best match your kitchen.`
+      : `${why} The built-in family recipe book has nothing for ${body.forWhom === "family" ? "the whole family" : whoLabel(body.forWhom, state.settings)}${body.mealType ? ` at ${body.mealType}` : ""} yet. Try another meal, or add a recipe to the recipes/ folder.`;
   };
   if (!aiOnline()) {
     fallback(ui.ai === "unknown" ? "The recipe AI is still being checked." : "AI recipes are off. To turn them on, add a Claude API key in 👤 Profile.");

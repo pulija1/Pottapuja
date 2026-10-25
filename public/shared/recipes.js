@@ -7,6 +7,7 @@ import { normName } from "./shopping.js";
 import { checkForAudience } from "./safety.js";
 import { RECIPE_FILES, parseRecipeMarkdown, combineBooks } from "./recipe-book.js";
 import { usesAppliance, fastestMinutes } from "./appliances.js";
+import { recipeHasFruit } from "./kitchen.js";
 
 async function readBook(file) {
   if (typeof process !== "undefined" && process.versions?.node && typeof window === "undefined") {
@@ -127,6 +128,9 @@ export function readyToCook(pantry, { forWhom = "", maxMissing = 0, schoolNutFre
 const CUISINE_BOOST = 0.5;
 
 export const APPLIANCE_BOOST = 0.1;
+const FAMILY_BOOST = 0.3;
+const BUSY_BOOST = 2;
+const FRUIT_BOOST = 0.3;
 
 // Rank library recipes by how many of their ingredients are in the pantry.
 // With schoolNutFree, recipes that are not nut-free are left out of lunchbox and snack suggestions.
@@ -136,9 +140,17 @@ export const APPLIANCE_BOOST = 0.1;
 // for one of them, and quick mode counts the faster of the stove and appliance times.
 // cuisines (from Profile) lifts the family's cuisines well above the rest, so most picks come
 // from them, while a strong kitchen match from another cuisine can still show up.
-export function suggestFromLibrary(pantry, { forWhom = "both", mealType = "", limit = 6, schoolNutFree = false, maxMinutes = 0, cuisines = [], frozen = [], appliances = [] } = {}) {
+// busyMorning (a weekday) puts breakfasts made the night before or with no cooking well ahead.
+export function suggestFromLibrary(pantry, { forWhom = "both", mealType = "", limit = 6, schoolNutFree = false, maxMinutes = 0, cuisines = [], frozen = [], appliances = [], busyMorning = false } = {}) {
   const k = kitchen(pantry, frozen);
-  const wanted = forWhom === "both" ? ["baby", "kid", "family"] : [forWhom, "family"];
+  // The whole family eats the 4-year-old's food too (mild, nothing whole), so "family" includes the
+  // kid's recipes, after the family ones. The book's family recipes are mostly dinners, so without
+  // this a family breakfast, lunch or snack found nothing.
+  const wanted = forWhom === "both" ? ["baby", "kid", "family"] : forWhom === "family" ? ["family", "kid"] : [forWhom, "family"];
+  // Weekday breakfast: what was made the night before, or needs no cooking, comes first. The baby's
+  // breakfast leans toward one with a fruit in it.
+  const busy = (x) => busyMorning && x.mealType === "breakfast" && !!x.busyMorning;
+  const fruit = (x) => mealType === "breakfast" && x.forWhom === "baby" && recipeHasFruit(x);
   const minutes = (r) => fastestMinutes(r, appliances) || Infinity;
   const quick = (r) => minutes(r) <= maxMinutes;
   return LIBRARY.filter((x) => !x.leftover && wanted.includes(x.forWhom))
@@ -147,7 +159,8 @@ export function suggestFromLibrary(pantry, { forWhom = "both", mealType = "", li
     .map((x) => {
       const needed = neededNames(x);
       const hit = needed.filter((n) => k.fresh.has(n)).length + needed.filter((n) => k.cold.has(n)).length * FROZEN_WEIGHT;
-      const score = (needed.length ? hit / needed.length : 0) + (x.familyFavorite ? 0.15 : 0) + (cuisines.length && inCuisines(x, cuisines) ? CUISINE_BOOST : 0) + (usesAppliance(x, appliances) ? APPLIANCE_BOOST : 0);
+      const score = (needed.length ? hit / needed.length : 0) + (x.familyFavorite ? 0.15 : 0) + (cuisines.length && inCuisines(x, cuisines) ? CUISINE_BOOST : 0) + (usesAppliance(x, appliances) ? APPLIANCE_BOOST : 0)
+        + (forWhom === "family" && x.forWhom === "family" ? FAMILY_BOOST : 0) + (busy(x) ? BUSY_BOOST : 0) + (fruit(x) ? FRUIT_BOOST : 0);
       return { recipe: x, score, hit };
     })
     .sort((a, b) => b.score - a.score || b.hit - a.hit)
