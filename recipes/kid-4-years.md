@@ -1254,6 +1254,83 @@ How to read and edit this file: see [README.md](README.md).
 
 ---
 
+## School snack box: tiny and light
+
+The school snack box is very small, so on school days the snack suggestions come from the recipes marked **Snack box: tiny**: a few bites of finger food that keep 4 hours in a bag and need no spoon. When the school is nut-free, the nut butter ones are left out and the sunflower seed butter one takes their place.
+
+### Apple slices with sunflower seed butter
+
+- **For:** kid
+- **Meal:** snack
+- **Cuisine:** American
+- **Time:** 3 min
+- **Snack box:** tiny
+
+**Ingredients**
+
+- ½ apple, cored and thinly sliced
+- 2 tsp sunflower seed butter
+- 1 pinch cinnamon
+
+**Steps**
+
+1. Slice the apple thin and squeeze a little lemon over it so it stays white in the box.
+2. Spoon the sunflower seed butter into the smallest cup of the box, dust with cinnamon, and pack the slices next to it.
+
+**Notes:** Nut-free, so it is safe for a nut-free school. Pick a sunflower seed butter with no added sugar.
+
+### Cheese cubes and cucumber sticks
+
+- **For:** kid
+- **Meal:** snack
+- **Cuisine:** American
+- **Time:** 3 min
+- **Good for:** 🥛 Milk/dairy
+- **Snack box:** tiny
+
+**Ingredients**
+
+- 1 slice cheddar cheese, cut into small cubes
+- 4 slices cucumber, cut into sticks
+
+**Steps**
+
+1. Cut the cheese into small cubes and the cucumber into thin sticks.
+2. Pack them side by side in the snack box.
+
+**Notes:** Nut-free. Pat the cucumber dry so the cheese stays firm.
+
+### Ragi cookies (jaggery, no egg)
+
+- **For:** kid
+- **Meal:** snack
+- **Serves:** 8 (2 small cookies each)
+- **Cuisine:** South Indian
+- **Time:** 30 min
+- **Good for:** 🥛 Milk/dairy
+- **Snack box:** tiny
+- **Prep ahead:** weekend · 30 min · keeps 7 days in an airtight tin
+- **Oven:** 15 min at 170°C (340°F), as in the steps.
+- **Air fryer:** 8 min at 160°C, in batches on parchment.
+
+**Ingredients**
+
+- ½ cup ragi flour
+- ½ cup whole wheat flour
+- ¼ cup butter, soft
+- ¼ cup jaggery, powdered
+- 1 pinch cardamom powder
+- 2 tbsp milk
+
+**Steps**
+
+1. Beat the soft butter and powdered jaggery until creamy.
+2. Mix in ragi flour, wheat flour and cardamom, then add milk a spoon at a time to make a soft dough.
+3. Roll into small balls, press flat on a lined tray, and bake 15 minutes at 170°C until firm at the edges.
+4. Cool fully, then store in an airtight tin. Two small cookies fill the snack box.
+
+**Notes:** Nut-free and egg-free. Bake a batch at the weekend for the whole school week. Ragi is fine for the 4-year-old (the baby's Never use list is separate).
+
 ## Snacks: milk and nuts
 
 ### Kesar badam milk
@@ -1427,20 +1504,20 @@ How to read and edit this file: see [README.md](README.md).
 - **Meal:** snack
 - **Cuisine:** American
 - **Time:** 5 min
-- **Good for:** 🥛 Milk/dairy · 🥜 Nuts
-- **Nut-free swap:** Use sunflower seed butter.
+- **Good for:** 🥜 Nuts
+- **Nut-free swap:** Use sunflower seed butter (see Apple slices with sunflower seed butter).
+- **Snack box:** tiny
 
 **Ingredients**
 
-- 1 apple, cored and thinly sliced
-- 1 tbsp peanut butter
-- 2 tbsp yogurt
+- ½ apple, cored and thinly sliced
+- 2 tsp peanut butter
 - 1 pinch cinnamon
 
 **Steps**
 
-1. Stir peanut butter, yogurt and cinnamon into a smooth dip.
-2. Serve with thin apple slices. A squeeze of lemon keeps the slices from browning in the snack box.
+1. Slice the apple thin and squeeze a little lemon over it so it stays white in the box.
+2. Spoon the peanut butter into the smallest cup of the box, dust with cinnamon, and pack the slices next to it.
 
 ### Peanut butter banana smoothie
 
@@ -1473,6 +1550,7 @@ How to read and edit this file: see [README.md](README.md).
 - **Time:** 15 min
 - **Good for:** 🥜 Nuts
 - **Nut-free swap:** Use roasted sunflower and pumpkin seeds instead of nuts.
+- **Snack box:** tiny
 
 **Ingredients**
 
@@ -1500,6 +1578,7 @@ How to read and edit this file: see [README.md](README.md).
 - **Time:** 15 min
 - **Good for:** 🥜 Nuts
 - **Nut-free swap:** Use sunflower seed butter.
+- **Snack box:** tiny
 
 **Ingredients**
 
@@ -1647,6 +1726,7 @@ How to read and edit this file: see [README.md](README.md).
 - **Time:** 3 min
 - **Good for:** 🥛 Milk/dairy · 🥜 Nuts
 - **Nut-free swap:** Use raisins instead of nuts when school is nut-free.
+- **Snack box:** tiny
 - **Family favorite:** yes
 - **ID:** ds-cheese-nuts-snack
 

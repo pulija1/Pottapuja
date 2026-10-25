@@ -912,6 +912,8 @@ function suggestionsFor(key) {
       // Nothing that can't be ready that morning: no baking on a school day, and a weekend batch only while it keeps.
       .filter((r) => meal !== "breakfast" || fitsMorning(r, key, appliancesOwned()));
     if (busyMorning && candidates.some((r) => r.busyMorning)) candidates = candidates.filter((r) => r.busyMorning);
+    // The school snack box is tiny: on school days, only light finger food that fits it (apple and nut butter, cheese, a ragi cookie).
+    if (s.id === "kid_snack" && isSchoolDay(key) && candidates.some((r) => r.snackBox)) candidates = candidates.filter((r) => r.snackBox);
     let fresh = candidates.filter((r) => !used.has(r.id) && !avoid.has(r.id));
     // Steer the 4-year-old's empty slots toward the daily goal: an egg at breakfast, milk in the lunchbox, nuts in the snack.
     if (s.who === "kid") {

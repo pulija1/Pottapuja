@@ -148,6 +148,8 @@ export function parseRecipeMarkdown(md, file = "") {
     if (prep) recipe.prepAhead = prep;
     // Made the night before and warmed in the morning: how ("1½ min in the microwave, covered").
     if (r.fields.reheat) recipe.reheat = r.fields.reheat;
+    // Small and light enough for the 4-year-old's tiny school snack box: "Snack box: tiny".
+    if (/^(yes|tiny|small|y)/i.test(r.fields["snack box"] || "")) recipe.snackBox = true;
     // Dips served on the side, by their titles in the book.
     const dips = r.fields["side dip"] || r.fields["side dips"] || r.fields.dip;
     if (dips) recipe.sideDips = dips.split(/\s*(?:,|·|\bor\b)\s*/).map((x) => x.trim()).filter(Boolean);
@@ -265,6 +267,7 @@ export function recipeToMarkdown(r) {
   if (r.busyMorning) out.push(`- **Busy morning:** ${r.busyMorning.replace("-", " ")}`);
   if (r.prepAhead?.text) out.push(`- **Prep ahead:** ${r.prepAhead.text}`);
   if (r.reheat) out.push(`- **Reheat:** ${r.reheat}`);
+  if (r.snackBox) out.push(`- **Snack box:** tiny`);
   if (r.sideDips?.length) out.push(`- **Side dip:** ${r.sideDips.join(", ")}`);
   if (r.leftover?.length) out.push(`- **Leftover:** ${r.leftover.join(", ")}`);
   if (r.familyFavorite) out.push(`- **Family favorite:** yes`);

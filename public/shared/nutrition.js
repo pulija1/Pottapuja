@@ -46,6 +46,7 @@ const FOODS = [
   // Milks and creams that are not dairy, then nut butters, before milk and butter.
   F(/coconut milk/, [197, 2, 2.8, 0, 21, 1.6, 18], { cup: 240 }),
   F(/peanut butter/, [590, 25, 20, 6, 50, 1.9, 49], { cup: 256 }),
+  F(/sunflower seed butter/, [617, 17, 23, 5.7, 55, 4.1, 64], { cup: 256 }),
   F(/peanut powder|peanuts?\b/, [567, 26, 16, 8.5, 49, 4.6, 92], { cup: 100 }),
   F(/almond/, [579, 21, 22, 12.5, 50, 3.7, 269], { cup: 100 }),
   F(/cashew/, [553, 18, 30, 3.3, 44, 6.7, 37], { cup: 110 }),
