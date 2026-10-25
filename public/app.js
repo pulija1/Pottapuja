@@ -754,8 +754,8 @@ function renderCalendar() {
         </div>
         <button type="button" class="cal-view" data-action="cal-view" data-testid="cal-view" aria-expanded="${!week}">${week ? "Show the whole month" : "Show one week"}<span class="chev" aria-hidden="true"></span></button>
         <div class="week-plan" data-testid="week-plan">
-          <button type="button" class="btn sm" data-action="fill-week" data-testid="fill-week">📋 Fill the week from the kitchen</button>
-          <button type="button" class="btn sm primary" data-action="plan-chat" data-testid="plan-chat-open">💬 Plan the week with AI</button>
+          <button type="button" class="btn sm" data-action="fill-week" data-testid="fill-week"aria-label="Fill the week from the kitchen">📋 Fill from kitchen</button>
+          <button type="button" class="btn sm primary" data-action="plan-chat" data-testid="plan-chat-open"aria-label="Plan the week with AI">💬 Plan with AI</button>
         </div>
         <div class="legend">
           <span><i class="dot approved"></i>Approved</span>
@@ -1196,15 +1196,15 @@ function renderDayPanel(key) {
         <h2>${esc(fromKey(key).toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" }))}</h2>
         <div class="hero-stats">
           <span>🍽️ ${planned}/${slots.length} meals</span>
-          <span>✅ ${count(todosLeft, "to do", "to dos")}</span>
-          <span>⏰ ${count(remsLeft, "reminder")}</span>
+          ${todosLeft ? `<span>✅ ${count(todosLeft, "to do", "to dos")}</span>` : ""}
+          ${remsLeft ? `<span>⏰ ${count(remsLeft, "reminder")}</span>` : ""}
         </div>
       </div>
       <span class="hero-art n${pics.length || 1}" aria-hidden="true">${(pics.length ? pics : ["🍛"]).map((e) => `<span>${e}</span>`).join("")}</span>
     </div>
     ${banner}
     ${safetyBox}
-    ${pendList.length ? `<ul class="pending-list" data-testid="day-pending">${pendList.map((p) => `<li data-type="${p.type}">${{ approval: "⏳", plan: "📝", reminder: "⏰", todo: "✅" }[p.type]} ${esc(p.text)}${p.overdue ? ' <span class="pill bad">overdue</span>' : ""}</li>`).join("")}</ul>` : `<p class="small muted" data-testid="day-pending-none">Nothing pending for this date.</p>`}
+    ${pendList.length ? `<ul class="pending-list" data-testid="day-pending">${pendList.map((p) => `<li data-type="${p.type}">${{ approval: "⏳", plan: "📝", reminder: "⏰", todo: "✅" }[p.type]} ${esc(p.text)}${p.overdue ? ' <span class="pill bad">overdue</span>' : ""}</li>`).join("")}</ul>` : ""}
 
     <h3 class="day-h">🍽️ Meals</h3>
     ${renderKidGoals(key)}
@@ -1218,7 +1218,7 @@ function renderDayPanel(key) {
       const open = ui.openGroups.has(g.who) || hasIssue;
       return `<details class="meal-group ${g.who}" data-group="${g.who}" data-testid="meal-group-${g.who}" ${open ? "open" : ""}>
         <summary><span class="who-icon" aria-hidden="true">${g.icon}</span><span class="grow"><strong>${esc(whoLabel(g.who, state.settings, { age: true }))}</strong>
-          <span class="mini-art" aria-hidden="true">${done.map((s) => foodArt({ title: day.meals[s.id].title }).emoji).join("")}</span></span>
+          ${done.length ? `<span class="menu" data-testid="group-menu">${done.map((s) => `<span>${esc(day.meals[s.id].title)}</span>`).join("")}</span>` : ""}</span>
           <span class="small ${hasIssue ? "" : "muted"}" ${hasIssue ? 'style="color:var(--bad)"' : ""}>${hasIssue ? "⛔ check safety · " : ""}${done.length} of ${groupSlots.length} planned</span></summary>
         ${groupSlots.map((s) => slotRow(s, day, issues)).join("")}
       </details>`;
@@ -1677,18 +1677,22 @@ function renderShopping() {
         <h2>${ui.storeMode ? "At the store" : "Shopping list"} <span class="pill" data-testid="shop-left">${left} to buy</span></h2>
         <button class="btn ${ui.storeMode ? "primary" : ""}" data-action="store-mode" aria-pressed="${ui.storeMode}" data-testid="store-mode">${ui.storeMode ? "✓ Done shopping" : "🛒 I'm at the store"}</button>
       </div>
-      ${items.length ? `<div class="progress big" aria-hidden="true"><div style="width:${pct}%"></div></div>
+      ${items.length && (ui.storeMode || inCart.length) ? `<div class="progress big" aria-hidden="true"><div style="width:${pct}%"></div></div>
       <p class="small muted" style="margin:4px 0 0" data-testid="shop-progress">${inCart.length} of ${items.length} in the cart${ui.storeMode ? " · tap an item when it's in the cart" : ""}</p>` : ""}
+      ${ui.storeMode ? "" : `<form class="quick-add" data-form="shop-quick-add" data-testid="shop-quick-form">
+        <input type="text" name="name" placeholder="Add an item, e.g. milk" aria-label="Add an item" data-testid="shop-quick-add" autocomplete="off" enterkeyhint="done" required>
+        <button class="btn primary" aria-label="Add">Add</button>
+      </form>`}
       <div class="seg scroll-x" role="group" aria-label="Store filter" data-testid="store-filter">
         <button data-action="shop-store" data-store="all" aria-pressed="${ui.shopStore === "all"}">All stores</button>
         ${state.stores.map((s) => `<button data-action="shop-store" data-store="${esc(s)}" aria-pressed="${ui.shopStore === s}">${esc(s)}</button>`).join("")}
       </div>
     </div>
     <div data-testid="shop-list" class="${ui.storeMode ? "store-mode" : ""}">
-      ${groups.map(([aisle, list]) => `<section class="aisle card" data-testid="aisle">
+      ${groups.length ? `<div class="card aisles">${groups.map(([aisle, list]) => `<section class="aisle" data-testid="aisle">
         <h3><span class="aisle-icon" aria-hidden="true">${AISLE_ICONS[aisle] || "🛍️"}</span>${esc(aisle)}<span class="aisle-count">${list.length}</span></h3>
         ${list.map(shopRow).join("")}
-      </section>`).join("")}
+      </section>`).join("")}</div>` : ""}
       ${!toBuy.length ? `<div class="card empty-state" data-testid="shop-empty">${items.length ? `🎉 Everything is in the cart.${ui.storeMode ? '<button class="btn primary big" style="display:flex;width:100%;margin-top:12px" data-action="store-mode" data-testid="store-done">✓ Done shopping</button>' : ""}` : "The list is empty. Tap <strong>+ Add item</strong>, or pull items from your meal plan."}</div>` : ""}
       ${inCart.length ? `<details class="card cart" data-testid="shop-cart" data-cart ${ui.cartOpen ? "open" : ""}>
         <summary><span class="aisle-icon" aria-hidden="true">🛒</span>In the cart <span class="aisle-count">${inCart.length}</span></summary>
@@ -1706,7 +1710,7 @@ function renderShopping() {
         <div class="chips" style="margin-top:8px">${state.stores.map((s) => `<span class="chip">${esc(s)}<button data-action="store-del" data-store="${esc(s)}" aria-label="Remove ${esc(s)}">✕</button></span>`).join("")}</div>
         <form data-form="store-add" class="row" style="margin-top:8px"><input type="text" name="store" class="grow" placeholder="Add a store" required><button class="btn sm">Add</button></form>
       </details>` })}
-    <button class="fab" data-action="shop-fab" data-testid="shop-fab" aria-label="Add item"><span aria-hidden="true">＋</span> Add item</button>`;
+    <button class="fab" data-action="shop-fab" data-testid="shop-fab" aria-label="Add item with amount and store"><span aria-hidden="true">＋</span> Add item</button>`;
 }
 
 function shopAddSheet() {
@@ -2322,6 +2326,16 @@ document.addEventListener("submit", (e) => {
     }
     case "generate": generate(f); break;
     case "plan-chat": { const t = f.text.value; f.text.value = ""; sendChat(t); break; }
+    case "shop-quick-add": {
+      // The bar on top of the list: type a name, press Enter, done. Quantity and store live in the ⋯ sheet.
+      const name = f.name.value.trim();
+      if (!name) return;
+      addToShopping([{ name, quantity: null, unit: "", store: ui.shopStore === "all" ? "" : ui.shopStore }], "manual");
+      commit();
+      toast(`Added ${name}`);
+      $("[data-testid=shop-quick-add]")?.focus();
+      break;
+    }
     case "shop-add": {
       const name = f.name.value.trim();
       if (!name) return;
