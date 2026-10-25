@@ -394,6 +394,7 @@ How to read and edit this file: see [README.md](README.md).
 
 - **For:** kid
 - **Meal:** lunchbox
+- **Serves:** 3 (2 mini muffins each)
 - **Cuisine:** American
 - **Time:** 25 min
 - **Good for:** 🥚 Egg · 🥛 Milk/dairy
@@ -520,6 +521,7 @@ How to read and edit this file: see [README.md](README.md).
 
 - **For:** kid
 - **Meal:** lunchbox
+- **Serves:** 2
 - **Cuisine:** Indo-Chinese
 - **Time:** 20 min
 - **Good for:** 🥚 Egg
@@ -572,6 +574,7 @@ How to read and edit this file: see [README.md](README.md).
 
 - **For:** kid
 - **Meal:** lunchbox
+- **Serves:** 2
 - **Cuisine:** South Indian
 - **Time:** 20 min
 
@@ -598,6 +601,7 @@ How to read and edit this file: see [README.md](README.md).
 
 - **For:** kid
 - **Meal:** lunchbox
+- **Serves:** 2
 - **Cuisine:** South Indian
 - **Time:** 20 min
 - **ID:** lib-mini-idli-podi
@@ -617,6 +621,7 @@ How to read and edit this file: see [README.md](README.md).
 
 - **For:** kid
 - **Meal:** lunchbox
+- **Serves:** 2
 - **Cuisine:** South Indian
 - **Time:** 15 min
 - **Family favorite:** yes
@@ -642,6 +647,7 @@ How to read and edit this file: see [README.md](README.md).
 
 - **For:** kid
 - **Meal:** lunchbox
+- **Serves:** 2
 - **Cuisine:** South Indian
 - **Time:** 10 min
 - **Good for:** 🥛 Milk/dairy
@@ -664,6 +670,7 @@ How to read and edit this file: see [README.md](README.md).
 
 - **For:** kid
 - **Meal:** lunchbox
+- **Serves:** 2
 - **Cuisine:** South Indian
 - **Time:** 25 min
 - **ID:** lib-tomato-rice
@@ -686,6 +693,7 @@ How to read and edit this file: see [README.md](README.md).
 
 - **For:** kid
 - **Meal:** lunchbox
+- **Serves:** 2
 - **Cuisine:** South Indian
 - **Time:** 25 min
 - **ID:** lib-chapati-potato-roll
@@ -709,6 +717,7 @@ How to read and edit this file: see [README.md](README.md).
 
 - **For:** kid
 - **Meal:** lunchbox
+- **Serves:** 2
 - **Cuisine:** South Indian
 - **Time:** 15 min
 - **Good for:** 🥛 Milk/dairy
@@ -734,6 +743,7 @@ How to read and edit this file: see [README.md](README.md).
 
 - **For:** kid
 - **Meal:** lunchbox
+- **Serves:** 2
 - **Cuisine:** North Indian
 - **Time:** 30 min
 - **Good for:** 🥛 Milk/dairy
@@ -761,6 +771,7 @@ How to read and edit this file: see [README.md](README.md).
 
 - **For:** kid
 - **Meal:** lunchbox
+- **Serves:** 2
 - **Cuisine:** Indian (Maharashtrian)
 - **Time:** 15 min
 - **ID:** ds-poha
@@ -791,6 +802,7 @@ How to read and edit this file: see [README.md](README.md).
 
 - **For:** kid
 - **Meal:** lunchbox
+- **Serves:** 2
 - **Cuisine:** North Indian
 - **Time:** 25 min
 - **ID:** ds-vegetable-pulao
@@ -947,6 +959,7 @@ How to read and edit this file: see [README.md](README.md).
 
 - **For:** kid
 - **Meal:** lunchbox
+- **Serves:** 2
 - **Cuisine:** Mexican American
 - **Time:** 25 min
 - **Good for:** 🥛 Milk/dairy
@@ -1057,6 +1070,7 @@ How to read and edit this file: see [README.md](README.md).
 
 - **For:** kid
 - **Meal:** lunchbox
+- **Serves:** 2
 - **Cuisine:** Italian
 - **Time:** 20 min
 - **Good for:** 🥛 Milk/dairy · 🥜 Nuts
@@ -1178,6 +1192,7 @@ How to read and edit this file: see [README.md](README.md).
 
 - **For:** kid
 - **Meal:** lunchbox
+- **Serves:** 2
 - **Cuisine:** American
 - **Time:** 20 min
 - **Good for:** 🥚 Egg · 🥛 Milk/dairy
@@ -1442,6 +1457,7 @@ How to read and edit this file: see [README.md](README.md).
 
 - **For:** kid
 - **Meal:** snack
+- **Serves:** 5 (2 small ladoos each)
 - **Cuisine:** North Indian
 - **Time:** 15 min
 - **Good for:** 🥜 Nuts
@@ -1468,6 +1484,7 @@ How to read and edit this file: see [README.md](README.md).
 
 - **For:** kid
 - **Meal:** snack
+- **Serves:** 6 (2 bites each)
 - **Cuisine:** American
 - **Time:** 15 min
 - **Good for:** 🥜 Nuts
@@ -1492,6 +1509,7 @@ How to read and edit this file: see [README.md](README.md).
 
 - **For:** kid
 - **Meal:** snack
+- **Serves:** 6 (1 muffin each)
 - **Cuisine:** American
 - **Time:** 35 min
 - **Good for:** 🥚 Egg · 🥛 Milk/dairy · 🥜 Nuts
@@ -1633,6 +1651,7 @@ How to read and edit this file: see [README.md](README.md).
 
 - **For:** kid
 - **Meal:** snack
+- **Serves:** 2
 - **Cuisine:** Indian American
 - **Time:** 15 min
 - **Good for:** 🥛 Milk/dairy
@@ -1775,6 +1794,7 @@ How to read and edit this file: see [README.md](README.md).
 
 - **For:** kid
 - **Meal:** breakfast
+- **Serves:** 2
 - **Cuisine:** South Indian
 - **Time:** 25 min
 
