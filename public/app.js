@@ -1308,9 +1308,9 @@ function renderDayPanel(key) {
       const hasIssue = groupSlots.some((s) => issues[s.id]);
       const open = ui.openGroups.has(g.who) || hasIssue;
       return `<details class="meal-group ${g.who}" data-group="${g.who}" data-testid="meal-group-${g.who}" ${open ? "open" : ""}>
-        <summary><span class="who-icon" aria-hidden="true">${g.icon}</span><span class="grow"><strong>${esc(whoLabel(g.who, state.settings, { age: true }))}</strong>
-          ${done.length ? `<span class="menu" data-testid="group-menu">${done.map((s) => `<span>${esc(day.meals[s.id].title)}</span>`).join("")}</span>` : ""}</span>
-          <span class="small ${hasIssue ? "" : "muted"}" ${hasIssue ? 'style="color:var(--bad)"' : ""}>${hasIssue ? "⛔ check safety · " : ""}${done.length} of ${groupSlots.length} planned</span></summary>
+        <summary><span class="who-icon" aria-hidden="true">${g.icon}</span><span class="grow"><span class="group-head"><strong>${esc(whoLabel(g.who, state.settings, { age: true }))}</strong>
+          <span class="small ${hasIssue ? "" : "muted"}" ${hasIssue ? 'style="color:var(--bad)"' : ""}>${hasIssue ? "⛔ check safety · " : ""}${done.length} of ${groupSlots.length} planned</span></span>
+          ${done.length ? `<span class="menu" data-testid="group-menu">${done.map((s) => `<span>${esc(day.meals[s.id].title)}</span>`).join("")}</span>` : ""}</span></summary>
         ${groupSlots.map((s) => slotRow(s, day, issues)).join("")}
       </details>`;
     }).join("")}
