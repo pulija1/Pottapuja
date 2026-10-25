@@ -6,6 +6,7 @@ import { todayKey, addDays, addMonths, monthGrid, monthLabel, prettyDate, fromKe
 import { checkRecipe, checkForAudience, isNutIngredient, isSchoolFood } from "./shared/safety.js";
 import { LIBRARY, suggestFromLibrary, readyToCook, RECIPE_BOOK_STATUS } from "./shared/recipes.js";
 import { nutritionTags, TAG_LABELS } from "./shared/recipe-book.js";
+import { NUTRIENTS, DAILY_NEEDS, estimateNutrition, dailyShare } from "./shared/nutrition.js";
 import { mergeItems, groupByAisle, formatQty, missingFromPantry, normName, normUnit, aisleFor } from "./shared/shopping.js";
 import { SLOTS, emptyDay, getDay, dayHasPlan, markEdited, approveDay, unapproveDay, slotsFor, todosOn, MEAL_GROUPS, whoLabel, slotLabel, remindersOn, pendingFor, dayStatus } from "./shared/plan.js";
 
@@ -994,6 +995,28 @@ function renderReadyToCook() {
   </div>`;
 }
 
+// Estimated nutrition for one serving, worked out from the ingredients. For the baby's and the
+// 4-year-old's recipes it also shows how much of that child's day one serving covers.
+const fmtNutrient = (n, x) => `${x}${n.unit === "kcal" ? " kcal" : " " + n.unit}`;
+function nutritionPanel(r) {
+  if (!r.ingredients?.length) return "";
+  const { servings, perServing, missing, counted } = estimateNutrition(r);
+  // Too little of the recipe is known (an AI recipe with unusual ingredients) to be worth showing.
+  if (!perServing.kcal || missing.length > counted) return "";
+  const need = DAILY_NEEDS[r.forWhom];
+  const share = dailyShare(perServing, r.forWhom);
+  const named = String((r.forWhom === "baby" ? state.settings?.babyName : state.settings?.kidName) || "").trim();
+  const childName = named || `the ${need?.label}`;
+  const pick = (k) => NUTRIENTS.find((n) => n.key === k);
+  const headline = `${fmtNutrient(pick("kcal"), perServing.kcal)} · ${fmtNutrient(pick("protein"), perServing.protein)} protein · ${fmtNutrient(pick("iron"), perServing.iron)} iron`;
+  const rows = NUTRIENTS.map((n) => `<tr><th scope="row">${esc(n.label)}</th><td>${esc(fmtNutrient(n, perServing[n.key]))}</td>${need ? `<td>${share[n.key] != null ? esc(share[n.key]) + "%" : ""}</td>` : ""}</tr>`).join("");
+  const serving = servings > 1 ? `one of ${servings} servings${r.servingNote ? ` (${esc(r.servingNote)})` : ""}` : "one serving";
+  return `<details class="nutrition" data-testid="recipe-nutrition"><summary>Nutrition <span class="muted" data-testid="nutrition-headline">≈ ${esc(headline)}</span></summary>
+    <table class="nutrition-table"><thead><tr><th scope="col">Per serving</th><th scope="col">About</th>${need ? `<th scope="col">Of ${esc(childName)}'s day</th>` : ""}</tr></thead><tbody>${rows}</tbody></table>
+    <p class="small muted">Estimated from the ingredients for ${serving}, not measured.${r.forWhom === "baby" ? " Breast milk or formula still gives the baby most of the day's needs." : ""}${missing.length ? ` Not counted: ${esc(missing.join(", "))}.` : ""}</p>
+  </details>`;
+}
+
 function recipeCard(r, { saved = false } = {}) {
   const safety = checkForAudience(r, { schoolNutFree: nutFreeOn() });
   const missing = new Set(shoppingNeeds(r).map((i) => normName(i.name)));
@@ -1009,6 +1032,7 @@ function recipeCard(r, { saved = false } = {}) {
       ${safety.safe ? (safety.warnings.length ? "⚠️ Safe with care" : "✅ Age-safe") : "⛔ Not safe as written"}
       ${issues.length ? `<ul>${issues.map((i) => `<li>${esc(i.message)}</li>`).join("")}</ul>` : ""}
     </div>
+    ${nutritionPanel(r)}
     <details><summary>Ingredients (${r.ingredients.length})${missing.size ? ` · ${missing.size} to buy` : ""}</summary>
       <ul>${r.ingredients.map((i) => `<li class="${missing.has(normName(i.name)) ? "missing" : ""}">${esc(i.name)} ${i.quantity != null ? `<span class="muted">${esc(i.quantity)} ${esc(i.unit || "")}</span>` : ""}${missing.has(normName(i.name)) ? " (need)" : ""}</li>`).join("")}</ul>
     </details>

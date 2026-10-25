@@ -786,6 +786,26 @@ test("E2E BOOK-12 the Recipes tab lists recipe-book recipes that the kitchen can
   await ctx.close();
 });
 
+test("E2E NUTR-01 a recipe shows estimated protein, carbs, fiber and iron per serving, and the child's share of the day", async () => {
+  const { page, ctx, errors } = await open();
+  await tid(page, "tab-recipes").click();
+  await tid(page, "pantry-input").fill("eggs, whole wheat bread, milk, almond powder, banana, butter");
+  await tid(page, "pantry-add").click();
+  await tid(page, "ready-to-cook").getByText("French toast sticks", { exact: false }).click();
+  const dialog = page.locator("dialog[open]");
+  await dialog.waitFor();
+  const panel = dialog.getByTestId("recipe-nutrition");
+  assert.match(await panel.getByTestId("nutrition-headline").innerText(), /kcal · [\d.]+ g protein · [\d.]+ mg iron/);
+  await panel.locator("summary").click();
+  const text = await panel.innerText();
+  for (const label of ["Protein", "Carbs", "Fiber", "Fat", "Iron", "Calcium"]) assert.match(text, new RegExp(label));
+  assert.match(text, /4-year-old.*day/);
+  assert.match(text, /\d+%/);
+  assert.match(text, /Estimated from the ingredients/);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
 test("E2E DATA-10 a change made in another tab shows up here instead of being overwritten later", async () => {
   const a = await open();
   const other = await a.ctx.newPage();

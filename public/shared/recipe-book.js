@@ -125,6 +125,12 @@ export function parseRecipeMarkdown(md, file = "") {
       source: "library",
     };
     if (/^(yes|true|y|⭐)/i.test(r.fields["family favorite"] || r.fields["family favourite"] || "")) recipe.familyFavorite = true;
+    const serves = String(r.fields.serves || r.fields.servings || r.fields.makes || "").match(/^(\d+(?:\.\d+)?)\s*(.*)$/);
+    if (serves && Number(serves[1]) > 0) {
+      recipe.servings = Number(serves[1]);
+      const each = serves[2].replace(/^\((.*)\)$/, "$1").replace(/^servings?\b\s*/i, "").trim();
+      if (each) recipe.servingNote = each;
+    }
     if (r.fields["nut-free swap"]) recipe.nutFreeSwap = r.fields["nut-free swap"];
     const declared = String(r.fields["good for"] || "").toLowerCase();
     const tags = new Set(nutritionTags(recipe));
@@ -218,6 +224,7 @@ export function recipeToMarkdown(r) {
   out.push(`- **For:** ${who}`, `- **Meal:** ${r.mealType}`);
   if (r.cuisine) out.push(`- **Cuisine:** ${r.cuisine}`);
   if (r.prepMinutes) out.push(`- **Time:** ${r.prepMinutes} min`);
+  if (r.servings) out.push(`- **Serves:** ${r.servings}${r.servingNote ? ` (${r.servingNote})` : ""}`);
   if (r.texture) out.push(`- **Texture:** ${r.texture}`);
   if (tags.length) out.push(`- **Good for:** ${tags.map((t) => TAG_LABELS[t]).join(" · ")}`);
   if (r.nutFreeSwap) out.push(`- **Nut-free swap:** ${r.nutFreeSwap}`);

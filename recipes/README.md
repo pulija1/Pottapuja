@@ -34,6 +34,10 @@ Swap any recipe for another one from the same section. Search the file for 🥚,
 - **Shopping:** a planned recipe's missing ingredients go to the shopping list with their quantities.
 - **AI recipes** (when the server has an API key) are extra. The book works without the AI, including on GitHub Pages where there is no server.
 
+## Nutrition
+
+Each recipe in the app shows calories, protein, carbs, fiber, fat, iron and calcium for one serving, and for the baby's and the 4-year-old's recipes, how much of that child's day one serving covers. The numbers are worked out from the ingredient list (amounts and food values from USDA FoodData Central and the Indian Food Composition Tables, rounded), so they are estimates, not lab values. A recipe added here gets its numbers without any extra work; add a **Serves** line when it makes more than one portion. Rice, pasta and dal are counted dry unless the ingredient says `cooked`; beans are counted cooked unless it says `soaked` or `dry`. New foods the app doesn't know yet go in `public/shared/nutrition.js`.
+
 ## Adding or changing a recipe
 
 Copy an existing recipe and change it. The format:
@@ -64,7 +68,7 @@ Copy an existing recipe and change it. The format:
 
 - `###` starts a recipe; the title is the recipe's name. `##` headings only group recipes and can be anything.
 - **For** is `baby`, `kid` or `family`. **Meal** is `breakfast`, `lunchbox`, `lunch`, `snack` or `dinner`. Both are required.
-- Optional lines: **Cuisine**, **Time**, **Texture** (baby: `puree`, `mashed`, `porridge`, `soft finger food`), **Nut-free swap** (what to do if the school goes nut-free), **Family favorite:** yes, and **ID** (only for older recipes, so plans that already use them keep working).
+- Optional lines: **Cuisine**, **Time**, **Serves** (how many portions it makes, for the nutrition numbers; `Serves: 6 (1 muffin each)`. Without it, a baby or kid recipe is one portion and a family recipe is four), **Texture** (baby: `puree`, `mashed`, `porridge`, `soft finger food`), **Nut-free swap** (what to do if the school goes nut-free), **Family favorite:** yes, and **ID** (only for older recipes, so plans that already use them keep working).
 - **Good for** is for people reading the file. The app works out egg, milk/dairy and nuts from the ingredients by itself.
 - Each ingredient is one line: amount, unit, name, then a comma and any note. `1½ cups rice, washed`, `2 tbsp almond powder`, `6 curry leaves`, `Salt, to taste`. Units the app understands: g, kg, ml, l, tsp, tbsp, cup, pinch, slice, clove, sprig, handful, inch, bunch, can, packet, dozen. Keep the name the way you'd write it on a shopping list (`paneer`, `cheddar cheese`, `black beans`) so it matches the kitchen list.
 - Steps are a numbered list.
