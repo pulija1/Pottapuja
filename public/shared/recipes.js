@@ -146,7 +146,8 @@ export function suggestFromLibrary(pantry, { forWhom = "both", mealType = "", li
       return { recipe: x, score, hit };
     })
     .sort((a, b) => b.score - a.score || b.hit - a.hit)
-    .sort((a, b) => !maxMinutes ? 0 : quick(b.recipe) - quick(a.recipe) || (quick(a.recipe) ? 0 : minutes(a.recipe) - minutes(b.recipe)))
+    // Quick mode: a recipe that uses something from the kitchen beats one that doesn't, however fast.
+    .sort((a, b) => !maxMinutes ? 0 : (b.hit > 0) - (a.hit > 0) || quick(b.recipe) - quick(a.recipe) || (quick(a.recipe) ? 0 : minutes(a.recipe) - minutes(b.recipe)))
     .slice(0, limit)
     .map((s) => s.recipe);
 }
@@ -208,4 +209,35 @@ export function leftoverRecipesFor(kind, { cuisines = [] } = {}) {
   const curry = /curry$/.test(kind);
   const fits = LIBRARY.filter((r) => r.leftover && (r.leftover.includes(kind) || (curry && r.leftover.includes("any curry"))));
   return fits.sort((a, b) => (cuisines.length ? inCuisines(b, cuisines) - inCuisines(a, cuisines) : 0));
+}
+
+// Fry or curry. The recipe's **Dish:** line wins; otherwise the title tells (vepudu, fry, kura, pulusu, pappu, ...).
+export function dishType(recipe) {
+  const d = String(recipe?.dish || "").toLowerCase();
+  if (d === "fry" || d === "curry") return d;
+  const t = String(recipe?.title || "").toLowerCase();
+  if (/\b(vepudu|fry|podi kura|stir-fry|poriyal|palya|thoran)\b/.test(t)) return "fry";
+  if (/\b(kura|curry|pulusu|pappu|dal|charu|rasam|sambar|stew|kootu|gravy|masala)\b/.test(t)) return "curry";
+  return "";
+}
+
+// Cook by vegetable: the family fries and curries in the book that use the picked vegetables.
+// Recipes with every picked vegetable come first, then the ones with most of them; within that,
+// those ready in maxMinutes (if set) and then the fastest. With onlyQuick, slower ones are left out.
+export function cookByVegetables(vegetables, { maxMinutes = 0, onlyQuick = false } = {}) {
+  const picked = [...new Set((vegetables || []).map((v) => normName(v)).filter(Boolean))];
+  const out = { fry: [], curry: [] };
+  if (!picked.length) return out;
+  const minutes = (r) => r.prepMinutes || Infinity;
+  const matches = LIBRARY.filter((r) => r.forWhom === "family")
+    .map((recipe) => {
+      const names = new Set(recipe.ingredients.map((i) => normName(i.name)));
+      const has = picked.filter((v) => names.has(v));
+      return { recipe, dish: dishType(recipe), has, all: has.length === picked.length, quick: maxMinutes > 0 && minutes(recipe) <= maxMinutes };
+    })
+    .filter((x) => x.has.length && x.dish)
+    .filter((x) => !onlyQuick || !maxMinutes || x.quick)
+    .sort((a, b) => b.has.length - a.has.length || (b.quick ? 1 : 0) - (a.quick ? 1 : 0) || minutes(a.recipe) - minutes(b.recipe));
+  for (const x of matches) out[x.dish].push(x);
+  return out;
 }

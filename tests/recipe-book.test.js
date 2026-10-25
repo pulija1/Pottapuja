@@ -3,7 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { parseIngredient, parseRecipeMarkdown, combineBooks, nutritionTags, recipeToMarkdown, RECIPE_FILES } from "../public/shared/recipe-book.js";
-import { LIBRARY, RECIPE_BOOK_STATUS, readyToCook, missingForRecipe, suggestFromLibrary, cuisinesOf, inCuisines, topPicks, leftoverKind, leftoverRecipesFor, freezerSet } from "../public/shared/recipes.js";
+import { LIBRARY, RECIPE_BOOK_STATUS, readyToCook, missingForRecipe, suggestFromLibrary, cookByVegetables, dishType, cuisinesOf, inCuisines, topPicks, leftoverKind, leftoverRecipesFor, freezerSet } from "../public/shared/recipes.js";
 import { aisleFor, missingFromPantry } from "../public/shared/shopping.js";
 import { checkForAudience, checkRecipe, isSchoolFood } from "../public/shared/safety.js";
 import { normName } from "../public/shared/shopping.js";
@@ -196,7 +196,7 @@ test("BOOK-13 top picks: easy recipes that use the kitchen's vegetables, from th
   for (let i = 1; i < top.length; i++) assert.ok(top[i - 1].score >= top[i].score);
   assert.ok(!top.some((x) => x.recipe.leftover));
   // Nothing in the picked cuisines fits: the other cuisines are used rather than showing nothing.
-  const other = topPicks(["sushi rice", "nori", "cucumber"], { cuisines: ["telugu"], maxMissing: 6 });
+  const other = topPicks(["firm tofu", "soy sauce", "sesame oil"], { cuisines: ["telugu"], maxMissing: 6 });
   assert.ok(other.length > 0 && other.some((x) => !inCuisines(x.recipe, ["telugu"])));
   assert.deepEqual(topPicks([], { cuisines: ["telugu"] }), []);
 });
@@ -241,4 +241,47 @@ test("BOOK-15 the freezer counts as in the kitchen, after fresh vegetables", () 
   // The same peas fresh rank at least as high as frozen ones.
   const fresh = topPicks([...pantry, "peas"], { isVegetable: isVeg, limit: 200, maxMissing: 3 }).find((x) => x.recipe.id === peas.recipe.id);
   assert.ok(fresh.score >= peas.score);
+});
+
+test("COOK-01 a time-short cook picks one Telugu vegetable and gets a quick fry and a quick curry", () => {
+  const both = ["vankaya", "bendakaya", "sorakaya", "beerakaya", "dondakaya", "potlakaya", "kakarakaya", "munagakaya", "aratikaya",
+    "chamadumpa", "gummadikaya", "bangaladumpa", "chilagada dumpa", "chikkudukaya", "goruchikkudu", "mullangi", "kandagadda",
+    "cabbage", "cauliflower", "capsicum", "pachi batani", "palakura", "thotakura"];
+  const curryOnly = ["gongura", "menthikura", "mamidikaya", "dosakaya", "tamata"];
+  for (const veg of [...both, ...curryOnly]) {
+    const { fry, curry } = cookByVegetables([veg], { maxMinutes: 20, onlyQuick: true });
+    assert.ok(curry.length, veg + ": no quick curry");
+    if (both.includes(veg)) assert.ok(fry.length, veg + ": no quick fry");
+    for (const x of [...fry, ...curry]) assert.ok(x.recipe.prepMinutes <= 20, x.recipe.title);
+  }
+  // Every way of writing lady's finger finds the okra recipes.
+  for (const name of ["Ladies finger", "lady's finger", "lady finger", "bhindi", "Bendakaya (okra)", "okra"]) {
+    assert.equal(normName(name), "okra", name);
+    assert.ok(cookByVegetables([name]).fry.some((x) => /bendakaya/i.test(x.recipe.title)), name);
+  }
+  assert.equal(normName("brinjals"), "brinjal");
+  assert.equal(normName("ridge gourds"), "ridge gourd");
+  assert.equal(normName("radishes"), "radish");
+});
+
+test("COOK-02 picking several vegetables puts the recipes that use all of them first", () => {
+  for (const [vegs, dish] of [[["bendakaya", "bangaladumpa"], "fry"], [["vankaya", "bangaladumpa"], "curry"], [["vankaya", "bangaladumpa"], "fry"],
+    [["cauliflower", "pachi batani"], "curry"], [["cabbage", "pachi batani"], "fry"], [["capsicum", "bangaladumpa"], "fry"], [["bangaladumpa", "pachi batani"], "curry"]]) {
+    const list = cookByVegetables(vegs, { maxMinutes: 20 })[dish];
+    assert.ok(list.length && list[0].all, vegs.join("+") + " " + dish + ": " + list[0]?.recipe.title);
+    const firstPartial = list.findIndex((x) => !x.all);
+    assert.ok(firstPartial === -1 || list.slice(firstPartial).every((x) => !x.all), "all-match recipes come first");
+  }
+  // A vegetable with no fry still shows the curries, and recipes with only one of the picks are listed after.
+  const mixed = cookByVegetables(["gongura", "bendakaya"]);
+  assert.ok(mixed.curry.some((x) => /gongura/i.test(x.recipe.title)) && mixed.fry.some((x) => /bendakaya/i.test(x.recipe.title)));
+  assert.deepEqual(cookByVegetables([]), { fry: [], curry: [] });
+});
+
+test("COOK-03 every Telugu recipe is a fry or a curry, and quick ones fit in 20 minutes", () => {
+  const telugu = LIBRARY.filter((r) => r.file === "telugu-curries.md");
+  for (const r of telugu) assert.ok(["fry", "curry"].includes(dishType(r)), r.title + ": " + dishType(r));
+  const quick = telugu.filter((r) => /^Quick/.test(r.section));
+  assert.ok(quick.length >= 40, "quick recipes: " + quick.length);
+  for (const r of quick) assert.ok(r.prepMinutes <= 20 && r.dish, r.title);
 });
