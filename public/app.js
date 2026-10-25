@@ -902,10 +902,22 @@ function renderDayPanel(key) {
 // ---------- recipes ----------
 const STAPLES = ["rice", "moong dal", "toor dal", "urad dal", "ragi flour", "rava", "curd", "ghee", "milk", "egg", "banana", "apple", "carrot", "potato", "sweet potato", "tomato", "onion", "beans", "peas", "pumpkin", "spinach", "lemon", "idli/dosa batter", "vermicelli", "atta", "coconut", "curry leaves", "mustard seeds", "jeera", "turmeric", "tamarind",
   "paneer", "cheddar cheese", "butter", "bread", "flour tortilla", "corn tortilla", "black beans", "avocado", "rolled oats", "peanut butter", "almond powder"];
+// Telugu names first, as the family says them; normName maps each to the English name the recipes use.
+const TELUGU_VEG = ["Vankaya (brinjal)", "Bendakaya (okra)", "Sorakaya (bottle gourd)", "Beerakaya (ridge gourd)", "Dondakaya (ivy gourd)",
+  "Potlakaya (snake gourd)", "Kakarakaya (bitter gourd)", "Munagakaya (drumstick)", "Aratikaya (raw banana)", "Chamadumpa (taro root)",
+  "Gummadikaya (pumpkin)", "Dosakaya (cucumber)", "Bangaladumpa (potato)", "Chilagada dumpa (sweet potato)", "Chikkudukaya (broad beans)",
+  "Goruchikkudu (cluster beans)", "Mamidikaya (raw mango)", "Mullangi (radish)", "Kandagadda (yam)", "Tamata (tomato)", "Ullipaya (onion)",
+  "Pachi mirapakaya (green chilli)", "Allam (ginger)", "Vellulli (garlic)", "Cabbage", "Cauliflower", "Capsicum", "Pachi batani (peas)"];
+const TELUGU_LEAVES = ["Palakura (spinach)", "Thotakura (amaranth leaves)", "Gongura (sorrel leaves)", "Menthikura (methi leaves)",
+  "Kothimeera (coriander leaves)", "Pudina (mint leaves)", "Karivepaku (curry leaves)"];
+
+function quickAddGroup(label, items, have, testid) {
+  const left = items.filter((s) => !have.has(normName(s)));
+  return left.length ? `<details style="margin-top:8px" data-testid="${testid}" data-group="${testid}" ${ui.openGroups.has(testid) ? "open" : ""}><summary>${esc(label)}</summary><div class="chips" style="margin-top:8px">${left.map((s) => `<button class="chip add" data-action="pantry-quick" data-name="${esc(s)}">+ ${esc(s)}</button>`).join("")}</div></details>` : "";
+}
 
 function renderRecipes() {
   const pantrySet = new Set(state.pantry.map(normName));
-  const suggestions = STAPLES.filter((s) => !pantrySet.has(normName(s)));
   const filt = ui.savedFilter.trim().toLowerCase();
   const saved = state.savedRecipes.filter((r) => !filt || r.title.toLowerCase().includes(filt));
 
@@ -919,7 +931,9 @@ function renderRecipes() {
         <input type="text" name="items" class="grow" placeholder="Add items, comma separated (e.g. drumstick, paneer)" aria-label="Add pantry items" data-testid="pantry-input">
         <button class="btn primary" data-testid="pantry-add">Add</button>
       </form>
-      ${suggestions.length ? `<details style="margin-top:8px"><summary>Quick add common items</summary><div class="chips" style="margin-top:8px">${suggestions.map((s) => `<button class="chip add" data-action="pantry-quick" data-name="${esc(s)}">+ ${esc(s)}</button>`).join("")}</div></details>` : ""}
+      ${quickAddGroup("Quick add common items", STAPLES, pantrySet, "quick-common")}
+      ${quickAddGroup("Kuragayalu (Telugu vegetables)", TELUGU_VEG, pantrySet, "quick-telugu-veg")}
+      ${quickAddGroup("Aakukuralu (leafy greens)", TELUGU_LEAVES, pantrySet, "quick-telugu-leaves")}
     </div>
 
     ${renderReadyToCook()}

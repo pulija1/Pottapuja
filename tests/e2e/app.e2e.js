@@ -180,6 +180,21 @@ test("E2E QUICK-03 the Quick option asks for one recipe and shows just one", asy
   await ctx.close();
 });
 
+test("E2E TEL-01 Telugu vegetables can be added to the kitchen by their Telugu names", async () => {
+  const { page, ctx, errors } = await open();
+  await tid(page, "tab-recipes").click();
+  const group = tid(page, "quick-telugu-veg");
+  await group.locator("summary").click();
+  await group.getByRole("button", { name: "+ Vankaya (brinjal)" }).click();
+  assert.match(await tid(page, "pantry-list").innerText(), /Vankaya \(brinjal\)/);
+  assert.equal(await group.getByRole("button", { name: "+ Vankaya (brinjal)" }).count(), 0, "chip goes once added");
+  await group.getByRole("button", { name: "+ Bendakaya (okra)" }).click();   // the group stays open for the next tap
+  assert.match(await tid(page, "pantry-list").innerText(), /Bendakaya \(okra\)/);
+  assert.ok(await tid(page, "quick-telugu-leaves").count(), "leafy greens group is there too");
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
 test("E2E REC-10 double-clicking Get recipes sends one request", async () => {
   const { page, ctx } = await open();
   let calls = 0;

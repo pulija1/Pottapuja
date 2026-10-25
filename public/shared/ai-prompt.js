@@ -24,6 +24,8 @@ Rules for the 4-year-old (forWhom "kid"):
 
 Family recipes (forWhom "family") should say in the notes how to take out a plain baby portion before salt and spice go in.
 
+Telugu dishes and vegetables go by their Telugu names with the English in brackets, for example "Vankaya kura (brinjal curry)" or "sorakaya (bottle gourd)". The family's kitchen list may use either name.
+
 Use quantities as numbers and short units (g, kg, ml, cup, tbsp, tsp, pcs, pinch). Keep steps short and clear.`;
 
 export const FOR_WHOM = ["baby", "kid", "family"];

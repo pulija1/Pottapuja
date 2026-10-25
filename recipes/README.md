@@ -7,8 +7,9 @@ All the recipes the meal planner suggests live in these Markdown files. They rea
 | [kid-4-years.md](kid-4-years.md) | The 4-year-old: an egg breakfast for every day, school lunchboxes, and milk and nut snacks |
 | [baby-8-months.md](baby-8-months.md) | The 8-month-old: purees, porridges, mashes and soft finger food |
 | [family-dinners.md](family-dinners.md) | One-pot family dinners, each with a step to take out the baby's and the 4-year-old's portions |
+| [telugu-curries.md](telugu-curries.md) | Telugu pappu, kura, vepudu, pulusu and charu by their Telugu names, each with a baby portion step |
 
-Cuisines: South Indian, North Indian, Indian American, Mexican and Mexican American, Tex-Mex, American, Italian, Middle Eastern and Mediterranean, Japanese, Korean and Chinese.
+Cuisines: Telugu, South Indian, North Indian, Indian American, Mexican and Mexican American, Tex-Mex, American, Italian, Middle Eastern and Mediterranean, Japanese, Korean and Chinese.
 
 ## A week for the 4-year-old
 
