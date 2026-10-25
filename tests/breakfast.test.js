@@ -208,3 +208,15 @@ test("BRK-12 the Reheat and Side dip lines are read and written back, and a dip'
   assert.equal(again.reheat, "1 min in the microwave");
   assert.deepEqual(again.sideDips, ["Mint yogurt dip", "Mild salsa"]);
 });
+
+test("SNK-02 the tiny school snack box: light kid snacks, with nut-free ones for a nut-free school", () => {
+  const box = LIBRARY.filter((r) => r.snackBox);
+  assert.ok(box.every((r) => r.forWhom === "kid" && r.mealType === "snack"), "snack box recipes are the 4-year-old's snacks");
+  for (const t of ["Apple slices with peanut butter dip", "Apple slices with sunflower seed butter", "Cheese cubes and cucumber sticks", "Ragi cookies (jaggery, no egg)"]) assert.ok(box.some((r) => r.title === t), t);
+  const nutFree = box.filter((r) => checkForAudience(r, { schoolNutFree: true }).safe);
+  assert.ok(nutFree.length >= 3, "nut-free snack box ideas");
+  assert.ok(nutFree.every((r) => !r.ingredients.some((i) => isNutIngredient(i.name))));
+  assert.ok(!isNutIngredient("sunflower seed butter"));
+  const again = parseRecipeMarkdown(recipeToMarkdown(box[0])).recipes[0];
+  assert.equal(again.snackBox, true);
+});

@@ -1102,6 +1102,35 @@ test("E2E BRK-03 weekday suggestions: breakfast made the night before or no-cook
   await ctx.close();
 });
 
+test("E2E SNK-01 school-day snack is a light snack-box idea; nut-free swaps nut butter for sunflower seed butter", async () => {
+  const { page, ctx, errors } = await open();
+  const BOX = /Apple slices with (peanut butter dip|sunflower seed butter)|Cheese cubes and cucumber sticks|Ragi cookies|Cheese and chopped nuts snack box|Date and dry fruit ladoo|Peanut butter oat energy bites/;
+  const snack = page.locator("[data-testid=suggestion][data-slot=kid_snack]");
+  const seen = async (n) => {
+    const out = [];
+    for (let i = 0; i < n; i++) {
+      out.push(await snack.innerText());
+      await snack.getByRole("button").click();
+    }
+    return out;
+  };
+  await cell(page, "2026-10-26").click();   // a Monday
+  for (const t of await seen(6)) assert.match(t, BOX);
+  // Nut-free school: still a tiny box, never a nut butter.
+  await tid(page, "tab-recipes").click();
+  await tid(page, "school-nut-free").check();
+  await tid(page, "tab-calendar").click();
+  await cell(page, "2026-10-27").click();
+  const nutFree = await seen(6);
+  for (const t of nutFree) {
+    assert.match(t, /Apple slices with sunflower seed butter|Cheese cubes and cucumber sticks|Ragi cookies/);
+    assert.doesNotMatch(t, /peanut|nuts\b|almond|cashew/i);
+  }
+  assert.ok(nutFree.some((t) => /sunflower seed butter/.test(t)), nutFree.join(" | "));
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
 test("E2E UI-20 less scrolling: the calendar opens on one week, sections start folded and remember being opened, food has pictures", async () => {
   const ctx = await newContext({ weekView: true, viewport: { width: 390, height: 844 } });
   const page = await ctx.newPage();
