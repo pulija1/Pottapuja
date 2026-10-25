@@ -25,7 +25,10 @@ Meal slots (use these ids):
 - family_dinner: the whole family. Family dinners only.
 
 How to plan:
-- Prefer recipes from the recipe book: give their ref (like r12, or s3 for the family's saved recipes) and their exact title. Prefer ones that use what is in the kitchen and the freezer, then the family's cuisines and favourites.
+- Prefer recipes from the recipe book: give their ref (like r12, or s3 for the family's saved recipes) and their exact title. Prefer ones that use what is in the kitchen, then the family's cuisines and favourites.
+- Cook fresh food before it runs out. The context lists each fresh item with its use-by date (typed in by the parent, or estimated from how long it keeps in the fridge). Plan the items that run out first on the earliest days, each one on or before its date, and don't plan a dish around an item after its date. Once a planned meal uses up an item, don't plan it again unless there is plenty.
+- Freezer food keeps for months: it is low priority. Use it to fill gaps when the fresh food runs low, or when the parent asks.
+- The pantry staples listed are always at home: use them freely, never list them to buy.
 - Only when nothing in the book fits, make up a dish: leave ref empty and give its ingredients (with quantities), short steps and notes, following the age rules above.
 - School days (Monday to Friday) are busy mornings: breakfasts are warm and made the night before, then reheated in the microwave (upma, idli, parathas, egg burritos), with an easy side dip, or need no cooking. Recipe-book lines marked "make-ahead" or "no-cook" are made for this.
 - If the school is nut-free, the lunchbox and the snack box never contain peanuts or tree nuts.
@@ -105,7 +108,8 @@ export function planWindow(selected, today) {
 }
 
 // Everything Claude needs to know this turn, written as plain text before the parent's words.
-export function contextText({ today, window, days = {}, refOf = () => "", pantry = [], frozen = [], cuisines = [], appliances = [], schoolNutFree = false, cookable = [], saved = [] }) {
+//   expiry: kitchenExpiry(...) from freshness.js, [{ name, expires, estimated, daysLeft }]; staples: names always at home.
+export function contextText({ today, window, days = {}, refOf = () => "", pantry = [], frozen = [], cuisines = [], appliances = [], schoolNutFree = false, cookable = [], saved = [], expiry = [], staples = [] }) {
   const lines = [];
   lines.push(`Today is ${dayName(today)} ${today}. The week on screen is ${window.weekStart} to ${window.weekEnd}. Planning window: ${window.dates[0]} to ${window.dates.at(-1)}.`);
   lines.push("", "Current plan:");
@@ -120,9 +124,18 @@ export function contextText({ today, window, days = {}, refOf = () => "", pantry
     const empty = slots.filter((s) => !day?.meals?.[s.id]?.title).map((s) => s.id);
     lines.push(`${k} ${dayName(k)}${isSchoolDay(k) ? " school day" : " weekend"}${day?.status === "approved" ? " [approved]" : ""}: ${planned.join("; ") || "nothing planned"}${empty.length && planned.length ? ` | empty: ${empty.join(", ")}` : ""}`);
   }
-  lines.push("", `In the kitchen: ${pantry.join(", ") || "(nothing listed)"}`);
+  const runs = new Map(expiry.map((e) => [e.name, e]));
+  const fresh = pantry.map((p) => {
+    const e = runs.get(p);
+    if (!e) return p;
+    return `${p} (${e.daysLeft < 0 ? "past" : "use by"} ${dayName(e.expires)} ${e.expires}${e.estimated ? ", estimated" : ""})`;
+  });
+  lines.push("", `In the kitchen: ${fresh.join(", ") || "(nothing listed)"}`);
+  const soon = expiry.filter((e) => e.daysLeft <= 4).map((e) => e.name);
+  if (soon.length) lines.push(`Runs out first, cook these early in the week: ${soon.join(", ")}`);
   const cold = frozen.map((f) => f.name || f).filter(Boolean);
-  lines.push(`In the freezer: ${cold.join(", ") || "(nothing)"}`);
+  lines.push(`In the freezer (low priority, keeps for months): ${cold.join(", ") || "(nothing)"}`);
+  if (staples.length) lines.push(`Pantry staples always at home: ${staples.join(", ")}`);
   if (cookable.length) lines.push(`Recipe-book recipes that can be cooked from the kitchen and freezer now: ${cookable.join(", ")}`);
   lines.push(`Cuisines the family cooks most: ${cuisines.join(", ") || "any"}`);
   const app = appliancePrompt(appliances);

@@ -38,7 +38,7 @@ test("CHAT-04 the context shows the plan, approvals, kitchen, freezer and nut-fr
   assert.match(text, /2026-10-23 Fri school day \[approved\]: family_dinner=Dal \(r1\)/);
   assert.match(text, /2026-10-24 Sat weekend: nothing planned/);
   assert.match(text, /In the kitchen: rice, dal/);
-  assert.match(text, /In the freezer: green peas/);
+  assert.match(text, /In the freezer \(low priority, keeps for months\): green peas/);
   assert.match(text, /school is nut-free/);
   assert.match(userTurn(text, "No eggs this week"), /Parent: No eggs this week$/);
 });

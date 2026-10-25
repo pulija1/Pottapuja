@@ -8,6 +8,7 @@ export function defaultState() {
   return {
     version: 1,
     pantry: ["rice", "moong dal", "toor dal", "ragi flour", "rava", "curd", "ghee", "carrot", "banana", "tomato", "onion", "idli/dosa batter", "curry leaves", "mustard seeds", "turmeric"],
+    pantryDates: {},   // kitchen item (normName) -> { added, expires }: when it came in and its use-by date ("" = estimate it)
     savedRecipes: [],
     days: {},
     shopping: [],
@@ -33,6 +34,7 @@ function sanitize(data) {
   }
   out.pantry = out.pantry.filter((x) => typeof x === "string");
   out.stores = out.stores.filter((x) => typeof x === "string");
+  out.pantryDates = cleanPantryDates(out.pantryDates);
   for (const k of ["savedRecipes", "shopping", "todos", "frozen", "reminders"]) out[k] = out[k].filter((x) => typeof x === "object");
   out.todos = out.todos.filter((t) => typeof t.text === "string" && typeof t.date === "string");
   out.shopping = out.shopping.filter((i) => typeof i.name === "string");
@@ -44,6 +46,18 @@ function sanitize(data) {
     if (!Array.isArray(day.schedule)) day.schedule = [];
   }
   return migrateBringToTodos(out);
+}
+
+// Only { added, expires } date strings survive; anything else in the map is dropped.
+export function cleanPantryDates(v) {
+  const out = {};
+  if (!v || typeof v !== "object" || Array.isArray(v)) return out;
+  const date = (d) => (typeof d === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : "");
+  for (const [k, e] of Object.entries(v)) {
+    if (!k || !e || typeof e !== "object") continue;
+    out[k] = { added: date(e.added), expires: date(e.expires) };
+  }
+  return out;
 }
 
 export function load() {
