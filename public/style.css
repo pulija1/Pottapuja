@@ -470,7 +470,7 @@ body.in-store:has(.toast.show) .fab { bottom: calc(92px + env(safe-area-inset-bo
 .cloud-btn[data-status="offline"], .cloud-btn[data-status="error"], .cloud-btn[data-status="no-family"], .cloud-btn[data-status="choose"] { border-color: var(--warn); color: var(--warn); }
 .members { list-style: none; margin: 0; padding: 0; }
 .members li { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px dashed var(--line); word-break: break-all; }
-.linkish { background: none; border: 0; padding: 0; color: var(--brand); text-decoration: underline; font: inherit; cursor: pointer; }
+.linkish { background: none; border: 0; padding: 0; color: var(--brand); text-decoration: underline; font: inherit; cursor: pointer; display: inline; text-align: left; }
 .family-choice { display: flex; flex-direction: column; gap: 8px; margin: 0; }
 
 /* ---------- Collapsible sections ---------- */

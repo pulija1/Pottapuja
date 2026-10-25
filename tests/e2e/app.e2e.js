@@ -1091,7 +1091,7 @@ test("E2E BRK-03 weekday suggestions: breakfast made the night before or no-cook
   const { page, ctx, errors } = await open();
   await cell(page, "2026-10-26").click();   // a Monday
   const kid = page.locator("[data-testid=suggestion][data-slot=kid_breakfast]");
-  assert.match(await kid.innerText(), /Made the night before, reheat in the microwave|Make the night before|No cooking/);
+  assert.match(await kid.innerText(), /Made the night before \(\d+ min\), reheat in the microwave|Make the night before|Weekend batch|No cooking/);
   const baby = page.locator("[data-testid=suggestion][data-slot=baby_breakfast]");
   const text = await baby.innerText();
   assert.ok(/banana|avocado|papaya|mango|chikoo|apple|pear/i.test(text), text);
@@ -1356,7 +1356,7 @@ test("E2E FRESH-02 Quick breakfasts from the kitchen, and AI breakfast ideas tol
   await tid(page, "tab-recipes").click();
   const rows = tid(page, "quick-breakfast");
   assert.ok((await rows.count()) >= 1);
-  assert.match(await rows.first().textContent(), /⚡ \d+ min/);
+  assert.match(await rows.first().textContent(), /⚡ \d+ min|No cooking|night before|Weekend batch/);
   assert.ok((await tid(page, "quick-breakfast-baby").locator("[data-testid=quick-breakfast]").count()) >= 1, "the baby's quick breakfasts too");
   // Staples are assumed at home, and that can be turned off.
   assert.match(await page.locator("label", { has: tid(page, "assume-staples") }).textContent(), /rice, dals, spices/);
@@ -1367,11 +1367,90 @@ test("E2E FRESH-02 Quick breakfasts from the kitchen, and AI breakfast ideas tol
   assert.match(prompt, /Meal: breakfast/);
   assert.match(prompt, /Use these first, they run out soon: .*idli\/dosa batter/);
   assert.match(prompt, /Pantry staples always at home: rice, toor dal/);
-  assert.match(prompt, /Quick and easy breakfasts/);
+  assert.match(prompt, /Easy breakfasts the 4-year-old eats too/);
+  assert.match(prompt, /anything baked or slower only as a weekend batch/);
   assert.match(calls[0].body.system, /never honey/, "the age rules are still sent");
 
   await tid(page, "assume-staples").uncheck();
   assert.equal(await page.evaluate(() => window.__mealPlanner.state.settings.assumeStaples), false);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+// ---------- each child's needs, and breakfasts that fit a real morning ----------
+test("E2E PREF-01 a gassy baby on iron-fortified cereal: Profile saves it, suggestions follow it, and the AI is told", async () => {
+  const ctx = await newContext();
+  await ctx.addInitScript((k) => localStorage.setItem("familyMealPlanner.aiKey", k), FAKE_KEY);
+  const page = await ctx.newPage();
+  const errors = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  const calls = await fakeClaude(page, { recipes: [claudeRecipe(), claudeRecipe({ title: "Cauliflower mash", ingredients: [{ name: "cauliflower", quantity: 50, unit: "g" }] })] });
+  await page.goto(`${off.url}?today=${TODAY}`);
+  await page.getByTestId("cal-grid").waitFor();
+  await unfoldAll(page);
+  await tid(page, "profile").click();
+  await tid(page, "profile-dialog").waitFor();
+  const names = tid(page, "family-names");
+  if (!(await names.evaluate((d) => d.open))) await names.locator("summary").click();
+  await tid(page, "baby-pref-gassy").check();
+  await tid(page, "baby-pref-ironCereal").check();
+  await tid(page, "baby-pref-note").fill("loves pear");
+  await tid(page, "kid-pref-noEgg").check();
+  await tid(page, "save-names").click();
+  assert.deepEqual(await page.evaluate(() => window.__mealPlanner.state.settings.prefs), { baby: { tags: ["gassy", "ironCereal"], note: "loves pear" }, kid: { tags: ["noEgg"], note: "" } });
+  await page.keyboard.press("Escape");
+
+  // The week's suggestions: the baby's breakfast is the cereal, nothing gassy, no egg for the 4-year-old.
+  await tid(page, "tab-calendar").click();
+  await cell(page, TODAY).click();
+  await tid(page, "fill-week").click();
+  await tid(page, "toast").waitFor();
+  const meals = await page.evaluate(() => Object.values(window.__mealPlanner.state.days).map((d) => d.meals));
+  assert.ok(meals.some((m) => /Iron-fortified cereal/.test(m.baby_breakfast?.title || "")), "cereal at breakfast");
+  for (const m of meals) {
+    for (const [slot, meal] of Object.entries(m)) {
+      if (slot.startsWith("baby")) assert.doesNotMatch(meal.title, /cauliflower|cabbage|broccoli|rajma|chana/i);
+      if (slot.startsWith("kid")) assert.doesNotMatch(meal.title, /\begg/i, `${slot}: ${meal.title}`);
+    }
+  }
+
+  // AI recipes hear it, and one that breaks it is left out.
+  await tid(page, "tab-recipes").click();
+  await tid(page, "gen-for").selectOption("baby");
+  await tid(page, "generate-recipes").click();
+  await page.locator("[data-testid=recipe-card]", { hasText: "Ragi banana porridge" }).waitFor({ timeout: 5000 });
+  assert.match(calls[0].body.messages[0].content, /The 8-month-old has a gassy tummy.*"loves pear"/);
+  assert.match(calls[0].body.messages[0].content, /The 4-year-old doesn't eat egg/);
+  assert.equal(await page.locator("[data-testid=recipe-card]", { hasText: "Cauliflower mash" }).count(), 0);
+  assert.match(await tid(page, "rejected-notice").textContent(), /Cauliflower mash.*gas/);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test("E2E MORN-01 school-day breakfasts are never slow; the weekend says what to batch and the evening what to prep", async () => {
+  const { page, ctx, errors } = await open(off, { today: "2026-10-24" });   // a Saturday
+  await page.evaluate(() => { const s = window.__mealPlanner.state; s.pantry.push("egg", "spinach", "cheddar cheese", "flour tortilla", "potato", "black beans", "bread", "milk"); });
+  await tid(page, "tab-calendar").click();
+  await cell(page, "2026-10-26").click();   // Monday, so the week on screen is the school week
+  await tid(page, "fill-week").click();
+  await tid(page, "toast").waitFor();
+  const days = await page.evaluate(() => window.__mealPlanner.state.days);
+
+  for (const [date, d] of Object.entries(days)) {
+    const dow = new Date(date + "T12:00").getDay();
+    if (dow === 0 || dow === 6) continue;
+    for (const slot of ["kid_breakfast", "baby_breakfast"]) assert.doesNotMatch(d.meals[slot]?.title || "", /Ven pongal|Kerala egg roast|Mild shakshuka/, `${date} ${slot}`);
+  }
+  // Pick a weekend batch for Monday and a night-before breakfast for Tuesday, then look at Sunday and Monday.
+  await page.evaluate(() => {
+    const s = window.__mealPlanner.state;
+    s.days["2026-10-26"].meals.kid_breakfast = { recipeId: "lib-make-ahead-egg-muffins-with-spinach-and-cheese", title: "Make-ahead egg muffins with spinach and cheese", forWhom: "kid" };
+    s.days["2026-10-27"].meals.kid_breakfast = { recipeId: "lib-vegetable-upma-made-the-night-before", title: "Vegetable upma (made the night before)", forWhom: "family" };
+  });
+  await cell(page, "2026-10-25").click();
+  assert.match(await tid(page, "prep-ahead").textContent(), /Weekend prep for the school week: Make-ahead egg muffins with spinach and cheese for Mon/);
+  await cell(page, "2026-10-26").click();
+  assert.match(await tid(page, "prep-ahead").textContent(), /Tonight, for tomorrow's breakfast: Vegetable upma \(made the night before\) \(15 min\)/);
   assert.deepEqual(errors, []);
   await ctx.close();
 });

@@ -19,6 +19,7 @@ How to read and edit this file: see [README.md](README.md).
 - **For:** family
 - **Meal:** breakfast
 - **Busy morning:** make ahead
+- **Prep ahead:** weekend · 35 min · make 8, keeps 3 days in the fridge or a month in the freezer
 - **Reheat:** 1 to 1½ min in the microwave, wrapped in a damp paper towel, turning once
 - **Side dip:** Mint yogurt dip, Mild salsa
 - **Cuisine:** Mexican American
@@ -55,6 +56,7 @@ How to read and edit this file: see [README.md](README.md).
 - **For:** family
 - **Meal:** breakfast
 - **Busy morning:** make ahead
+- **Prep ahead:** night before · 15 min · keeps a day in the fridge
 - **Reheat:** 1½ to 2 min in the microwave with 2 tbsp water, covered, stir halfway
 - **Side dip:** Coconut chutney
 - **Cuisine:** South Indian
@@ -87,6 +89,7 @@ How to read and edit this file: see [README.md](README.md).
 - **For:** family
 - **Meal:** breakfast
 - **Busy morning:** make ahead
+- **Prep ahead:** weekend · 40 min · keeps 3 days in the fridge or a month in the freezer
 - **Reheat:** 30 to 40 sec in the microwave under a damp paper towel, or 1 min on a hot tawa
 - **Side dip:** Mint yogurt dip, Cucumber raita dip
 - **Cuisine:** North Indian
@@ -119,6 +122,7 @@ How to read and edit this file: see [README.md](README.md).
 - **For:** family
 - **Meal:** breakfast
 - **Busy morning:** make ahead
+- **Prep ahead:** night before · 15 min
 - **Reheat:** 45 sec to 1 min in the microwave, wrapped in a damp paper towel
 - **Side dip:** Mint yogurt dip
 - **Cuisine:** North Indian
@@ -149,6 +153,7 @@ How to read and edit this file: see [README.md](README.md).
 - **For:** family
 - **Meal:** breakfast
 - **Busy morning:** make ahead
+- **Prep ahead:** night before · 15 min
 - **Reheat:** 45 sec in the microwave, or 3 min in the air fryer to crisp
 - **Side dip:** Avocado yogurt dip, Mild salsa
 - **Cuisine:** Mexican American
@@ -178,6 +183,7 @@ How to read and edit this file: see [README.md](README.md).
 - **For:** family
 - **Meal:** breakfast
 - **Busy morning:** make ahead
+- **Prep ahead:** weekend · 40 min · bakes 30 min, keeps 4 days in the fridge
 - **Reheat:** 1 min in the microwave
 - **Side dip:** Cinnamon yogurt dip
 - **Cuisine:** American
@@ -212,6 +218,7 @@ How to read and edit this file: see [README.md](README.md).
 - **For:** family
 - **Meal:** breakfast
 - **Busy morning:** make ahead
+- **Prep ahead:** night before · 5 min
 - **Reheat:** 1½ min in the microwave, stir halfway
 - **Cuisine:** American
 - **Time:** 5 min
@@ -241,6 +248,7 @@ How to read and edit this file: see [README.md](README.md).
 - **For:** family
 - **Meal:** breakfast
 - **Busy morning:** make ahead
+- **Prep ahead:** night before · 20 min · with batter that's ready
 - **Reheat:** 1 to 2 min in the microwave, sprinkled with water and covered
 - **Side dip:** Coconut chutney, Tomato chutney
 - **Cuisine:** South Indian
@@ -266,6 +274,7 @@ How to read and edit this file: see [README.md](README.md).
 - **For:** family
 - **Meal:** breakfast
 - **Busy morning:** make ahead
+- **Prep ahead:** night before · 15 min
 - **Cuisine:** American
 - **Time:** 5 min
 - **Serves:** 3
@@ -292,6 +301,7 @@ How to read and edit this file: see [README.md](README.md).
 - **For:** family
 - **Meal:** breakfast
 - **Busy morning:** make ahead
+- **Prep ahead:** night before · 10 min · with rice from dinner
 - **Cuisine:** South Indian
 - **Time:** 5 min
 - **Serves:** 3
@@ -322,6 +332,7 @@ How to read and edit this file: see [README.md](README.md).
 - **For:** family
 - **Meal:** breakfast
 - **Busy morning:** make ahead
+- **Prep ahead:** weekend · 40 min · keeps 4 days in the fridge
 - **Reheat:** 30 sec in the microwave for two, covered with a damp paper towel
 - **Side dip:** Mint yogurt dip
 - **Cuisine:** North Indian
@@ -354,6 +365,7 @@ How to read and edit this file: see [README.md](README.md).
 - **For:** family
 - **Meal:** breakfast
 - **Busy morning:** make ahead
+- **Prep ahead:** night before · 5 min
 - **Cuisine:** American
 - **Time:** 5 min
 - **Serves:** 3
@@ -480,6 +492,7 @@ How to read and edit this file: see [README.md](README.md).
 - **For:** kid
 - **Meal:** breakfast
 - **Busy morning:** make ahead
+- **Prep ahead:** weekend · 35 min · bake a tray, keeps 4 days in the fridge
 - **Reheat:** 30 sec in the microwave
 - **Side dip:** Avocado yogurt dip
 - **Cuisine:** American
@@ -512,6 +525,7 @@ How to read and edit this file: see [README.md](README.md).
 - **For:** kid
 - **Meal:** breakfast
 - **Busy morning:** make ahead
+- **Prep ahead:** night before · 12 min
 - **Cuisine:** American
 - **Time:** 5 min
 - **Good for:** 🥚 Egg
@@ -559,6 +573,7 @@ How to read and edit this file: see [README.md](README.md).
 - **For:** kid
 - **Meal:** breakfast
 - **Busy morning:** make ahead
+- **Prep ahead:** night before · 5 min
 - **Cuisine:** American
 - **Time:** 5 min
 - **Good for:** 🥛 Milk/dairy
@@ -603,6 +618,7 @@ How to read and edit this file: see [README.md](README.md).
 - **For:** baby
 - **Meal:** breakfast
 - **Busy morning:** make ahead
+- **Prep ahead:** night before · 15 min · keeps 2 days in the fridge
 - **Cuisine:** American
 - **Time:** 5 min
 - **Serves:** 4
@@ -679,6 +695,7 @@ How to read and edit this file: see [README.md](README.md).
 - **For:** baby
 - **Meal:** breakfast
 - **Busy morning:** make ahead
+- **Prep ahead:** night before · 5 min
 - **Cuisine:** South Indian
 - **Time:** 6 min
 - **Texture:** porridge

@@ -8,6 +8,8 @@ import { checkForAudience } from "./safety.js";
 import { RECIPE_FILES, parseRecipeMarkdown, combineBooks } from "./recipe-book.js";
 import { usesAppliance, fastestMinutes } from "./appliances.js";
 import { recipeHasFruit } from "./kitchen.js";
+import { prefProblem, prefBoost } from "./preferences.js";
+import { fromKey } from "./dates.js";
 
 async function readBook(file) {
   if (typeof process !== "undefined" && process.versions?.node && typeof window === "undefined") {
@@ -130,10 +132,10 @@ export function missingForRecipe(recipe, pantry) {
 // frozen (the Frozen tab) counts as in the kitchen; `fromFreezer` lists what a recipe takes from it,
 // and recipes that need less from the freezer come first.
 // staples count as at home; with useSoon, recipes that use food running out come first at the same number missing.
-export function readyToCook(pantry, { forWhom = "", maxMissing = 0, schoolNutFree = false, limit = 12, cuisines = [], frozen = [], staples = [], useSoon = null } = {}) {
+export function readyToCook(pantry, { forWhom = "", maxMissing = 0, schoolNutFree = false, limit = 12, cuisines = [], frozen = [], staples = [], useSoon = null, settings = null } = {}) {
   const k = kitchen(pantry, frozen, staples);
   if (!k.size) return [];
-  return LIBRARY.filter((x) => !x.leftover && (!forWhom || x.forWhom === forWhom))
+  return LIBRARY.filter((x) => !x.leftover && (!forWhom || x.forWhom === forWhom) && suits(x, settings))
     .filter((x) => !schoolNutFree || x.forWhom !== "kid" || checkForAudience(x, { schoolNutFree: true }).safe)
     .map((recipe) => {
       const needed = [...new Set(neededNames(recipe, k.assumed))];
@@ -144,6 +146,43 @@ export function readyToCook(pantry, { forWhom = "", maxMissing = 0, schoolNutFre
     .filter((x) => x.used > 0 && x.missing.length <= maxMissing)
     .sort((a, b) => a.missing.length - b.missing.length || b.soon - a.soon || a.fromFreezer.length - b.fromFreezer.length || (cuisines.length ? inCuisines(b.recipe, cuisines) - inCuisines(a.recipe, cuisines) : 0) || (b.recipe.familyFavorite ? 1 : 0) - (a.recipe.familyFavorite ? 1 : 0) || b.used - a.used)
     .slice(0, limit);
+}
+
+// Each child's needs from Profile (settings.prefs): `child` is who eats it ("baby", "kid"), or the
+// recipe's own forWhom when it is for one of them. Family recipes are left as they are.
+const childOf = (recipe, child) => child || (recipe.forWhom === "baby" || recipe.forWhom === "kid" ? recipe.forWhom : "");
+const suits = (recipe, settings, child) => !settings || !prefProblem(recipe, childOf(recipe, child), settings);
+
+// ---------- what a breakfast takes, and when ----------
+// A school morning has time for 15 minutes of cooking at most. Work the night before should be
+// easy, 20 minutes or less; anything longer (a tray of muffins, parathas, burritos) is weekend prep.
+export const MORNING_MINUTES = 15;
+export const EASY_NIGHT_MINUTES = 20;
+
+// "no-cook", "morning" (quick to cook that morning), "night" (easy the night before), "weekend"
+// (batch-made at the weekend) or "slow" (only for a relaxed weekend morning).
+export function breakfastKind(recipe, appliances = []) {
+  if (recipe?.busyMorning === "no-cook") return "no-cook";
+  if (recipe?.busyMorning === "make-ahead") {
+    const p = recipe.prepAhead;
+    if (p?.when === "weekend" || (p?.minutes || 0) > EASY_NIGHT_MINUTES) return "weekend";
+    return "night";
+  }
+  const m = fastestMinutes(recipe, appliances) || recipe?.prepMinutes || Infinity;
+  return m <= MORNING_MINUTES ? "morning" : "slow";
+}
+
+// Can this breakfast be on the table on the morning of `key`? Weekends: anything. School days:
+// no-cook, quick, easy night-before, or a weekend batch that still keeps that day (made Sunday:
+// Monday is 1 day on). A batch that also freezes keeps all week.
+export function fitsMorning(recipe, key, appliances = []) {
+  const dow = fromKey(key).getDay();
+  if (dow === 0 || dow === 6) return true;
+  const kind = breakfastKind(recipe, appliances);
+  if (kind === "slow") return false;
+  if (kind !== "weekend") return true;
+  const p = recipe.prepAhead || {};
+  return !!p.frozen || !p.keepsDays || dow <= p.keepsDays;
 }
 
 const CUISINE_BOOST = 0.5;
@@ -166,7 +205,9 @@ const FRUIT_BOOST = 0.3;
 // and the warm ones (made the night before, reheated in the microwave) first of all.
 // staples (the cuisine's basics) count as at home and so don't dilute the kitchen match, and
 // useSoon (Map of ingredient -> weight, from useSoonWeights) lifts recipes that use food running out.
-export function suggestFromLibrary(pantry, { forWhom = "both", mealType = "", limit = 6, schoolNutFree = false, maxMinutes = 0, cuisines = [], frozen = [], appliances = [], busyMorning = false, staples = [], useSoon = null } = {}) {
+// settings (with prefs) and child ("baby"/"kid", who will eat it) leave out recipes that don't suit
+// that child and lift the ones that do; see preferences.js.
+export function suggestFromLibrary(pantry, { forWhom = "both", mealType = "", limit = 6, schoolNutFree = false, maxMinutes = 0, cuisines = [], frozen = [], appliances = [], busyMorning = false, staples = [], useSoon = null, settings = null, child = "" } = {}) {
   const k = kitchen(pantry, frozen, staples);
   // The whole family eats the 4-year-old's food too (mild, nothing whole), so "family" includes the
   // kid's recipes, after the family ones. The book's family recipes are mostly dinners, so without
@@ -185,11 +226,13 @@ export function suggestFromLibrary(pantry, { forWhom = "both", mealType = "", li
     .filter((x) => x.mealType !== "side" || mealType === "side")
     .filter((x) => !mealType || x.mealType === mealType || (mealType === "lunch" && x.mealType === "lunchbox"))
     .filter((x) => !schoolNutFree || x.forWhom !== "kid" || checkForAudience(x, { schoolNutFree: true }).safe)
+    .filter((x) => suits(x, settings, child))
     .map((x) => {
       const needed = neededNames(x, k.assumed);
       const hit = needed.filter((n) => k.fresh.has(n)).length + needed.filter((n) => k.cold.has(n)).length * FROZEN_WEIGHT;
       const score = (needed.length ? hit / needed.length : 0) + useSoonScore(needed, k.fresh, useSoon) + (x.familyFavorite ? 0.15 : 0) + (cuisines.length && inCuisines(x, cuisines) ? CUISINE_BOOST : 0) + (usesAppliance(x, appliances) ? APPLIANCE_BOOST : 0)
-        + (forWhom === "family" && x.forWhom === "family" ? FAMILY_BOOST : 0) + (busy(x) ? BUSY_BOOST : 0) + (warm(x) ? WARM_BOOST : 0) + (fruit(x) ? FRUIT_BOOST : 0);
+        + (forWhom === "family" && x.forWhom === "family" ? FAMILY_BOOST : 0) + (busy(x) ? BUSY_BOOST : 0) + (warm(x) ? WARM_BOOST : 0) + (fruit(x) ? FRUIT_BOOST : 0)
+        + (settings ? prefBoost(x, childOf(x, child), settings, { mealType }) : 0);
       return { recipe: x, score, hit };
     })
     .sort((a, b) => b.score - a.score || b.hit - a.hit)
@@ -210,11 +253,11 @@ function ease(recipe) {
 // from the family's cuisines, easiest first. Recipes need at least one thing from the kitchen and at
 // most `maxMissing` to buy. When nothing in the picked cuisines fits, the other cuisines are used.
 // Freezer items fill in when the fresh vegetables are few, at a little less weight than fresh.
-export function topPicks(pantry, { cuisines = [], schoolNutFree = false, maxMissing = 2, limit = 15, isVegetable = () => false, frozen = [], staples = [], useSoon = null } = {}) {
+export function topPicks(pantry, { cuisines = [], schoolNutFree = false, maxMissing = 2, limit = 15, isVegetable = () => false, frozen = [], staples = [], useSoon = null, settings = null } = {}) {
   const k = kitchen(pantry, frozen, staples);
   if (!k.size) return [];
   const ranked = LIBRARY
-    .filter((x) => !x.leftover && x.mealType !== "side")
+    .filter((x) => !x.leftover && x.mealType !== "side" && suits(x, settings))
     .filter((x) => !schoolNutFree || x.forWhom !== "kid" || checkForAudience(x, { schoolNutFree: true }).safe)
     .map((recipe) => {
       const needed = [...new Set(neededNames(recipe, k.assumed))];
@@ -232,23 +275,27 @@ export function topPicks(pantry, { cuisines = [], schoolNutFree = false, maxMiss
   return (mine.length ? mine : ranked).slice(0, limit);
 }
 
-// Quick, easy breakfasts from what's in the kitchen, for the Recipes tab: ready in `maxMinutes`
-// (the air fryer or oven time counts when faster), with at most `maxMissing` things to buy, the
-// cuisine's staples taken as at home. Fewest missing first, then the ones that use food running
-// out, then the picked cuisines, then the quickest. Kid and family breakfasts by default; pass
-// forWhom "baby" for the baby's. Returns [{ recipe, missing, minutes, soon }].
-export function quickBreakfasts(pantry, { forWhom = "", maxMinutes = 20, maxMissing = 1, limit = 6, schoolNutFree = false, cuisines = [], frozen = [], staples = [], useSoon = null, appliances = [] } = {}) {
+// Easy breakfasts from what's in the kitchen, for the Recipes tab, by when the work happens: made
+// that morning in MORNING_MINUTES or less (or no cooking), easy the night before, or batch-made at
+// the weekend. Slow ones never show. At most `maxMissing` things to buy, the cuisine's staples taken
+// as at home. Fewest missing first, then the ones that use food running out, then the child's needs,
+// the picked cuisines and the quickest. Kid and family breakfasts by default; forWhom "baby" for the
+// baby's. Returns [{ recipe, kind, missing, minutes, soon }].
+export function quickBreakfasts(pantry, { forWhom = "", maxMissing = 1, limit = 6, schoolNutFree = false, cuisines = [], frozen = [], staples = [], useSoon = null, appliances = [], settings = null } = {}) {
   const k = kitchen(pantry, frozen, staples);
   const who = forWhom ? [forWhom] : ["kid", "family"];
+  const child = forWhom === "baby" ? "baby" : "kid";
   return LIBRARY.filter((x) => x.mealType === "breakfast" && !x.leftover && who.includes(x.forWhom))
     .filter((x) => !schoolNutFree || x.forWhom !== "kid" || checkForAudience(x, { schoolNutFree: true }).safe)
+    .filter((x) => suits(x, settings, child))
     .map((recipe) => {
       const needed = [...new Set(neededNames(recipe, k.assumed))];
       const missing = needed.filter((n) => !k.has(n));
-      return { recipe, missing, used: needed.length - missing.length, minutes: fastestMinutes(recipe, appliances) || recipe.prepMinutes || 0, soon: useSoonScore(needed, k.fresh, useSoon) };
+      return { recipe, kind: breakfastKind(recipe, appliances), missing, used: needed.length - missing.length, minutes: fastestMinutes(recipe, appliances) || recipe.prepMinutes || 0,
+        soon: useSoonScore(needed, k.fresh, useSoon), pref: settings ? prefBoost(recipe, child, settings, { mealType: "breakfast" }) : 0 };
     })
-    .filter((x) => x.minutes && x.minutes <= maxMinutes && x.missing.length <= maxMissing && (x.used > 0 || !x.missing.length))
-    .sort((a, b) => a.missing.length - b.missing.length || b.soon - a.soon || (cuisines.length ? inCuisines(b.recipe, cuisines) - inCuisines(a.recipe, cuisines) : 0) || a.minutes - b.minutes || b.used - a.used)
+    .filter((x) => x.kind !== "slow" && x.missing.length <= maxMissing && (x.used > 0 || !x.missing.length))
+    .sort((a, b) => a.missing.length - b.missing.length || b.soon - a.soon || b.pref - a.pref || (cuisines.length ? inCuisines(b.recipe, cuisines) - inCuisines(a.recipe, cuisines) : 0) || a.minutes - b.minutes || b.used - a.used)
     .slice(0, limit);
 }
 

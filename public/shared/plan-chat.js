@@ -8,6 +8,8 @@ import { addDays, fromKey, isSchoolDay } from "./dates.js";
 import { checkRecipe, isNutIngredient } from "./safety.js";
 import { appliancePrompt } from "./appliances.js";
 import { SYSTEM as RECIPE_RULES } from "./ai-prompt.js";
+import { prefProblem } from "./preferences.js";
+import { fitsMorning } from "./recipes.js";
 
 export const SLOT_IDS = SLOTS.map((s) => s.id);
 // How many days from the start of the week on screen the chat may plan: this week and the next.
@@ -30,7 +32,8 @@ How to plan:
 - Freezer food keeps for months: it is low priority. Use it to fill gaps when the fresh food runs low, or when the parent asks.
 - The pantry staples listed are always at home: use them freely, never list them to buy.
 - Only when nothing in the book fits, make up a dish: leave ref empty and give its ingredients (with quantities), short steps and notes, following the age rules above.
-- School days (Monday to Friday) are busy mornings: breakfasts are warm and made the night before, then reheated in the microwave (upma, idli, parathas, egg burritos), with an easy side dip, or need no cooking. Recipe-book lines marked "make-ahead" or "no-cook" are made for this.
+- School days (Monday to Friday) are busy mornings: nothing is baked or cooked for long that morning (no muffins, pancakes or parathas made at 7 am). A breakfast is either ready in 15 minutes, needs no cooking, is easy prep the night before (20 minutes or less, recipe-book lines marked "night prep"), or is a weekend batch (lines marked "weekend batch") planned only on the weekdays it keeps for. Warm ones reheated in the microwave are the family's favourite, with an easy side dip. Plan the weekend batches on Saturday or Sunday's to-do in the reply ("bake the egg muffins on Sunday").
+- Each child's needs (in the context) always hold, like a gassy tummy or no egg; the baby's iron-fortified cereal belongs at breakfast.
 - If the school is nut-free, the lunchbox and the snack box never contain peanuts or tree nuts.
 - Each day, the 4-year-old should get an egg, a milk food and some nuts across breakfast, lunchbox, snack and family dinner (lines are tagged egg, dairy, nuts), unless the parent says otherwise.
 - Don't serve the same dish two days running. A family curry can come back the next day as a leftover makeover.
@@ -72,6 +75,7 @@ function catalogLine(ref, r) {
     r.cuisine || "",
     (r.tags || []).join(","),
     r.busyMorning || "",
+    r.prepAhead ? (r.prepAhead.when === "weekend" || (r.prepAhead.minutes || 0) > 20 ? `weekend batch${r.prepAhead.keepsDays && !r.prepAhead.frozen ? ` keeps ${r.prepAhead.keepsDays} days` : ""}` : `night prep ${r.prepAhead.minutes || ""} min`.trim()) : "",
     r.reheat ? "reheats" : "",
     r.familyFavorite ? "favourite" : "",
     (r.ingredients || []).some((i) => isNutIngredient(i.name)) ? "has nuts" : "",
@@ -109,7 +113,8 @@ export function planWindow(selected, today) {
 
 // Everything Claude needs to know this turn, written as plain text before the parent's words.
 //   expiry: kitchenExpiry(...) from freshness.js, [{ name, expires, estimated, daysLeft }]; staples: names always at home.
-export function contextText({ today, window, days = {}, refOf = () => "", pantry = [], frozen = [], cuisines = [], appliances = [], schoolNutFree = false, cookable = [], saved = [], expiry = [], staples = [] }) {
+//   needs: prefsPrompt(settings), each child's needs from Profile.
+export function contextText({ today, window, days = {}, refOf = () => "", pantry = [], frozen = [], cuisines = [], appliances = [], schoolNutFree = false, cookable = [], saved = [], expiry = [], staples = [], needs = "" }) {
   const lines = [];
   lines.push(`Today is ${dayName(today)} ${today}. The week on screen is ${window.weekStart} to ${window.weekEnd}. Planning window: ${window.dates[0]} to ${window.dates.at(-1)}.`);
   lines.push("", "Current plan:");
@@ -141,6 +146,7 @@ export function contextText({ today, window, days = {}, refOf = () => "", pantry
   const app = appliancePrompt(appliances);
   if (app) lines.push(app);
   lines.push(schoolNutFree ? "The school is nut-free." : "The school allows nuts.");
+  if (needs) lines.push("", "Each child's needs:", needs);
   if (saved.length) {
     lines.push("", "The family's saved recipes:");
     for (const [ref, r] of saved) lines.push(catalogLine(ref, r));
@@ -155,7 +161,9 @@ export function userTurn(context, text) {
 // Turn Claude's changes into ones the app can apply. Each change must be in the planning window,
 // in a slot that exists that day, and pass the age and nut-free checks for that slot.
 //   refs: Map of "r12"/"s3" -> recipe. Returns { apply: [{ date, slot, recipe | null, isNew }], skipped: [{ date, slot, title, why }] }.
-export function planChanges(changes, { dates, refs, schoolNutFree = false, stamp = Date.now().toString(36) }) {
+// With settings, a meal that breaks a child's needs from Profile is left out; a recipe-book breakfast
+// that can't be ready on a school morning (baked that morning, or a weekend batch past its keeping) too.
+export function planChanges(changes, { dates, refs, schoolNutFree = false, settings = null, appliances = [], stamp = Date.now().toString(36) }) {
   const inWindow = new Set(dates);
   const apply = [];
   const skipped = [];
@@ -195,7 +203,10 @@ export function planChanges(changes, { dates, refs, schoolNutFree = false, stamp
     if (slot.who !== "family") {
       const res = checkRecipe(recipe, { age: slot.who, lunchbox: slot.id === "kid_lunchbox" || slot.id === "kid_snack", schoolNutFree, nutFreeSwap: recipe.nutFreeSwap });
       if (!res.safe) return skip(res.errors[0].message);
+      const why = settings && prefProblem(recipe, slot.who, settings);
+      if (why) return skip(why);
     }
+    if (!isNew && slot.id.endsWith("breakfast") && recipe.mealType === "breakfast" && !fitsMorning(recipe, c.date, appliances)) return skip("can't be ready on a school morning");
     apply.push({ date: c.date, slot: slot.id, recipe, isNew });
   });
   return { apply, skipped };
