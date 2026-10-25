@@ -64,6 +64,13 @@ async function addShopItems(page, names) {
   await page.keyboard.press("Escape");
 }
 
+async function addFrozen(page, name) {
+  await tid(page, "tab-frozen").click();
+  await tid(page, "frozen-fab").click();
+  await tid(page, "frozen-name").fill(name);
+  await tid(page, "frozen-add").click();
+}
+
 async function openGroup(page, slot) {
   const group = tid(page, `meal-group-${slot.split("_")[0]}`);
   if (!(await group.evaluate((d) => d.open))) await group.locator("summary").click();
@@ -378,40 +385,72 @@ test("E2E SHOP-16 Back closes the sheet, then leaves store mode, without leaving
   await ctx.close();
 });
 
-test("E2E TODO-05 to-dos: tap the row to tick, edit in the sheet, swipe left to delete", async () => {
-  const { page, ctx } = await open(mock, { viewport: { width: 390, height: 844 } });
-  await tid(page, "tab-todo").click();
-  await tid(page, "todo-idea").filter({ hasText: "Pack school bag" }).click();
-  await tid(page, "todo-item").locator(".name").click();
-  assert.equal(await tid(page, "todo-left").innerText(), "All done");
-  await tid(page, "todo-more").click();
-  await tid(page, "todo-input").fill("Pack school bag and water bottle");
-  await tid(page, "todo-save").click();
-  assert.match(await tid(page, "todo-list").innerText(), /water bottle/);
-  await swipeRow(page, tid(page, "todo-list").getByTestId("todo-item"), -160);
-  assert.equal(await tid(page, "todo-list").getByTestId("todo-item").count(), 0);
+test("E2E FRZ-01 the Frozen tab replaces To do: add, use one, edit, swipe to delete, survives reload", async () => {
+  const { page, ctx, errors } = await open(mock, { viewport: { width: 390, height: 844 } });
+  assert.equal(await tid(page, "tab-todo").count(), 0, "the To do tab is gone");
+  await tid(page, "tab-frozen").click();
+  assert.ok(await tid(page, "frozen-empty").isVisible());
+  await tid(page, "frozen-fab").click();
+  await tid(page, "frozen-idea").filter({ hasText: "Parathas" }).click();
+  assert.equal(await tid(page, "frozen-name").inputValue(), "Parathas");
+  await tid(page, "frozen-qty").fill("3");
+  await tid(page, "frozen-add").click();
+  await tid(page, "frozen-fab").click();
+  await tid(page, "frozen-name").fill("Idli batter");
+  await tid(page, "frozen-unit").getByText("boxes").click();
+  await tid(page, "frozen-date").fill("2026-06-01");
+  await tid(page, "frozen-add").click();
+  assert.equal(await tid(page, "frozen-count").innerText(), "2 items");
+  // Oldest first, and food frozen months ago is flagged.
+  assert.deepEqual(await page.locator("[data-testid=frozen-item] .name").allInnerTexts().then((t) => t.map((x) => x.split("\n")[0].replace(/Use soon/, "").trim())), ["Idli batter", "Parathas"]);
+  assert.equal(await tid(page, "frozen-item").filter({ hasText: "Idli batter" }).getByTestId("frozen-old").count(), 1);
+  assert.match(await tid(page, "frozen-item").filter({ hasText: "Idli batter" }).innerText(), /1 box · frozen 5 months ago/);
+  assert.match(await tid(page, "frozen-item").filter({ hasText: "Parathas" }).innerText(), /3 packs · frozen today/);
+  // Tapping the row takes one out; the undo puts it back.
+  await tid(page, "frozen-item").filter({ hasText: "Parathas" }).locator(".name").click();
+  assert.match(await tid(page, "frozen-item").filter({ hasText: "Parathas" }).innerText(), /2 packs/);
+  await tid(page, "toast-undo").click();
+  assert.match(await tid(page, "frozen-item").filter({ hasText: "Parathas" }).innerText(), /3 packs/);
+  // Edit in the sheet.
+  await tid(page, "frozen-item").filter({ hasText: "Parathas" }).getByTestId("frozen-more").click();
+  await tid(page, "frozen-name").fill("Aloo parathas");
+  await tid(page, "frozen-note").fill("for the lunchbox");
+  await tid(page, "frozen-save").click();
+  assert.match(await tid(page, "frozen-list").innerText(), /Aloo parathas[\s\S]*for the lunchbox/);
+  // The last one taken out removes the item; swipe left deletes.
+  await swipeRow(page, tid(page, "frozen-item").filter({ hasText: "Idli batter" }), 160);
+  assert.equal(await tid(page, "frozen-item").count(), 1);
+  await page.waitForTimeout(300);
+  await page.reload();
+  await tid(page, "tab-frozen").click();
+  assert.equal(await tid(page, "frozen-item").count(), 1);
+  await swipeRow(page, tid(page, "frozen-item"), -160);
+  assert.equal(await tid(page, "frozen-item").count(), 0);
+  assert.deepEqual(errors, []);
   await ctx.close();
 });
 
-test("E2E TODO-01 the To do tab opens on tomorrow; ideas and ticks persist; the calendar shows them", async () => {
-  const { page, ctx } = await open();
-  await tid(page, "tab-todo").click();
-  assert.equal(await tid(page, "todo-date").inputValue(), TOMORROW);
-  await tid(page, "todo-idea").filter({ hasText: "Buy dresses" }).click();
-  await tid(page, "todo-fab").click();
-  await tid(page, "todo-input").fill("Doctor's appointment");
-  await tid(page, "todo-who").getByText("8-month-old").click();
-  await tid(page, "todo-add").click();
-  assert.equal(await tid(page, "todo-item").count(), 2);
-  await tid(page, "todo-item").filter({ hasText: "Buy dresses" }).locator("input[type=checkbox]").check();
-  await page.waitForTimeout(300);
-  await page.reload();
-  await tid(page, "tab-todo").click();
-  assert.ok(await tid(page, "todo-item").filter({ hasText: "Buy dresses" }).locator("input[type=checkbox]").isChecked());
-  await tid(page, "tab-calendar").click();
+test("E2E FRZ-02 to-dos saved before the change are kept and still show and work on the calendar", async () => {
+  const todos = [{ id: "t1", text: "Buy shoes", who: "kid", date: TOMORROW, time: "", done: false }];
+  const ctx = await newContext({ viewport: { width: 390, height: 844 } });
+  await ctx.addInitScript((t) => { if (!localStorage.getItem("familyMealPlanner.v1")) localStorage.setItem("familyMealPlanner.v1", JSON.stringify({ version: 1, todos: t })); }, todos);
+  const page = await ctx.newPage();
+  const errors = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await page.goto(`${mock.url}?today=${TODAY}#todo`);
+  await tid(page, "cal-grid").waitFor();
   await cell(page, TOMORROW).click();
-  const t = await page.locator("[data-testid=day-pending] li[data-type=todo]").allInnerTexts();
-  assert.deepEqual(t.map((x) => x.trim()), ["✅ Doctor's appointment"]);
+  const row = tid(page, "day-todos").getByTestId("todo-item");
+  assert.match(await row.innerText(), /Buy shoes/);
+  await row.locator(".name").click();
+  assert.match(await tid(page, "day-todos").getByTestId("todo-item").getAttribute("class"), /done/);
+  await tid(page, "day-todos").getByTestId("todo-more").click();
+  await tid(page, "todo-input").fill("Buy school shoes");
+  await tid(page, "todo-save").click();
+  assert.match(await tid(page, "day-todos").innerText(), /Buy school shoes/);
+  await swipeRow(page, tid(page, "day-todos").getByTestId("todo-item"), -160);
+  assert.equal(await tid(page, "day-todos").getByTestId("todo-item").count(), 0);
+  assert.deepEqual(errors, []);
   await ctx.close();
 });
 
@@ -505,7 +544,7 @@ test("E2E UI-02 pending and approved are not shown by colour alone", async () =>
 
 test("E2E UI-03 every tab fits a phone screen without sideways scroll", async () => {
   const { page, ctx } = await open(mock, { viewport: { width: 375, height: 740 } });
-  for (const tab of ["calendar", "recipes", "shopping", "todo", "reminders"]) {
+  for (const tab of ["calendar", "recipes", "shopping", "frozen", "reminders"]) {
     await tid(page, `tab-${tab}`).click();
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     assert.ok(overflow <= 0, `${tab} tab is ${overflow}px too wide`);
@@ -591,31 +630,6 @@ test("E2E OFF-06 AI off still shows family favorites from the recipe book", asyn
   await ctx.close();
 });
 
-test("E2E TODO-05 old missed to-dos are folded behind 'Show N older'; ticking updates in place", async () => {
-  const todos = [];
-  for (let i = 1; i <= 40; i++) {
-    const d = new Date(Date.UTC(2026, 9, 22 - i)).toISOString().slice(0, 10);
-    todos.push({ id: "t" + i, text: "Old task " + i, who: "kid", date: d, time: "", done: false });
-  }
-  todos.push({ id: "tm", text: "Buy shoes", who: "kid", date: TOMORROW, time: "", done: false });
-  // Seed before the app loads (a reload would save the app's own state over it on pagehide).
-  const ctx = await newContext();
-  await ctx.addInitScript((t) => { if (!localStorage.getItem("familyMealPlanner.v1")) localStorage.setItem("familyMealPlanner.v1", JSON.stringify({ version: 1, todos: t })); }, todos);
-  const page = await ctx.newPage();
-  const errors = [];
-  page.on("pageerror", (e) => errors.push(e.message));
-  await page.goto(`${mock.url}?today=${TODAY}`);
-  await tid(page, "tab-todo").click();
-  assert.equal(await tid(page, "todo-missed").getByTestId("todo-item").count(), 14);
-  await tid(page, "todo-older").click();
-  assert.equal(await tid(page, "todo-missed").getByTestId("todo-item").count(), 40);
-  await tid(page, "todo-list").locator("input[type=checkbox]").check();
-  assert.equal(await tid(page, "todo-left").innerText(), "All done");
-  assert.match(await tid(page, "todo-list").getByTestId("todo-item").getAttribute("class"), /done/);
-  assert.deepEqual(errors, []);
-  await ctx.close();
-});
-
 test("E2E SHOP-09 unticking a bought item takes back only what the tick added to the kitchen", async () => {
   const { page, ctx } = await open();
   await tid(page, "tab-recipes").click();
@@ -686,21 +700,6 @@ test("E2E SHOP-13 ticking food as bought adds it to the kitchen; diapers and nap
   const pantry = await page.evaluate(() => JSON.parse(localStorage.getItem("familyMealPlanner.v1")).pantry.map((x) => x.toLowerCase()));
   assert.ok(pantry.includes("drumstick"));
   assert.ok(!pantry.some((x) => /diaper|napkin/.test(x)), JSON.stringify(pantry));
-  await ctx.close();
-});
-
-test("E2E TODO-03 blank to-dos are ignored and HTML is shown as text", async () => {
-  const { page, ctx } = await open();
-  await tid(page, "tab-todo").click();
-  const before = await tid(page, "todo-item").count();
-  await tid(page, "todo-fab").click();
-  await tid(page, "todo-input").fill("   ");
-  await tid(page, "todo-add").click();
-  assert.equal(await tid(page, "todo-item").count(), before);
-  await tid(page, "todo-input").fill(`<img src=x onerror="window.__xss=1">`);
-  await tid(page, "todo-add").click();
-  await page.waitForTimeout(100);
-  assert.equal(await page.evaluate(() => window.__xss), undefined);
   await ctx.close();
 });
 
@@ -792,15 +791,12 @@ test("E2E DATA-10 a change made in another tab shows up here instead of being ov
   const other = await a.ctx.newPage();
   await other.goto(`${mock.url}?today=${TODAY}`);
   await tid(other, "cal-grid").waitFor();
-  await tid(other, "tab-todo").click();
-  await tid(other, "todo-idea").first().click();
-  const text = await other.evaluate(() => window.__mealPlanner.state.todos[0].text);
-  await a.page.waitForFunction((t) => window.__mealPlanner.state.todos.some((x) => x.text === t), text);
+  await addFrozen(other, "Parathas");
+  await a.page.waitForFunction(() => window.__mealPlanner.state.frozen.some((x) => x.name === "Parathas"));
   await a.page.waitForFunction(() => document.querySelector("#toast").textContent.includes("another tab"));
-  // An edit here now keeps the other tab's to-do.
-  await tid(a.page, "tab-todo").click();
-  await tid(a.page, "todo-idea").nth(1).click();
-  await other.waitForFunction(() => window.__mealPlanner.state.todos.length === 2);
+  // An edit here now keeps the other tab's freezer item.
+  await addFrozen(a.page, "Green peas");
+  await other.waitForFunction(() => window.__mealPlanner.state.frozen.length === 2);
   assert.deepEqual(a.errors, []);
   await a.ctx.close();
 });
@@ -813,12 +809,11 @@ test("E2E DATA-11 when saving fails (storage full), a warning stays on screen un
     window.__restoreSave = () => { Storage.prototype.setItem = orig; };
     Storage.prototype.setItem = function () { throw new DOMException("full", "QuotaExceededError"); };
   });
-  await tid(a.page, "tab-todo").click();
-  await tid(a.page, "todo-idea").first().click();
+  await addFrozen(a.page, "Parathas");
   await tid(a.page, "save-warning").waitFor();
   assert.match(await tid(a.page, "save-warning").innerText(), /aren't being saved/);
   await a.page.evaluate(() => window.__restoreSave());
-  await tid(a.page, "todo-idea").nth(1).click();
+  await addFrozen(a.page, "Green peas");
   await tid(a.page, "save-warning").waitFor({ state: "hidden" });
   await a.ctx.close();
 });

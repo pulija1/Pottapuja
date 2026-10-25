@@ -8,7 +8,9 @@
 // changed fields are written.
 
 export const LISTS = ["shopping", "todos", "reminders", "savedRecipes"];
-export const META = ["pantry", "stores", "settings"];   // "notified" stays per phone, so every phone still alerts
+// The freezer list lives in the meta document too, so the Firestore rules need no new document;
+// two phones changing different freezer items still merge item by item (see merge3).
+export const META = ["pantry", "stores", "settings", "frozen"];   // "notified" stays per phone, so every phone still alerts
 
 function hash(s) {
   let h = 0;
@@ -80,6 +82,7 @@ export function decodeInto(state, docs) {
       } else if (sec === "meta") {
         if (key === "settings" && isObj(v)) meta.settings = v;
         else if ((key === "pantry" || key === "stores") && Array.isArray(v)) meta[key] = v.filter((x) => typeof x === "string");
+        else if (key === "frozen" && Array.isArray(v)) meta.frozen = v.filter((x) => isObj(x) && typeof x.name === "string");
       } else if (isObj(v) && VALID[sec](v)) lists[sec].set(key, v);
     }
   }
@@ -95,7 +98,7 @@ export function decodeInto(state, docs) {
   }
   state.days = days;
   if (meta.settings) state.settings = { ...state.settings, ...meta.settings };
-  for (const k of ["pantry", "stores"]) if (meta[k]) state[k] = meta[k];
+  for (const k of ["pantry", "stores", "frozen"]) if (meta[k]) state[k] = meta[k];
   return JSON.stringify(encode(state)) !== before;
 }
 

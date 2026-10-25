@@ -2,12 +2,12 @@ import { load, save, exportJson, importJson, onChange, defaultState, onSaveError
 import * as cloud from "./cloud.js";
 import { getAiKey, setAiKey, looksLikeKey, browserRecipes } from "./ai-browser.js";
 import { QUICK_MINUTES } from "./shared/ai-prompt.js";
-import { todayKey, addDays, addMonths, monthGrid, monthLabel, prettyDate, fromKey, isDateKey, isSchoolDay, occurrences } from "./shared/dates.js";
+import { todayKey, addDays, addMonths, monthGrid, monthLabel, prettyDate, fromKey, isDateKey, isSchoolDay, occurrences, daysBetween } from "./shared/dates.js";
 import { checkRecipe, checkForAudience, isNutIngredient, isSchoolFood } from "./shared/safety.js";
 import { LIBRARY, suggestFromLibrary, readyToCook, RECIPE_BOOK_STATUS } from "./shared/recipes.js";
 import { nutritionTags, TAG_LABELS } from "./shared/recipe-book.js";
 import { mergeItems, groupByAisle, formatQty, missingFromPantry, normName, normUnit, aisleFor } from "./shared/shopping.js";
-import { SLOTS, emptyDay, getDay, dayHasPlan, markEdited, approveDay, unapproveDay, slotsFor, todosOn, MEAL_GROUPS, whoLabel, slotLabel, TODO_IDEAS, remindersOn, pendingFor, dayStatus } from "./shared/plan.js";
+import { SLOTS, emptyDay, getDay, dayHasPlan, markEdited, approveDay, unapproveDay, slotsFor, todosOn, MEAL_GROUPS, whoLabel, slotLabel, remindersOn, pendingFor, dayStatus } from "./shared/plan.js";
 
 const state = load();
 let TODAY = todayKey();
@@ -26,7 +26,6 @@ const ui = {
   shopStore: "all",
   storeMode: false,
   cartOpen: false,       // the "In the cart" section on the shopping list is expanded
-  todoDate: addDays(TODAY, 1),   // the To do tab opens on tomorrow
   openGroups: new Set(),          // meal sections the parent has expanded in the day panel
   suggest: {},                    // date -> { seed, picks: { slotId: recipeId } } meal suggestions shown in the day panel
   savedFilter: "",
@@ -600,7 +599,7 @@ function setTab(tab) {
 
 function render() {
   renderHeader();
-  const fn = { calendar: renderCalendar, recipes: renderRecipes, shopping: renderShopping, todo: renderTodo, reminders: renderReminders }[ui.tab];
+  const fn = { calendar: renderCalendar, recipes: renderRecipes, shopping: renderShopping, frozen: renderFrozen, reminders: renderReminders }[ui.tab];
   fn();
 }
 
@@ -798,22 +797,20 @@ function todoRow(t, { showDate = false } = {}) {
   });
 }
 
-function todoSheet(t = null) {
-  const date = t?.date || ui.todoDate;
+function todoSheet(t) {
   const quick = [[TODAY, "Today"], [addDays(TODAY, 1), "Tomorrow"]];
-  sheet(t ? "todo-edit-sheet" : "todo-sheet", `<form data-form="${t ? "todo-edit" : "todo-add"}" class="stack" ${t ? `data-id="${esc(t.id)}"` : ""}>
-    <div class="row between"><h2>${t ? "Edit to do" : "Add a to do"}</h2><button type="button" class="iconbtn lg" data-sheet-close aria-label="Close">✕</button></div>
-    <label class="field"><span>What needs doing</span><input type="text" name="text" required maxlength="120" value="${esc(t?.text || "")}" placeholder="e.g. Pack the water bottle" data-testid="todo-input" enterkeyhint="done"></label>
-    <div class="field"><span>For</span>${chipRadios("who", ["kid", "baby", "family"].map((v) => [v, whoLabel(v, state.settings, { age: true })]), t?.who || "kid", "todo-who")}</div>
+  sheet("todo-edit-sheet", `<form data-form="todo-edit" class="stack" data-id="${esc(t.id)}">
+    <div class="row between"><h2>Edit to do</h2><button type="button" class="iconbtn lg" data-sheet-close aria-label="Close">✕</button></div>
+    <label class="field"><span>What needs doing</span><input type="text" name="text" required maxlength="120" value="${esc(t.text)}" placeholder="e.g. Pack the water bottle" data-testid="todo-input" enterkeyhint="done"></label>
+    <div class="field"><span>For</span>${chipRadios("who", ["kid", "baby", "family"].map((v) => [v, whoLabel(v, state.settings, { age: true })]), t.who || "kid", "todo-who")}</div>
     <div class="field"><span>When</span>
-      <div class="row">${quick.map(([k, l]) => `<button type="button" class="btn sm ${k === date ? "primary" : ""}" data-action="todo-sheet-date" data-date="${k}">${l}</button>`).join("")}
-        <input type="date" name="date" value="${esc(date)}" required data-testid="todo-input-date" class="grow" aria-label="Date"></div>
+      <div class="row">${quick.map(([k, l]) => `<button type="button" class="btn sm ${k === t.date ? "primary" : ""}" data-action="todo-sheet-date" data-date="${k}">${l}</button>`).join("")}
+        <input type="date" name="date" value="${esc(t.date)}" required data-testid="todo-input-date" class="grow" aria-label="Date"></div>
     </div>
-    <label class="field"><span>Time (optional)</span><input type="time" name="time" value="${esc(t?.time || "")}"></label>
-    <button class="btn primary big" data-testid="${t ? "todo-save" : "todo-add"}">${t ? "Save" : "Add to do"}</button>
-    ${t ? `<button type="button" class="btn danger big" data-action="todo-del" data-id="${esc(t.id)}" data-testid="todo-delete">Delete</button>` : ""}
+    <label class="field"><span>Time (optional)</span><input type="time" name="time" value="${esc(t.time || "")}"></label>
+    <button class="btn primary big" data-testid="todo-save">Save</button>
+    <button type="button" class="btn danger big" data-action="todo-del" data-id="${esc(t.id)}" data-testid="todo-delete">Delete</button>
   </form>`);
-  if (!t) $("[data-testid=todo-input]")?.focus();
 }
 
 const WHO_OPTIONS = (sel = "kid") => ["kid", "baby", "family"].map((v) => [v, whoLabel(v, state.settings)])
@@ -1320,21 +1317,7 @@ function toggleTodo(id, doneNow) {
   if (!t) return;
   t.done = doneNow;
   if (ui.tab === "calendar") { commitDay(t.date); return; }
-  if (ui.tab !== "todo") { commit(); return; }
-  // On the To do tab, tick the row in place instead of rebuilding a long list.
-  save(state);
-  pendCache.delete(t.date);
-  for (const row of document.querySelectorAll(`.swipe[data-kind=todo][data-id="${CSS.escape(id)}"]`)) {
-    row.classList.toggle("done", doneNow);
-    const box = row.querySelector("input[type=checkbox]");
-    if (box) box.checked = doneNow;
-    const l = row.querySelector(".swipe-l");
-    if (l) l.textContent = doneNow ? "✓ Not done" : "✓ Done";
-  }
-  const list = todosOn(state, ui.todoDate);
-  const left = list.filter((x) => !x.done).length;
-  const pill = $("[data-testid=todo-left]");
-  if (pill) { pill.textContent = left ? `${left} left` : "All done"; pill.className = `pill ${left ? "warn" : "ok"}`; }
+  commit();
 }
 
 function plannedRecipes(fromKey_, days) {
@@ -1351,37 +1334,102 @@ function plannedRecipes(fromKey_, days) {
   return out;
 }
 
-// ---------- to do ----------
-function renderTodo() {
-  const key = ui.todoDate;
-  const list = todosOn(state, key);
-  const left = list.filter((t) => !t.done).length;
-  const soon = (state.todos || [])
-    .filter((t) => !t.done && t.date >= TODAY && t.date <= addDays(TODAY, 7) && t.date !== key)
-    .sort((a, b) => (a.date + (a.time || "99")).localeCompare(b.date + (b.time || "99")));
-  // Newest missed first; only the last two weeks unless asked, since a long list is slow and unread.
-  const allMissed = (state.todos || []).filter((t) => !t.done && t.date < TODAY).sort((a, b) => b.date.localeCompare(a.date));
-  const missed = ui.showOlderMissed ? allMissed : allMissed.filter((t) => t.date >= addDays(TODAY, -14));
-  const older = allMissed.length - missed.length;
-  const dayName = key === TODAY ? "Today" : key === addDays(TODAY, 1) ? "Tomorrow" : prettyDate(key);
-  $("#view-todo").innerHTML = `
+// ---------- frozen ----------
+const FROZEN_UNITS = ["packs", "boxes", "bags", "portions", "pcs"];
+const FROZEN_IDEAS = ["Chapatis", "Parathas", "Idli batter", "Dosa batter", "Green peas", "Grated coconut", "Ginger garlic paste", "Mixed vegetables", "Sambar", "Dal", "Chicken", "Fish", "Baby purée cubes", "Ice cream"];
+const FROZEN_OLD_DAYS = 90;   // past about three months, frozen food is worth using up first
+
+function frozenAge(i) {
+  const n = isDateKey(i.date) ? daysBetween(i.date, TODAY) : null;
+  if (n == null) return "";
+  if (n <= 0) return "today";
+  if (n === 1) return "yesterday";
+  if (n < 14) return `${n} days ago`;
+  if (n < 60) return `${Math.round(n / 7)} weeks ago`;
+  return `${Math.round(n / 30)} months ago`;
+}
+
+function frozenQty(i) {
+  if (i.qty == null || i.qty === "") return "";
+  const one = { packs: "pack", boxes: "box", bags: "bag", portions: "portion" };
+  return i.unit ? `${i.qty} ${Number(i.qty) === 1 ? one[i.unit] || i.unit : i.unit}` : `× ${i.qty}`;
+}
+
+function frozenRow(i) {
+  const old = isDateKey(i.date) && daysBetween(i.date, TODAY) >= FROZEN_OLD_DAYS;
+  const age = frozenAge(i);
+  const meta = [frozenQty(i), age ? `frozen ${age}` : "", i.note].filter(Boolean).map(esc).join(" · ");
+  return swipeRow({
+    testid: "frozen-item",
+    cls: `frozen-item ${old ? "old" : ""}`,
+    data: `data-kind="frozen" data-id="${esc(i.id)}" data-name="${esc(i.name)}"`,
+    leftLabel: "Used one",
+    check: `<input type="checkbox" class="big-check" data-action="frozen-use" data-id="${esc(i.id)}" aria-label="Used one ${esc(i.name)}">`,
+    body: `<span class="name">${esc(i.name)}${old ? ' <span class="pill warn" data-testid="frozen-old">Use soon</span>' : ""}</span>${meta ? `<span class="meta" data-testid="frozen-meta">${meta}</span>` : ""}`,
+    more: `<button type="button" class="iconbtn lg" data-action="frozen-more" data-id="${esc(i.id)}" aria-label="Edit ${esc(i.name)}" data-testid="frozen-more">⋯</button>`,
+  });
+}
+
+function renderFrozen() {
+  // Oldest first, so what has been in the freezer longest gets used first.
+  const items = [...state.frozen].sort((a, b) => String(a.date || "").localeCompare(String(b.date || "")) || a.name.localeCompare(b.name));
+  $("#view-frozen").innerHTML = `
     <div class="card">
-      <div class="row between">
-        <button class="btn sm" data-action="todo-day" data-delta="-1" aria-label="Previous day">‹</button>
-        <input type="date" value="${key}" data-action="todo-date" style="max-width:180px" aria-label="Date" data-testid="todo-date">
-        <button class="btn sm" data-action="todo-day" data-delta="1" aria-label="Next day">›</button>
+      <div class="row between"><h2 style="margin:0">🧊 In the freezer</h2><span class="pill" data-testid="frozen-count">${items.length} item${items.length === 1 ? "" : "s"}</span></div>
+      <div data-testid="frozen-list" style="margin-top:6px">${items.length ? items.map(frozenRow).join("") : '<p class="empty-state" data-testid="frozen-empty">Nothing in the freezer yet. Tap <strong>+ Add frozen item</strong> when you put something in.</p>'}</div>
+      ${items.length ? '<p class="small muted swipe-hint">Tip: tap or swipe right when you take one out, swipe left to delete. Oldest is at the top.</p>' : ""}
+    </div>
+    <button class="fab" data-action="frozen-fab" data-testid="frozen-fab" aria-label="Add frozen item"><span aria-hidden="true">＋</span> Add frozen item</button>`;
+}
+
+function frozenSheet(it = null) {
+  const have = new Set(state.frozen.map((i) => normName(i.name)));
+  const ideas = it ? [] : FROZEN_IDEAS.filter((n) => !have.has(normName(n)));
+  const units = !it?.unit || FROZEN_UNITS.includes(it.unit) ? FROZEN_UNITS : [...FROZEN_UNITS, it.unit];
+  sheet(it ? "frozen-edit-sheet" : "frozen-sheet", `<form data-form="${it ? "frozen-edit" : "frozen-add"}" class="stack" ${it ? `data-id="${esc(it.id)}"` : ""}>
+    <div class="row between"><h2>${it ? `🧊 ${esc(it.name)}` : "Add to the freezer"}</h2><button type="button" class="iconbtn lg" data-sheet-close aria-label="Close">✕</button></div>
+    <input type="text" name="name" placeholder="What (e.g. parathas)" required maxlength="80" value="${esc(it?.name || "")}" aria-label="What" data-testid="frozen-name" class="big-input" autocomplete="off" enterkeyhint="done">
+    ${ideas.length ? `<div class="field"><span>Tap to fill in</span><div class="chips scroll-x" data-testid="frozen-ideas">${ideas.map((n) => `<button type="button" class="chip add big" data-action="frozen-idea" data-name="${esc(n)}" data-testid="frozen-idea">${esc(n)}</button>`).join("")}</div></div>` : ""}
+    <div class="field"><span>How many</span>
+      <div class="stepper">
+        <button type="button" class="btn big" data-action="qty-step" data-delta="-1" aria-label="Less">−</button>
+        <input type="number" name="qty" min="0" step="any" value="${it ? it.qty ?? "" : 1}" inputmode="decimal" aria-label="How many" data-testid="frozen-qty">
+        <button type="button" class="btn big" data-action="qty-step" data-delta="1" aria-label="More">+</button>
       </div>
-      <div class="row between" style="margin-top:10px"><h2 style="margin:0">To do: ${esc(dayName)}</h2><span class="pill ${left ? "warn" : "ok"}" data-testid="todo-left">${left ? `${left} left` : list.length ? "All done" : "Nothing yet"}</span></div>
-      <div data-testid="todo-list" style="margin-top:6px">${list.length ? list.map((t) => todoRow(t)).join("") : '<p class="empty-state">Nothing planned for the kids on this day. Tap <strong>+ Add to do</strong> or an idea below.</p>'}</div>
-      <h3>Quick ideas for ${esc(dayName.toLowerCase() === "today" || dayName.toLowerCase() === "tomorrow" ? dayName.toLowerCase() : prettyDate(key))}</h3>
-      <div class="chips">${TODO_IDEAS.map((i) => `<button class="chip add big" data-action="todo-idea" data-text="${esc(i.text)}" data-who="${i.who}" data-testid="todo-idea">+ ${esc(i.text)}</button>`).join("")}</div>
     </div>
-    ${allMissed.length ? `<div class="card" data-testid="todo-missed"><h2>⚠️ Not done yet</h2>${missed.map((t) => todoRow(t, { showDate: true })).join("")}
-      ${older ? `<button class="btn ghost sm" data-action="todo-older" data-testid="todo-older">Show ${older} older</button>` : ""}</div>` : ""}
-    <div class="card" data-testid="todo-upcoming"><h2>Coming up this week</h2>
-      ${soon.length ? soon.map((t) => todoRow(t, { showDate: true })).join("") : '<p class="small muted">Nothing else in the next 7 days.</p>'}
-    </div>
-    <button class="fab" data-action="todo-fab" data-testid="todo-fab" aria-label="Add to do"><span aria-hidden="true">＋</span> Add to do</button>`;
+    <div class="field"><span>Unit</span>${chipRadios("unit", units.map((u) => [u, u]), it ? it.unit || "" : "packs", "frozen-unit")}</div>
+    <label class="field"><span>Frozen on</span><input type="date" name="date" value="${esc(it?.date || TODAY)}" max="${TODAY}" data-testid="frozen-date"></label>
+    <label class="field"><span>Note (optional)</span><input type="text" name="note" maxlength="100" value="${esc(it?.note || "")}" placeholder="e.g. for the baby, top shelf" data-testid="frozen-note"></label>
+    <button class="btn primary big" data-testid="${it ? "frozen-save" : "frozen-add"}">${it ? "Save" : "Add to freezer"}</button>
+    ${it ? `<button type="button" class="btn danger big" data-action="frozen-del" data-id="${esc(it.id)}" data-testid="frozen-delete">Delete</button>` : ""}
+  </form>`);
+  if (!it) $("[data-testid=frozen-name]")?.focus();
+}
+
+// Takes one out of the freezer; the last one takes the item off the list. Can be undone.
+function useFrozen(id) {
+  const idx = state.frozen.findIndex((i) => i.id === id);
+  if (idx < 0) return;
+  const it = state.frozen[idx];
+  const before = { ...it };
+  const qty = Number(it.qty);
+  if (qty > 1) it.qty = qty - 1;
+  else { state.frozen.splice(idx, 1); rowChangedAt = Date.now(); }   // the rows below move up: don't let the tap land on the next one
+  commit();
+  const left = qty > 1 ? `${frozenQty(it)} left` : "none left";
+  toast(`Used ${before.name} · ${left}`, () => {
+    const at = state.frozen.findIndex((i) => i.id === id);
+    if (at >= 0) state.frozen[at] = before; else state.frozen.splice(idx, 0, before);
+    commit();
+  });
+}
+
+function deleteFrozen(id) {
+  const idx = state.frozen.findIndex((i) => i.id === id);
+  if (idx < 0) return;
+  const [it] = state.frozen.splice(idx, 1);
+  commit();
+  toast(`Deleted ${it.name}`, () => { if (!state.frozen.some((i) => i.id === it.id)) state.frozen.splice(idx, 0, it); commit(); });
 }
 
 // ---------- reminders ----------
@@ -1560,7 +1608,15 @@ document.addEventListener("click", (e) => {
       break;
     }
     case "todo-del": el.closest("dialog")?.close(); deleteTodo(el.dataset.id); break;
-    case "todo-fab": todoSheet(); break;
+    case "frozen-fab": frozenSheet(); break;
+    case "frozen-more": { const it = state.frozen.find((i) => i.id === el.dataset.id); if (it) frozenSheet(it); break; }
+    case "frozen-del": el.closest("dialog")?.close(); deleteFrozen(el.dataset.id); break;
+    case "frozen-idea": {
+      const f = el.closest("form");
+      f.name.value = el.dataset.name;
+      f.qty.focus();
+      break;
+    }
     case "todo-more": { const t = state.todos.find((x) => x.id === el.dataset.id); if (t) todoSheet(t); break; }
     case "todo-sheet-date": {
       const f = el.closest("form");
@@ -1644,18 +1700,6 @@ document.addEventListener("click", (e) => {
     }
     case "store-del": state.stores = state.stores.filter((s) => s !== el.dataset.store); if (ui.shopStore === el.dataset.store) ui.shopStore = "all"; commit(); break;
 
-    case "todo-older": ui.showOlderMissed = true; render(); break;
-    case "todo-day": ui.todoDate = addDays(ui.todoDate, Number(el.dataset.delta)); render(); break;
-    case "todo-idea": {
-      const date = ui.todoDate;
-      if (!state.todos.some((t) => t.date === date && t.text === el.dataset.text)) {
-        state.todos.push({ id: uid(), text: el.dataset.text, who: el.dataset.who, date, time: "", done: false });
-      }
-      commit();
-      toast(`Added for ${prettyDate(date)}.`);
-      break;
-    }
-
     case "rem-del": state.reminders = state.reminders.filter((r) => r.id !== el.dataset.id); commit(); break;
     case "notif": Notification.requestPermission().then(() => render()); break;
   }
@@ -1681,6 +1725,7 @@ document.addEventListener("change", (e) => {
       break;
     }
     case "todo-toggle": toggleTodo(el.dataset.id, el.checked); break;
+    case "frozen-use": useFrozen(el.dataset.id); break;
     case "rem-done": {
       const r = state.reminders.find((x) => x.id === el.dataset.id);
       if (!r) return;
@@ -1696,7 +1741,6 @@ document.addEventListener("change", (e) => {
       commit();
       toast(el.checked ? "Nut-free school: lunchbox nuts are blocked and kept off the shopping list." : "Nuts allowed in the lunchbox.");
       break;
-    case "todo-date": if (isDateKey(el.value)) { ui.todoDate = el.value; render(); } break;
     case "import": {
       const file = el.files?.[0];
       if (!file) return;
@@ -1796,14 +1840,29 @@ document.addEventListener("submit", (e) => {
       commit();
       break;
     }
-    case "todo-add":
     case "todo-add-day": {
       const text = f.text.value.trim();
-      const date = kind === "todo-add" ? f.date.value : ui.selected;
+      const date = ui.selected;
       if (!text || !isDateKey(date)) return;
       state.todos.push({ id: uid(), text, who: f.who.value, date, time: f.time?.value || "", done: false });
-      if (kind === "todo-add") { ui.todoDate = date; form.closest("dialog")?.close(); toast(`Added for ${prettyDate(date)}.`); }
-      if (kind === "todo-add-day") { commitDay(date); $("[data-testid=day-todo-input]")?.focus(); } else commit();
+      commitDay(date);
+      $("[data-testid=day-todo-input]")?.focus();
+      break;
+    }
+    case "frozen-add":
+    case "frozen-edit": {
+      const name = f.name.value.trim();
+      if (!name) return;
+      const fields = { name, qty: f.qty.value === "" ? null : Number(f.qty.value), unit: f.unit.value, date: isDateKey(f.date.value) ? f.date.value : TODAY, note: f.note.value.trim() };
+      if (kind === "frozen-add") state.frozen.push({ id: uid(), ...fields });
+      else {
+        const it = state.frozen.find((i) => i.id === form.dataset.id);
+        if (!it) return;
+        Object.assign(it, fields);
+      }
+      form.closest("dialog")?.close();
+      commit();
+      toast(kind === "frozen-add" ? `Added ${name} to the freezer` : `Saved ${name}`);
       break;
     }
     case "rem-add": {
@@ -1886,9 +1945,12 @@ function endSwipe() {
   const { kind, id } = row.dataset;
   if (dx > SWIPE_AT) {
     if (kind === "shop") toggleShopItem(id, !row.classList.contains("bought"));
+    else if (kind === "frozen") useFrozen(id);
     else toggleTodo(id, !row.classList.contains("done"));
   } else if (dx < -SWIPE_AT) {
-    if (kind === "shop") deleteShopItem(id); else deleteTodo(id);
+    if (kind === "shop") deleteShopItem(id);
+    else if (kind === "frozen") deleteFrozen(id);
+    else deleteTodo(id);
   }
 }
 document.addEventListener("pointerup", endSwipe);
@@ -1937,7 +1999,7 @@ window.addEventListener("offline", () => { ui.ai = "unreachable"; renderHeader()
 
 // ---------- start ----------
 const initialTab = location.hash.replace("#", "");
-setTab(["calendar", "recipes", "shopping", "todo", "reminders"].includes(initialTab) ? initialTab : "calendar");
+setTab(["calendar", "recipes", "shopping", "frozen", "reminders"].includes(initialTab) ? initialTab : "calendar");
 onChange(() => { renderSyncButtons(); cloud.pushSoon(); });
 startFamilySync();
 maybeShowLogin();

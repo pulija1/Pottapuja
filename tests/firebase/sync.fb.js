@@ -151,19 +151,20 @@ test("SYNC-E2E-05 a phone with no signal keeps working and catches up when it's 
   }
 });
 
-test("SYNC-E2E-06 other tabs of data sync too: to-dos, days, kitchen and children's names", async () => {
+test("SYNC-E2E-06 other tabs of data sync too: to-dos, days, freezer, kitchen and children's names", async () => {
   await A.page.evaluate(() => {
     const m = window.__mealPlanner;
     m.state.todos.push({ id: "td1", text: "Pack the school bag", who: "kid", date: "2026-10-23", time: "", done: false });
     m.state.days["2026-10-23"] = { meals: { baby_breakfast: { title: "Ragi porridge" } }, schedule: [] };
     m.state.pantry.push("jowar flour");
+    m.state.frozen.push({ id: "fz1", name: "Parathas", qty: 4, unit: "packs", date: "2026-10-20", note: "" });
     m.state.settings.kidName = "Kid";
     m.cloud.syncNow();
   });
   await waitFor(() => B.page.evaluate(() => {
     const s = window.__mealPlanner.state;
-    return s.todos.some((t) => t.id === "td1") && s.days["2026-10-23"]?.meals?.baby_breakfast?.title === "Ragi porridge" && s.pantry.includes("jowar flour") && s.settings.kidName === "Kid";
-  }), "to-do, day, kitchen and names on B");
+    return s.todos.some((t) => t.id === "td1") && s.days["2026-10-23"]?.meals?.baby_breakfast?.title === "Ragi porridge" && s.pantry.includes("jowar flour") && s.frozen.some((i) => i.id === "fz1") && s.settings.kidName === "Kid";
+  }), "to-do, day, freezer, kitchen and names on B");
   // The calendar on B shows the synced to-do on that date without a reload.
   await tid(B.page, "tab-calendar").click();
   await B.page.locator('[data-testid="cal-day-2026-10-23"]').click();

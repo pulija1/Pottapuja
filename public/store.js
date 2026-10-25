@@ -13,6 +13,7 @@ export function defaultState() {
     shopping: [],
     stores: ["Indian grocery", "Supermarket", "Costco"],
     todos: [],
+    frozen: [],        // what's in the freezer: { id, name, qty, unit, date (when it went in), note }
     reminders: [],
     notified: {},
     settings: { schoolNutFree: false, kidName: "", babyName: "" },
@@ -32,9 +33,10 @@ function sanitize(data) {
   }
   out.pantry = out.pantry.filter((x) => typeof x === "string");
   out.stores = out.stores.filter((x) => typeof x === "string");
-  for (const k of ["savedRecipes", "shopping", "todos", "reminders"]) out[k] = out[k].filter((x) => typeof x === "object");
+  for (const k of ["savedRecipes", "shopping", "todos", "frozen", "reminders"]) out[k] = out[k].filter((x) => typeof x === "object");
   out.todos = out.todos.filter((t) => typeof t.text === "string" && typeof t.date === "string");
   out.shopping = out.shopping.filter((i) => typeof i.name === "string");
+  out.frozen = out.frozen.filter((i) => typeof i.name === "string");
   out.reminders = out.reminders.filter((r) => typeof r.title === "string" && typeof r.date === "string");
   for (const [key, day] of Object.entries(out.days)) {
     if (!day || typeof day !== "object" || Array.isArray(day)) { delete out.days[key]; continue; }
