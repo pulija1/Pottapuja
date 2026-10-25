@@ -992,3 +992,36 @@ test("E2E APPL-01 appliances in the profile: recipes show the air fryer and oven
   assert.deepEqual(errors, []);
   await ctx.close();
 });
+
+test("E2E CUI-01 cuisines picked in the profile steer suggestions and top picks; yesterday's curry becomes a roti quesadilla", async () => {
+  const ctx = await newContext();
+  const seed = { version: 1, pantry: ["Bendakaya (okra)", "onion", "tomato", "rice", "roti", "cheese", "curry leaves", "mustard seeds"], frozen: [{ id: "f1", name: "Frozen peas", qty: 2, unit: "packs", date: "2026-10-01" }],
+    days: { [TODAY]: { meals: { family_dinner: { recipeId: "lib-kodi-kura", title: "Kodi kura (Andhra chicken curry, mild)", forWhom: "family" } }, schedule: [], status: "pending" } } };
+  await ctx.addInitScript((s) => { if (!localStorage.getItem("familyMealPlanner.v1")) localStorage.setItem("familyMealPlanner.v1", s); }, JSON.stringify(seed));
+  const page = await ctx.newPage();
+  const errors = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await page.goto(`${mock.url}?today=${TODAY}`);
+  await tid(page, "cal-grid").waitFor();
+
+  await tid(page, "profile").click();
+  await tid(page, "cuisine-telugu").check();
+  await tid(page, "cuisine-tamil").check();
+  await tid(page, "save-cuisines").click();
+  assert.deepEqual(await page.evaluate(() => window.__mealPlanner.state.settings.cuisines), ["telugu", "tamil"]);
+
+  // The day after the Kodi kura, the school lunchbox suggestion is a leftover makeover.
+  await cell(page, TOMORROW).click();
+  const lunch = page.locator("[data-testid=suggestion][data-slot=kid_lunchbox]");
+  assert.match(await lunch.innerText(), /Uses yesterday's Kodi kura[\s\S]*Roti chicken curry quesadilla/);
+  assert.doesNotMatch(await lunch.innerText(), /leftover chicken curry/, "the leftover is never something to buy");
+
+  await tid(page, "tab-recipes").click();
+  const top = tid(page, "top-picks");
+  await top.waitFor();
+  assert.ok((await tid(page, "top-pick").count()) <= 5);
+  assert.match(await top.innerText(), /Telugu, Tamil/);
+  assert.match(await tid(page, "leftover-ideas").innerText(), /Kodi kura[\s\S]*can become/);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});

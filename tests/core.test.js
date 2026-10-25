@@ -155,8 +155,9 @@ test("QUICK-02 quick suggestions from the recipe book are ready in 20 minutes, o
   const firstSlow = quick.findIndex((r) => !(r.prepMinutes <= 20));
   assert.ok(firstSlow === -1 || quick.slice(firstSlow).every((r) => !(r.prepMinutes <= 20)), "quick ones come first");
   // When nothing is that quick it offers the fastest one rather than nothing.
+  // (Leftover makeovers need yesterday's curry, so they are never plain suggestions.)
   const [fast] = suggestFromLibrary([], { forWhom: "family", mealType: "dinner", limit: 1, maxMinutes: 5 });
-  const dinners = LIBRARY.filter((r) => r.forWhom === "family" && r.mealType === "dinner");
+  const dinners = LIBRARY.filter((r) => r.forWhom === "family" && r.mealType === "dinner" && !r.leftover);
   assert.equal(fast.prepMinutes, Math.min(...dinners.map((r) => r.prepMinutes || Infinity)));
   // A recipe with the kitchen's vegetable beats a faster one without it.
   const [okra] = suggestFromLibrary(["ladies finger"], { forWhom: "both", limit: 1, maxMinutes: 20 });

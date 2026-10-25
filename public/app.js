@@ -4,7 +4,7 @@ import { getAiKey, setAiKey, looksLikeKey, browserRecipes } from "./ai-browser.j
 import { QUICK_MINUTES } from "./shared/ai-prompt.js";
 import { todayKey, addDays, addMonths, monthGrid, monthLabel, prettyDate, fromKey, isDateKey, isSchoolDay, occurrences, daysBetween } from "./shared/dates.js";
 import { checkRecipe, checkForAudience, isNutIngredient, isSchoolFood } from "./shared/safety.js";
-import { LIBRARY, suggestFromLibrary, readyToCook, RECIPE_BOOK_STATUS, cookByVegetables, missingForRecipe } from "./shared/recipes.js";
+import { LIBRARY, suggestFromLibrary, readyToCook, RECIPE_BOOK_STATUS, cookByVegetables, missingForRecipe, CUISINES, inCuisines, topPicks, leftoverKind, leftoverRecipesFor, freezerSet } from "./shared/recipes.js";
 import { nutritionTags, TAG_LABELS } from "./shared/recipe-book.js";
 import { APPLIANCES, ownedAppliances, methodsFor, fastestMinutes, basketPairs, applianceRequest } from "./shared/appliances.js";
 import { NUTRIENTS, DAILY_NEEDS, estimateNutrition, dailyShare } from "./shared/nutrition.js";
@@ -31,6 +31,7 @@ const ui = {
   openGroups: new Set(),          // meal sections the parent has expanded in the day panel
   suggest: {},                    // date -> { seed, picks: { slotId: recipeId } } meal suggestions shown in the day panel
   savedFilter: "",
+  morePicks: false,       // Recipes tab: show 15 top picks instead of 5
   gen: { forWhom: "both", mealType: "", notes: "", quick: false },
   cookVeg: [],            // vegetables picked in "Cook by vegetable"
   cookQuick: true,        // ...and only the ones ready in QUICK_MINUTES
@@ -186,10 +187,32 @@ function findRecipeByTitle(title, who) {
 const nutFreeOn = () => !!state.settings?.schoolNutFree;
 // The air fryer and oven the family has, from 👤 Profile.
 const appliancesOwned = () => ownedAppliances(state.settings);
+// The cuisines picked in Profile (ids from CUISINES). Empty means every cuisine counts the same.
+const cuisinePicks = () => (Array.isArray(state.settings?.cuisines) ? state.settings.cuisines : []).filter((c) => CUISINES.some((x) => x.id === c));
+// What's in the freezer (the Frozen tab) counts as in the kitchen for suggestions, a little behind fresh food.
+const frozenOnHand = () => state.frozen || [];
+// Vegetables count most when ranking top picks; onion, tomato and the aromatics are in almost everything, so they don't.
+const isMainVeg = (n) => aisleFor(n) === "Vegetables" && !/onion|shallot|ginger|garlic|chill?i|curry leaves|coriander|mint|lemon|lime|tomato/.test(n);
+
+// Family curries cooked on a date that can be made into something new the next day ("chicken curry", "dal", ...).
+function leftoversFrom(key) {
+  const day = getDay(state, key);
+  const out = [];
+  for (const s of slotsFor(key)) {
+    const m = day?.meals?.[s.id];
+    if (!m?.title || s.who !== "family") continue;
+    const r = (m.recipeId && findRecipe(m.recipeId)) || findRecipeByTitle(m.title) || { title: m.title };
+    const kind = leftoverKind(r);
+    if (kind && !out.some((o) => o.kind === kind)) out.push({ kind, title: m.title.replace(/\s*\(.*?\)/g, "").trim() || m.title });
+  }
+  return out;
+}
 
 // Missing ingredients for a recipe, leaving nuts off the list for school food when the school is nut-free.
+// Whatever is in the freezer isn't missing either.
 function shoppingNeeds(recipe) {
-  const need = missingFromPantry(recipe, state.pantry);
+  const cold = freezerSet(frozenOnHand());
+  const need = missingFromPantry(recipe, state.pantry).filter((i) => !cold.has(normName(i.name)));
   return nutFreeOn() && isSchoolFood(recipe) ? need.filter((i) => !isNutIngredient(i.name)) : need;
 }
 
@@ -486,6 +509,12 @@ function profileDialog({ focusKey = false } = {}) {
       <label class="chk" style="min-height:0"><input type="checkbox" name="oven" ${state.settings.oven ? "checked" : ""} data-testid="has-oven"> ♨️ Oven</label>
       <button type="button" class="btn sm" data-sync="appliances" data-testid="save-appliances">Save appliances</button>
     </details>`;
+  const picked = cuisinePicks();
+  const cuisines = `<details ${picked.length ? "" : "open"} data-testid="cuisine-section"><summary class="small">Cuisines we cook${picked.length ? " · " + esc(picked.map((id) => CUISINES.find((x) => x.id === id).label.replace(/ \(.*\)/, "")).join(", ")) : ""}</summary>
+      <p class="small muted">Suggestions and top picks come mostly from these. Leave them all off to see every cuisine.</p>
+      <div class="chips">${CUISINES.map((x) => `<label class="chk" style="min-height:0"><input type="checkbox" name="cuisine" value="${x.id}" ${picked.includes(x.id) ? "checked" : ""} data-testid="cuisine-${x.id}"> ${esc(x.label)}</label>`).join("")}</div>
+      <button type="button" class="btn sm" data-sync="cuisines" data-testid="save-cuisines">Save cuisines</button>
+    </details>`;
   const fam = c.family;
   const members = fam ? `<div class="stack" data-testid="family-members">
       <strong class="small">Family members</strong>
@@ -507,6 +536,7 @@ function profileDialog({ focusKey = false } = {}) {
     ${c.configured ? `<p class="small sync-status" data-testid="cloud-status-text" role="status">${esc(cloudStatusText(c))}</p>` : ""}
     ${members}
     ${names}
+    ${cuisines}
     ${appliances}
     ${aiKey}
     <p class="small muted">A backup file is still handy: <button type="button" class="linkish" data-sync="export" data-testid="profile-export">Export backup</button></p>
@@ -534,6 +564,14 @@ function profileDialog({ focusKey = false } = {}) {
         commit();
         toast("Appliances saved. Recipes will use them.");
         profileDialog();
+        break;
+      }
+      case "cuisines": {
+        const cuisines = [...dlg.querySelectorAll("input[name=cuisine]:checked")].map((i) => i.value);
+        state.settings = { ...state.settings, cuisines };
+        commit();
+        dlg.close();
+        toast(cuisines.length ? "Cuisines saved. Suggestions now lean toward them." : "Showing every cuisine.");
         break;
       }
       case "add": {
@@ -723,6 +761,10 @@ function suggestionsFor(key) {
   const day = getDay(state, key) || emptyDay();
   const entry = ui.suggest[key] || (ui.suggest[key] = { seed: 0, offsets: {}, picks: null });
   if (entry.picks) return entry.picks;
+  const cuisines = cuisinePicks();
+  // A curry cooked the day before becomes one of today's meals (roti quesadilla, kathi roll, kari dosa).
+  const leftovers = leftoversFrom(addDays(key, -1));
+  entry.leftover = {};
   const prev = getDay(state, addDays(key, -1));
   const avoid = new Set(Object.values(prev?.meals || {}).map((m) => m?.recipeId).filter(Boolean));
   const used = new Set(Object.values(day.meals || {}).map((m) => m?.recipeId).filter(Boolean));
@@ -730,12 +772,25 @@ function suggestionsFor(key) {
   for (const s of slotsFor(key)) {
     if (day.meals?.[s.id]?.title) continue;
     const meal = s.id.split("_")[1];
-    const opt = { forWhom: s.who, schoolNutFree: nutFreeOn(), limit: 40, appliances: appliancesOwned() };
+    const opt = { forWhom: s.who, schoolNutFree: nutFreeOn(), limit: 40, cuisines, frozen: frozenOnHand(), appliances: appliancesOwned() };
     const seen = new Set();
+    const safe = (r) => checkRecipe(r, { age: s.who === "baby" ? "baby" : "kid", lunchbox: s.id === "kid_lunchbox" || s.id === "kid_snack", schoolNutFree: nutFreeOn() }).safe;
+    // One leftover idea a day, in the first slot it fits. 🔀 on that slot moves on to the usual ideas.
+    if (leftovers.length && !Object.keys(entry.leftover).length && !entry.offsets[s.id]) {
+      const ideas = leftovers.flatMap((l) => leftoverRecipesFor(l.kind, { cuisines }).map((r) => ({ r, l })))
+        .filter(({ r }) => r.forWhom === s.who && (r.mealType === meal || (meal === "lunchbox" && r.mealType === "lunch")) && !used.has(r.id) && safe(r));
+      if (ideas.length) {
+        const { r, l } = ideas[entry.seed % ideas.length];
+        picks[s.id] = r.id;
+        used.add(r.id);
+        entry.leftover[s.id] = l.title;
+        continue;
+      }
+    }
     const candidates = suggestFromLibrary(state.pantry, { ...opt, mealType: meal })
       .concat(suggestFromLibrary(state.pantry, opt))
-      .filter((r) => r.forWhom === s.who && !seen.has(r.id) && seen.add(r.id))
-      .filter((r) => checkRecipe(r, { age: s.who === "baby" ? "baby" : "kid", lunchbox: s.id === "kid_lunchbox" || s.id === "kid_snack", schoolNutFree: nutFreeOn() }).safe);
+      .filter((r) => r.forWhom === s.who && !r.leftover && !seen.has(r.id) && seen.add(r.id))
+      .filter(safe);
     let fresh = candidates.filter((r) => !used.has(r.id) && !avoid.has(r.id));
     // Steer the 4-year-old's empty slots toward the daily goal: an egg at breakfast, milk in the lunchbox, nuts in the snack.
     if (s.who === "kid") {
@@ -798,6 +853,13 @@ function renderBasketPlan(key) {
   </div>`;
 }
 
+// Ingredients of a recipe that come from the freezer, because they aren't in the kitchen fresh.
+function fromFreezer(recipe) {
+  const cold = freezerSet(frozenOnHand());
+  const fresh = new Set(state.pantry.map(normName));
+  return [...new Set((recipe?.ingredients || []).map((i) => normName(i.name)).filter((n) => cold.has(n) && !fresh.has(n)))];
+}
+
 function renderSuggestions(key) {
   if (key < TODAY) return "";
   const picks = suggestionsFor(key);
@@ -809,9 +871,11 @@ function renderSuggestions(key) {
     ${rows.map((s) => {
       const r = findRecipe(picks[s.id]);
       const need = shoppingNeeds(r);
+      const from = ui.suggest[key]?.leftover?.[s.id];
+      const cold = fromFreezer(r);
       return `<div class="suggest-row" data-testid="suggestion" data-slot="${s.id}">
         <span class="small muted">${esc(slotLabel(s, state.settings))}</span>
-        <span class="grow">${esc(r.title)}${r.familyFavorite ? " ⭐" : ""}${tagIcons(r) ? ` <span aria-hidden="true">${tagIcons(r)}</span>` : ""}${applianceNote(r)}${need.length ? ` <span class="small" style="color:var(--warn)">· need ${esc(need.map((i) => i.name).join(", "))}</span>` : ' <span class="small" style="color:var(--ok)">· all in the kitchen</span>'}</span>
+        <span class="grow">${from ? `<span class="small" data-testid="leftover-idea">♻️ Uses yesterday's ${esc(from)}</span><br>` : ""}${esc(r.title)}${r.familyFavorite ? " ⭐" : ""}${tagIcons(r) ? ` <span aria-hidden="true">${tagIcons(r)}</span>` : ""}${applianceNote(r)}${need.length ? ` <span class="small" style="color:var(--warn)">· need ${esc(need.map((i) => i.name).join(", "))}</span>` : ' <span class="small" style="color:var(--ok)">· all in the kitchen</span>'}${cold.length ? ` <span class="small" data-testid="from-freezer">· 🧊 ${esc(cold.join(", "))} from the freezer</span>` : ""}</span>
         <button type="button" class="iconbtn" data-action="suggest-swap" data-slot="${s.id}" title="Another idea" aria-label="Another idea for ${esc(slotLabel(s, state.settings))}">🔀</button>
       </div>`;
     }).join("")}
@@ -1065,20 +1129,49 @@ function renderReadyToCook() {
       ${book.failed.length ? `Couldn't read ${book.failed.map((f) => esc(f.file)).join(", ")} from the recipe book. ` : ""}
       ${book.problems.length ? `${book.problems.length} recipe${book.problems.length > 1 ? "s" : ""} in the recipe book need fixing: ${book.problems.slice(0, 5).map((p) => `${esc(p.file)}${p.line ? " line " + p.line : ""} “${esc(p.title)}”: ${esc(p.message)}`).join("; ")}` : ""}
     </div>` : "";
-  const opt = { schoolNutFree: nutFreeOn() };
+  const opt = { schoolNutFree: nutFreeOn(), cuisines: cuisinePicks(), frozen: frozenOnHand() };
+  const picks = topPicks(state.pantry, { ...opt, isVegetable: isMainVeg, limit: ui.morePicks ? 15 : 5 });
   const now = readyToCook(state.pantry, { ...opt, limit: 8 });
   const nearly = readyToCook(state.pantry, { ...opt, maxMissing: 1, limit: 30 }).filter((x) => x.missing.length === 1).slice(0, 8);
-  const row = (x) => `<button type="button" class="ready-item" data-action="view-recipe" data-id="${esc(x.recipe.id)}" data-testid="ready-recipe">
+  const row = (x, testid = "ready-recipe") => `<button type="button" class="ready-item" data-action="view-recipe" data-id="${esc(x.recipe.id)}" data-testid="${testid}">
       <span class="grow"><strong>${esc(x.recipe.title)}</strong>${x.recipe.familyFavorite ? " ⭐" : ""} <span aria-hidden="true">${tagIcons(x.recipe)}</span>
-        <span class="small muted">${esc(whoLabel(x.recipe.forWhom, state.settings))} · ${esc(x.recipe.cuisine || x.recipe.mealType)}${x.missing.length ? ` · need ${esc(x.missing.join(", "))}` : ""}</span></span>
+        <span class="small muted">${esc(whoLabel(x.recipe.forWhom, state.settings))} · ${esc(x.recipe.cuisine || x.recipe.mealType)}${x.missing.length ? ` · need ${esc(x.missing.join(", "))}` : ""}${x.fromFreezer?.length ? ` · 🧊 from the freezer: ${esc(x.fromFreezer.join(", "))}` : ""}</span></span>
       <span aria-hidden="true">›</span></button>`;
-  return `<div class="card" data-testid="ready-to-cook">
+  const names = cuisinePicks().map((id) => CUISINES.find((x) => x.id === id).label.replace(/ \(.*\)/, ""));
+  const top = picks.length ? `<div class="card" data-testid="top-picks">
+    <h2>Top picks for you</h2>
+    <p class="small muted">Easy recipes that use the vegetables in your kitchen${names.length ? `, from ${esc(names.join(", "))}` : ""}. ${names.length ? "Change cuisines" : "Pick your cuisines"} in <button type="button" class="linkish" data-action="open-profile">👤 Profile</button>.</p>
+    <div class="ready-list">${picks.map((x) => row(x, "top-pick")).join("")}</div>
+    ${ui.morePicks || picks.length < 5 ? "" : '<button type="button" class="btn sm ghost" data-action="more-picks" data-testid="more-picks" style="margin-top:8px">Show more</button>'}
+  </div>` : "";
+  return `${top}${renderLeftoverIdeas()}<div class="card" data-testid="ready-to-cook">
     <h2>Ready to cook from your kitchen</h2>
     ${trouble}
-    ${now.length ? `<div class="ready-list">${now.map(row).join("")}</div>` : `<p class="small muted">${state.pantry.length ? "Nothing in the recipe book can be made with only what's in the kitchen yet." : "Add what you have above and recipes you can make right away show up here."}</p>`}
-    ${nearly.length ? `<h3>Just one thing to buy</h3><div class="ready-list" data-testid="nearly-ready">${nearly.map(row).join("")}</div>` : ""}
+    ${now.length ? `<div class="ready-list">${now.map((x) => row(x)).join("")}</div>` : `<p class="small muted">${state.pantry.length ? "Nothing in the recipe book can be made with only what's in the kitchen yet." : "Add what you have above and recipes you can make right away show up here."}</p>`}
+    ${nearly.length ? `<h3>Just one thing to buy</h3><div class="ready-list" data-testid="nearly-ready">${nearly.map((x) => row(x)).join("")}</div>` : ""}
     <p class="small muted" style="margin-top:8px">${LIBRARY.length} recipes in the family recipe book (the <code>recipes/</code> folder in the repository).</p>
   </div>`;
+}
+
+// Leftover makeovers: when yesterday's or today's plan has a curry, what it can turn into.
+// Otherwise a short list of the book's makeovers, for leftovers that weren't planned.
+function renderLeftoverIdeas() {
+  const cuisines = cuisinePicks();
+  const recent = [...leftoversFrom(addDays(TODAY, -1)), ...leftoversFrom(TODAY)];
+  const fromPlan = recent.map((l) => ({ l, list: leftoverRecipesFor(l.kind, { cuisines }) })).filter((x) => x.list.length);
+  const item = (r) => `<button type="button" class="ready-item" data-action="view-recipe" data-id="${esc(r.id)}" data-testid="leftover-recipe">
+      <span class="grow"><strong>${esc(r.title)}</strong> <span aria-hidden="true">${tagIcons(r)}</span>
+        <span class="small muted">${esc(whoLabel(r.forWhom, state.settings))} · ${esc(r.cuisine || r.mealType)}${r.prepMinutes ? " · " + esc(r.prepMinutes) + " min" : ""}</span></span>
+      <span aria-hidden="true">›</span></button>`;
+  if (fromPlan.length) {
+    return `<div class="card" data-testid="leftover-ideas"><h2>♻️ Leftover makeovers</h2>
+      ${fromPlan.map(({ l, list }) => `<p class="small">${esc(l.title)} can become:</p><div class="ready-list">${list.slice(0, 4).map(item).join("")}</div>`).join("")}
+      <p class="small muted" style="margin-top:8px">Put leftovers in the fridge within 2 hours, use them the next day, and reheat until steaming hot.</p></div>`;
+  }
+  const all = LIBRARY.filter((r) => r.leftover).sort((a, b) => inCuisines(b, cuisines) - inCuisines(a, cuisines)).slice(0, 4);
+  if (!all.length) return "";
+  return `<details class="card" data-testid="leftover-ideas"><summary><strong>♻️ Got leftover curry?</strong> <span class="small muted">Roti quesadillas, kathi rolls, kari dosa and more</span></summary>
+    <div class="ready-list" style="margin-top:8px">${all.map(item).join("")}</div></details>`;
 }
 
 // Estimated nutrition for one serving, worked out from the ingredients. For the baby's and the
@@ -1139,7 +1232,7 @@ async function generate(form) {
     ingredients: state.pantry,
     forWhom: form.forWhom.value,
     mealType: form.mealType.value,
-    notes: form.notes.value,
+    notes: [form.notes.value.trim(), cuisinePicks().length ? `The family mostly cooks ${cuisinePicks().map((id) => CUISINES.find((x) => x.id === id).label).join(", ")}.` : ""].filter(Boolean).join(" ").slice(0, 300),
     count: ui.gen.quick ? 1 : 4,
     quick: ui.gen.quick,
     schoolNutFree: nutFreeOn(),
@@ -1148,7 +1241,7 @@ async function generate(form) {
   ui.aiNotice = "";
   ui.rejected = [];
   const fallback = (why) => {
-    ui.results = suggestFromLibrary(state.pantry, { forWhom: body.forWhom, mealType: body.mealType, limit: body.quick ? 1 : 6, schoolNutFree: body.schoolNutFree, maxMinutes: body.quick ? QUICK_MINUTES : 0, appliances: appliancesOwned() });
+    ui.results = suggestFromLibrary(state.pantry, { forWhom: body.forWhom, mealType: body.mealType, limit: body.quick ? 1 : 6, schoolNutFree: body.schoolNutFree, maxMinutes: body.quick ? QUICK_MINUTES : 0, cuisines: cuisinePicks(), frozen: frozenOnHand(), appliances: appliancesOwned() });
     ui.aiNotice = `${why} Showing recipes from the built-in family recipe book that best match your kitchen.`;
   };
   if (!aiOnline()) {
@@ -1660,6 +1753,8 @@ document.addEventListener("click", (e) => {
     case "unapprove": unapproveDay(day()); commitDay(); break;
     case "clear-slot": { const d = day(); delete d.meals[el.dataset.slot]; markEdited(d); commitDay(); break; }
     case "view-recipe": { const r = findRecipe(el.dataset.id); if (r) recipeDialog(r); break; }
+    case "more-picks": ui.morePicks = true; render(); break;
+    case "open-profile": profileDialog(); break;
     case "autofill": {
       const n = applySuggestions(ui.selected);
       commitDay();

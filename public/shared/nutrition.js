@@ -31,6 +31,15 @@ const FOODS = [
   // Water, salt and things used by the drop or for colour add nothing worth counting.
   F(/\b(water|salt|baking (powder|soda)|vanilla|saffron|orange zest|curry leaves)\b/, [0, 0, 0, 0, 0, 0, 0]),
 
+  // Yesterday's cooked curries (leftover-makeovers.md), before their raw ingredients below.
+  F(/leftover chicken curry/, [150, 14, 4, 1, 9, 1, 20], { cup: 240 }),
+  F(/leftover paneer curry/, [180, 8, 7, 1.5, 13, 0.8, 200], { cup: 240 }),
+  F(/leftover beans curry|leftover (rajma|chole)/, [120, 6, 16, 5, 3.5, 1.8, 40], { cup: 240 }),
+  F(/leftover dal/, [105, 6, 15, 3, 2.5, 1.5, 25], { cup: 240 }),
+  F(/leftover sambar/, [65, 3, 9, 2.5, 2, 1, 30], { cup: 240 }),
+  F(/leftover (vegetable curry|kura|sabzi)/, [90, 2, 9, 3, 5, 0.8, 30], { cup: 200 }),
+  F(/leftover curry/, [130, 8, 8, 2, 7.5, 1, 40], { cup: 240 }),
+
   // Spice mixes, before "chana" in "chana masala powder" is read as chickpeas.
   F(/\bmasala\b|(sambar|rasam|kuzhambu|curry) powder/, SPICE, { cup: 120 }),
 
