@@ -1,6 +1,7 @@
 import { load, save, exportJson, importJson, onChange, defaultState, onSaveError, cancelPendingSave, STORAGE_KEY } from "./store.js";
 import * as cloud from "./cloud.js";
-import { getAiKey, setAiKey, looksLikeKey, browserRecipes } from "./ai-browser.js";
+import { getAiKey, setAiKey, looksLikeKey, browserRecipes, browserPlanChat } from "./ai-browser.js";
+import { catalogText, libraryRefs, savedRefs, planWindow, contextText, userTurn, planChanges } from "./shared/plan-chat.js";
 import { QUICK_MINUTES } from "./shared/ai-prompt.js";
 import { todayKey, addDays, addMonths, monthGrid, monthLabel, prettyDate, fromKey, isDateKey, isSchoolDay, occurrences, daysBetween } from "./shared/dates.js";
 import { checkRecipe, checkForAudience, isNutIngredient, isSchoolFood } from "./shared/safety.js";
@@ -40,6 +41,8 @@ const ui = {
   cookVeg: [],            // vegetables picked in "Cook by vegetable"
   cookQuick: true,        // ...and only the ones ready in QUICK_MINUTES
   confirmUnsafe: null,    // date whose unsafe plan the parent was warned about
+  // The week-planning chat: what the parent and Claude said (shown), and the turns sent to Claude.
+  chat: { shown: [], turns: [], busy: false, controller: null },
   // recipe form values survive re-renders
 };
 
@@ -518,8 +521,17 @@ function chooseFamilyDialog(c, list) {
 function profileDialog({ focusKey = false } = {}) {
   const c = cloud.getCloud();
   const hasKey = !!getAiKey();
-  const aiKey = `<details ${focusKey ? "open" : ""} data-testid="ai-key-section"><summary class="small">Claude API key (AI recipes)${hasKey ? " · added" : ""}</summary>
-      <p class="small muted">Kept only in this browser. It is never synced to the family or put in backups. Get a key at console.anthropic.com under API Keys, and set a monthly spend limit there.</p>
+  const aiKey = `<details ${focusKey ? "open" : ""} data-testid="ai-key-section"><summary class="small">Claude API key (AI recipes and week planning)${hasKey ? " · added" : ""}</summary>
+      ${hasKey ? "" : `<div class="key-steps" data-testid="ai-key-steps">
+        <p class="small"><strong>Get a key in about two minutes:</strong></p>
+        <ol class="small">
+          <li>Sign in or sign up at the Claude Console (a Claude.ai subscription doesn't include it; the API is billed on its own).</li>
+          <li>Under <strong>Billing</strong>, add some credit ($5 covers many weekly plans) and set a monthly spend limit.</li>
+          <li>Under <strong>API Keys</strong>, tap <strong>Create Key</strong>, copy it and paste it below.</li>
+        </ol>
+        <a class="btn sm primary" href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener noreferrer" data-testid="ai-key-get">🔑 Get a Claude key</a>
+      </div>`}
+      <p class="small muted">Kept only in this browser. It is never synced to the family or put in backups. Each phone adds the key once.</p>
       <label class="field"><span>API key</span><input name="aiKey" type="password" autocomplete="off" spellcheck="false" placeholder="${hasKey ? "Saved. Paste a new key to replace it" : "sk-ant-…"}" data-testid="ai-key"></label>
       <p class="small" data-testid="ai-key-status" role="status"></p>
       <div class="row"><button type="button" class="btn sm" data-sync="aikey-save" data-testid="ai-key-save">Save key</button>${hasKey ? '<button type="button" class="btn sm ghost" data-sync="aikey-remove" data-testid="ai-key-remove">Remove key</button>' : ""}</div>
@@ -741,6 +753,10 @@ function renderCalendar() {
           ${grid}
         </div>
         <button type="button" class="cal-view" data-action="cal-view" data-testid="cal-view" aria-expanded="${!week}">${week ? "Show the whole month" : "Show one week"}<span class="chev" aria-hidden="true"></span></button>
+        <div class="week-plan" data-testid="week-plan">
+          <button type="button" class="btn sm" data-action="fill-week" data-testid="fill-week">📋 Fill the week from the kitchen</button>
+          <button type="button" class="btn sm primary" data-action="plan-chat" data-testid="plan-chat-open">💬 Plan the week with AI</button>
+        </div>
         <div class="legend">
           <span><i class="dot approved"></i>Approved</span>
           <span><i class="dot pending"></i>To approve</span>
@@ -864,6 +880,146 @@ function applySuggestions(key) {
   if (n) markEdited(d);
   delete ui.suggest[key];
   return n;
+}
+
+// ---------- planning a whole week ----------
+// The days of the week on screen, from today on.
+function weekDates() {
+  const win = planWindow(ui.selected, TODAY);
+  return win.dates.filter((k) => k <= win.weekEnd);
+}
+
+// Copies of the days about to change, so the change can be undone in one tap.
+function snapshotDays(keys) {
+  const days = Object.fromEntries(keys.map((k) => [k, state.days[k] ? structuredClone(state.days[k]) : null]));
+  const savedIds = new Set(state.savedRecipes.map((r) => r.id));
+  return () => {
+    for (const [k, d] of Object.entries(days)) { if (d) state.days[k] = d; else delete state.days[k]; }
+    state.savedRecipes = state.savedRecipes.filter((r) => savedIds.has(r.id));
+    commit();
+  };
+}
+
+// Without AI: the kitchen suggestions for every empty meal of the week, a day at a time so each
+// day sees the one before it (no repeats, yesterday's curry as a leftover makeover).
+function fillWeek() {
+  const keys = weekDates();
+  const undo = snapshotDays(keys);
+  let n = 0;
+  for (const k of keys) {
+    delete ui.suggest[k];
+    n += applySuggestions(k);
+  }
+  commit();
+  toast(n ? `Added ${n} meal${n > 1 ? "s" : ""} to ${keys.length} day${keys.length > 1 ? "s" : ""}. Approve each day when ready.` : "Every meal this week is already planned.", n ? undo : null);
+}
+
+const planCatalog = () => (planCatalog.text ||= catalogText(LIBRARY));
+
+function chatRefs() {
+  return new Map([...libraryRefs(LIBRARY), ...savedRefs(state.savedRecipes)]);
+}
+
+function chatContext(win, refs) {
+  const back = new Map([...refs].map(([ref, r]) => [r.id, ref]));
+  const cookable = readyToCook(state.pantry, { maxMissing: 0, schoolNutFree: nutFreeOn(), limit: 60, cuisines: cuisinePicks(), frozen: frozenOnHand() })
+    .map((x) => back.get(x.recipe.id)).filter(Boolean);
+  return contextText({
+    today: TODAY, window: win, days: state.days, refOf: (m) => back.get(m.recipeId) || "",
+    pantry: state.pantry, frozen: frozenOnHand(), appliances: applianceRequest(state.settings), schoolNutFree: nutFreeOn(),
+    cuisines: cuisinePicks().map((id) => CUISINES.find((x) => x.id === id).label), cookable,
+    saved: [...savedRefs(state.savedRecipes)],
+  });
+}
+
+const CHAT_IDEAS = ["Plan this week", "No eggs this week", "Swap Tuesday's dinner", "Use what's in the freezer", "Plan next week"];
+
+function chatMessageHtml(m, i) {
+  if (m.role === "parent") return `<div class="chat-msg parent" data-testid="chat-parent">${esc(m.text)}</div>`;
+  if (m.role === "error") return `<div class="chat-msg error" data-testid="chat-error">⚠️ ${esc(m.text)}</div>`;
+  const label = (c) => `${esc(prettyDate(c.date))} · ${esc(slotLabel(SLOTS.find((s) => s.id === c.slot), state.settings))}`;
+  return `<div class="chat-msg claude" data-testid="chat-claude">
+    <p>${esc(m.text)}</p>
+    ${m.applied?.length ? `<ul class="chat-changes" data-testid="chat-changes">${m.applied.map((c) => `<li>${art(c.recipe || {}, "xs", "✕")} ${label(c)}: <strong>${c.recipe ? esc(c.recipe.title) : "cleared"}</strong>${c.isNew ? ' <span class="pill">new</span>' : ""}</li>`).join("")}</ul>` : ""}
+    ${m.skipped?.length ? `<p class="small" data-testid="chat-skipped" style="color:var(--warn)">Left out: ${m.skipped.map((c) => `${esc(c.title || c.slot)}${c.date ? ` (${esc(c.date)})` : ""}: ${esc(c.why)}`).join("; ")}</p>` : ""}
+    ${m.applied?.length ? (m.undone ? '<p class="small muted">Undone.</p>' : `<button type="button" class="btn sm ghost" data-action="chat-undo" data-i="${i}" data-testid="chat-undo">↩️ Undo these changes</button>`) : ""}
+  </div>`;
+}
+
+function renderChat(dlg = $("dialog[data-testid=plan-chat]")) {
+  if (!dlg) return;
+  const c = ui.chat;
+  const log = dlg.querySelector("[data-testid=chat-log]");
+  log.innerHTML = c.shown.length ? c.shown.map(chatMessageHtml).join("") + (c.busy ? '<div class="chat-msg claude busy" data-testid="chat-busy">Planning… this can take up to a minute.</div>' : "")
+    : `<p class="small muted">Ask for a plan for the week, then change it as you like: “no eggs this week”, “swap Tuesday's dinner”, “something with the frozen peas”. The meals go straight onto the calendar, waiting for your approval. Safety rules for both children, the nut-free lunchbox and warm weekday breakfasts are always kept.</p>`;
+  log.scrollTop = log.scrollHeight;
+  dlg.querySelector("[data-testid=chat-send]").disabled = c.busy;
+  dlg.querySelector("[data-testid=chat-reset]").hidden = !c.shown.length;
+}
+
+function planChatSheet() {
+  if (!getAiKey()) {
+    sheet("plan-chat", `<div class="stack">
+      <div class="row between"><h2>💬 Plan the week with AI</h2><button type="button" class="iconbtn lg" data-sheet-close aria-label="Close">✕</button></div>
+      <p class="small">The planning chat uses your own Claude API key. Add one in Profile (it takes a couple of minutes), then come back here.</p>
+      <p class="small muted">Without AI, <strong>📋 Fill the week from the kitchen</strong> on the calendar plans every empty meal from your recipe book.</p>
+      <button type="button" class="btn primary big" data-action="open-ai-key" data-testid="chat-add-key">Add a Claude API key</button>
+    </div>`);
+    return;
+  }
+  const dlg = sheet("plan-chat", `<form data-form="plan-chat" class="stack chat">
+    <div class="row between"><h2>💬 Plan the week with AI</h2><button type="button" class="iconbtn lg" data-sheet-close aria-label="Close">✕</button></div>
+    <div class="chat-log" data-testid="chat-log" aria-live="polite"></div>
+    <div class="chips scroll-x">${CHAT_IDEAS.map((t) => `<button type="button" class="chip add" data-action="chat-idea" data-text="${esc(t)}" data-testid="chat-idea">${esc(t)}</button>`).join("")}</div>
+    <div class="chat-input">
+      <textarea name="text" rows="2" maxlength="1000" placeholder="e.g. Plan this week, no eggs on Monday" data-testid="chat-input" enterkeyhint="send" aria-label="Message"></textarea>
+      <button class="btn primary" data-testid="chat-send">Send</button>
+    </div>
+    <button type="button" class="btn sm ghost" data-action="chat-reset" data-testid="chat-reset">Start a new chat</button>
+  </form>`);
+  renderChat(dlg);
+  dlg.querySelector("textarea").addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); e.target.form.requestSubmit(); }
+  });
+}
+
+async function sendChat(text) {
+  const c = ui.chat;
+  text = String(text || "").trim();
+  if (!text || c.busy) return;
+  const win = planWindow(ui.selected, TODAY);
+  const refs = chatRefs();
+  const turn = { role: "user", content: userTurn(chatContext(win, refs), c.note ? `${c.note} ${text}` : text) };
+  c.shown.push({ role: "parent", text });
+  c.busy = true;
+  c.controller = new AbortController();
+  const timer = setTimeout(() => c.controller?.abort("timeout"), 120000);
+  renderChat();
+  try {
+    const out = await browserPlanChat([...c.turns, turn], { catalog: planCatalog(), signal: c.controller.signal });
+    c.turns.push(turn, { role: "assistant", content: out.content });
+    c.note = "";
+    const { apply, skipped } = planChanges(out.changes, { dates: win.dates, refs, schoolNutFree: nutFreeOn() });
+    const undo = apply.length ? snapshotDays([...new Set(apply.map((x) => x.date))]) : null;
+    for (const x of apply) {
+      const d = ensureDay(x.date);
+      if (x.recipe) {
+        if (x.isNew && !state.savedRecipes.some((r) => r.id === x.recipe.id)) state.savedRecipes.push(x.recipe);
+        d.meals[x.slot] = { recipeId: x.recipe.id, title: x.recipe.title, forWhom: x.recipe.forWhom };
+      } else delete d.meals[x.slot];
+      markEdited(d);
+    }
+    c.shown.push({ role: "claude", text: out.reply, applied: apply, skipped, undo });
+    if (apply.length) commit();
+  } catch (err) {
+    const why = c.controller?.signal.aborted ? (c.controller.signal.reason === "timeout" ? "The AI took too long. Try again, or ask for fewer days." : "Stopped.") : err.message || "Something went wrong.";
+    c.shown.push({ role: "error", text: why });
+  } finally {
+    clearTimeout(timer);
+    c.busy = false;
+    c.controller = null;
+    renderChat();
+  }
 }
 
 // "· 🍟 12 min" when the family can make it in the air fryer or oven.
@@ -1895,6 +2051,16 @@ document.addEventListener("click", (e) => {
     case "view-recipe": { const r = findRecipe(el.dataset.id); if (r) recipeDialog(r); break; }
     case "more-picks": ui.morePicks = true; render(); break;
     case "open-profile": profileDialog(); break;
+    case "fill-week": fillWeek(); break;
+    case "plan-chat": planChatSheet(); break;
+    case "open-ai-key": $("dialog[data-testid=plan-chat]")?.close(); profileDialog({ focusKey: true }); break;
+    case "chat-idea": { const t = $("dialog[data-testid=plan-chat] textarea"); if (t) { t.value = el.dataset.text; t.focus(); } break; }
+    case "chat-undo": {
+      const m = ui.chat.shown[Number(el.dataset.i)];
+      if (m?.undo && !m.undone) { m.undo(); m.undone = true; m.undo = null; ui.chat.note = "(I undid the changes from one of your answers; the current plan above shows what is planned now.)"; renderChat(); toast("Changes undone."); }
+      break;
+    }
+    case "chat-reset": ui.chat.controller?.abort(); ui.chat = { shown: [], turns: [], busy: false, controller: null }; renderChat(); break;
     case "autofill": {
       const n = applySuggestions(ui.selected);
       commitDay();
@@ -2155,6 +2321,7 @@ document.addEventListener("submit", (e) => {
       break;
     }
     case "generate": generate(f); break;
+    case "plan-chat": { const t = f.text.value; f.text.value = ""; sendChat(t); break; }
     case "shop-add": {
       const name = f.name.value.trim();
       if (!name) return;

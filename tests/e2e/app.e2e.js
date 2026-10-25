@@ -1186,3 +1186,111 @@ test("E2E BRK-05 the 4-year-old's weekday breakfast suggestion is warm and names
   assert.deepEqual(errors, []);
   await ctx.close();
 });
+
+// ---------- planning a whole week ----------
+test("E2E WEEK-01 without AI, one tap fills every empty meal of the week from the kitchen, and Undo puts it back", async () => {
+  const { page, ctx, errors } = await open(off);
+  await cell(page, TODAY).click();
+  await tid(page, "fill-week").click();
+  await tid(page, "toast").waitFor();
+  assert.match(await tid(page, "toast").textContent(), /Added \d+ meals to 3 days/);
+  for (const d of [TODAY, TOMORROW, "2026-10-24"]) assert.equal(await cell(page, d).getAttribute("data-status"), "pending");
+  assert.equal(await cell(page, "2026-10-21").getAttribute("data-status"), "empty", "days before today stay as they were");
+  // Saturday has no school lunchbox.
+  const sat = await page.evaluate(() => Object.keys(window.__mealPlanner.state.days["2026-10-24"].meals));
+  assert.ok(!sat.includes("kid_lunchbox"));
+  await tid(page, "toast-undo").click();
+  assert.equal(await cell(page, TODAY).getAttribute("data-status"), "empty");
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+// A fake Claude for the planning chat: answers each turn with the next of `answers`, a function of the request.
+async function fakePlanChat(page, answers) {
+  const calls = [];
+  await page.route("https://api.anthropic.com/**", async (route) => {
+    const req = route.request();
+    const body = JSON.parse(req.postData() || "{}");
+    calls.push({ headers: req.headers(), body });
+    const answer = answers[calls.length - 1](body);
+    await route.fulfill({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": "*" },
+      body: JSON.stringify({ id: "msg_" + calls.length, type: "message", role: "assistant", stop_reason: "end_turn",
+        content: [{ type: "thinking", thinking: "", signature: "sig" + calls.length }, { type: "text", text: JSON.stringify(answer) }] }) });
+  });
+  return calls;
+}
+const refFor = (body, kind) => new RegExp(`^(r\\d+) \\| ${kind} \\| ([^|]+?) \\|`, "m").exec(body.system[1].text);
+const change = (o) => ({ ref: "", title: "", ingredients: [], steps: [], notes: "", ...o });
+
+test("E2E CHAT-01 the AI chat plans the week onto the calendar, changes it from the conversation, and drops unsafe meals", async () => {
+  const ctx = await newContext();
+  await ctx.addInitScript((k) => localStorage.setItem("familyMealPlanner.aiKey", k), FAKE_KEY);
+  const page = await ctx.newPage();
+  const errors = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  let dinners;
+  const calls = await fakePlanChat(page, [
+    (body) => {
+      const dinner = refFor(body, "family dinner");
+      const baby = refFor(body, "baby lunch");
+      dinners = dinner;
+      return { reply: "Here is the plan for the rest of the week.", changes: [
+        change({ date: TODAY, slot: "family_dinner", ref: dinner[1] }),
+        change({ date: TOMORROW, slot: "baby_lunch", ref: baby[1] }),
+        change({ date: TOMORROW, slot: "baby_breakfast", title: "Honey oats", ingredients: [{ name: "oats", quantity: 2, unit: "tbsp" }, { name: "honey", quantity: 1, unit: "tsp" }], steps: ["Cook"] }),
+      ] };
+    },
+    () => ({ reply: "Swapped Thursday's dinner for a quick dal.", changes: [
+      change({ date: TODAY, slot: "family_dinner", title: "Quick tomato dal", ingredients: [{ name: "toor dal", quantity: 1, unit: "cup" }, { name: "tomato", quantity: 2, unit: "pcs" }], steps: ["Pressure cook the dal", "Add the tempering"] }),
+    ] }),
+  ]);
+  await page.goto(`${off.url}?today=${TODAY}`);
+  await page.getByTestId("cal-grid").waitFor();
+
+  await tid(page, "plan-chat-open").click();
+  await tid(page, "chat-idea").first().click();
+  assert.equal(await tid(page, "chat-input").inputValue(), "Plan this week");
+  await tid(page, "chat-send").click();
+  await tid(page, "chat-claude").waitFor({ timeout: 5000 });
+  assert.equal(calls[0].headers["x-api-key"], FAKE_KEY);
+  assert.equal(calls[0].body.output_config.format.type, "json_schema");
+  assert.equal(calls[0].body.system[1].cache_control.type, "ephemeral", "the recipe book is cached");
+  assert.match(calls[0].body.system[0].text, /never honey/);
+  assert.match(calls[0].body.messages[0].content, /Parent: Plan this week$/);
+  assert.match(calls[0].body.messages[0].content, /2026-10-22 Thu school day: nothing planned/);
+  assert.equal(await tid(page, "chat-changes").locator("li").count(), 2);
+  assert.match(await tid(page, "chat-skipped").textContent(), /Honey oats/);
+  assert.equal(await cell(page, TODAY).getAttribute("data-status"), "pending");
+  assert.equal(await page.evaluate((d) => window.__mealPlanner.state.days[d].meals.family_dinner.title, TODAY), dinners[2].trim());
+
+  // The second turn carries the first, and the plan as it is now.
+  await tid(page, "chat-input").fill("Swap Thursday's dinner");
+  await tid(page, "chat-input").press("Enter");
+  await page.locator("[data-testid=chat-claude]").nth(1).waitFor({ timeout: 5000 });
+  const msgs = calls[1].body.messages;
+  assert.equal(msgs.length, 3);
+  assert.equal(msgs[1].role, "assistant");
+  assert.equal(msgs[1].content[0].signature, "sig1", "Claude's whole answer goes back unchanged");
+  assert.match(msgs[2].content, /family_dinner=/);
+  const dinner = await page.evaluate((d) => window.__mealPlanner.state.days[d].meals.family_dinner, TODAY);
+  assert.equal(dinner.title, "Quick tomato dal");
+  assert.ok(await page.evaluate((id) => window.__mealPlanner.state.savedRecipes.some((r) => r.id === id && r.ingredients.length === 2), dinner.recipeId));
+
+  // Undo puts the first plan's dinner back.
+  await page.locator("[data-testid=chat-undo]").nth(1).click();
+  assert.equal(await page.evaluate((d) => window.__mealPlanner.state.days[d].meals.family_dinner.title, TODAY), dinners[2].trim());
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test("E2E CHAT-02 without a key the chat explains and opens the key steps in Profile", async () => {
+  const { page, ctx, errors } = await open(off);
+  await tid(page, "plan-chat-open").click();
+  await tid(page, "chat-add-key").click();
+  await tid(page, "profile-dialog").waitFor();
+  assert.ok(await tid(page, "ai-key-section").evaluate((d) => d.open));
+  assert.match(await tid(page, "ai-key-steps").textContent(), /Create Key/);
+  assert.equal(await tid(page, "ai-key-get").getAttribute("href"), "https://console.anthropic.com/settings/keys");
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
