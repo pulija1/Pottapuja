@@ -46,6 +46,12 @@ export function libraryById(id) {
   return LIBRARY.find((x) => x.id === id) || null;
 }
 
+// The dips a recipe's **Side dip** line names, as recipes from the book. Names not in the book are left out.
+export function sideDipsFor(recipe) {
+  const key = (t) => String(t || "").toLowerCase().replace(/\(.*?\)/g, "").trim();
+  return (recipe?.sideDips || []).map((t) => LIBRARY.find((x) => x.mealType === "side" && key(x.title) === key(t))).filter(Boolean);
+}
+
 // The cuisines the family can pick in Profile. A recipe belongs to one when its **Cuisine** line
 // matches; "South Indian" counts as both Telugu and Tamil, and a fusion recipe can name two.
 export const CUISINES = [
@@ -129,7 +135,8 @@ const CUISINE_BOOST = 0.5;
 
 export const APPLIANCE_BOOST = 0.1;
 const FAMILY_BOOST = 0.3;
-const BUSY_BOOST = 2;
+const BUSY_BOOST = 3;
+const WARM_BOOST = 3;
 const FRUIT_BOOST = 0.3;
 
 // Rank library recipes by how many of their ingredients are in the pantry.
@@ -140,7 +147,8 @@ const FRUIT_BOOST = 0.3;
 // for one of them, and quick mode counts the faster of the stove and appliance times.
 // cuisines (from Profile) lifts the family's cuisines well above the rest, so most picks come
 // from them, while a strong kitchen match from another cuisine can still show up.
-// busyMorning (a weekday) puts breakfasts made the night before or with no cooking well ahead.
+// busyMorning (a weekday) puts breakfasts made the night before or with no cooking well ahead,
+// and the warm ones (made the night before, reheated in the microwave) first of all.
 export function suggestFromLibrary(pantry, { forWhom = "both", mealType = "", limit = 6, schoolNutFree = false, maxMinutes = 0, cuisines = [], frozen = [], appliances = [], busyMorning = false } = {}) {
   const k = kitchen(pantry, frozen);
   // The whole family eats the 4-year-old's food too (mild, nothing whole), so "family" includes the
@@ -150,17 +158,21 @@ export function suggestFromLibrary(pantry, { forWhom = "both", mealType = "", li
   // Weekday breakfast: what was made the night before, or needs no cooking, comes first. The baby's
   // breakfast leans toward one with a fruit in it.
   const busy = (x) => busyMorning && x.mealType === "breakfast" && !!x.busyMorning;
+  // The family likes a warm breakfast: made the night before and reheated beats cold or no-cook.
+  // Both boosts are bigger than every other score together, so they always decide the order.
+  const warm = (x) => busy(x) && x.forWhom !== "baby" && !!x.reheat;
   const fruit = (x) => mealType === "breakfast" && x.forWhom === "baby" && recipeHasFruit(x);
   const minutes = (r) => fastestMinutes(r, appliances) || Infinity;
   const quick = (r) => minutes(r) <= maxMinutes;
   return LIBRARY.filter((x) => !x.leftover && wanted.includes(x.forWhom))
+    .filter((x) => x.mealType !== "side" || mealType === "side")
     .filter((x) => !mealType || x.mealType === mealType || (mealType === "lunch" && x.mealType === "lunchbox"))
     .filter((x) => !schoolNutFree || x.forWhom !== "kid" || checkForAudience(x, { schoolNutFree: true }).safe)
     .map((x) => {
       const needed = neededNames(x);
       const hit = needed.filter((n) => k.fresh.has(n)).length + needed.filter((n) => k.cold.has(n)).length * FROZEN_WEIGHT;
       const score = (needed.length ? hit / needed.length : 0) + (x.familyFavorite ? 0.15 : 0) + (cuisines.length && inCuisines(x, cuisines) ? CUISINE_BOOST : 0) + (usesAppliance(x, appliances) ? APPLIANCE_BOOST : 0)
-        + (forWhom === "family" && x.forWhom === "family" ? FAMILY_BOOST : 0) + (busy(x) ? BUSY_BOOST : 0) + (fruit(x) ? FRUIT_BOOST : 0);
+        + (forWhom === "family" && x.forWhom === "family" ? FAMILY_BOOST : 0) + (busy(x) ? BUSY_BOOST : 0) + (warm(x) ? WARM_BOOST : 0) + (fruit(x) ? FRUIT_BOOST : 0);
       return { recipe: x, score, hit };
     })
     .sort((a, b) => b.score - a.score || b.hit - a.hit)
@@ -185,7 +197,7 @@ export function topPicks(pantry, { cuisines = [], schoolNutFree = false, maxMiss
   const k = kitchen(pantry, frozen);
   if (!k.size) return [];
   const ranked = LIBRARY
-    .filter((x) => !x.leftover)
+    .filter((x) => !x.leftover && x.mealType !== "side")
     .filter((x) => !schoolNutFree || x.forWhom !== "kid" || checkForAudience(x, { schoolNutFree: true }).safe)
     .map((recipe) => {
       const needed = [...new Set(neededNames(recipe))];

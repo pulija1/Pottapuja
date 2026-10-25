@@ -18,7 +18,8 @@ test("one serving stays in a sensible range for who it is for", () => {
   const limits = { baby: [20, 260], kid: [40, 520], family: [60, 750] };
   for (const r of LIBRARY) {
     const { perServing } = estimateNutrition(r);
-    const [lo, hi] = limits[r.forWhom];
+    // A dip or chutney is a spoonful on the side, so it can be light.
+    const [lo, hi] = r.mealType === "side" ? [10, 400] : limits[r.forWhom];
     assert.ok(perServing.kcal >= lo && perServing.kcal <= hi, `${r.title}: ${perServing.kcal} kcal per serving`);
   }
 });
