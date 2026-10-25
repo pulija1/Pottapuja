@@ -13,7 +13,8 @@ const WHO = {
   kid: "kid", "4-year-old": "kid", "4 year old": "kid", "4 years": "kid", child: "kid",
   family: "family", "whole family": "family", everyone: "family",
 };
-const MEALS = ["breakfast", "lunchbox", "lunch", "snack", "dinner"];
+// "side" is a dip or chutney served with another dish; it is never a meal of its own.
+const MEALS = ["breakfast", "lunchbox", "lunch", "snack", "dinner", "side"];
 
 const UNITS = {
   g: "g", kg: "kg", ml: "ml", l: "l",
@@ -107,9 +108,9 @@ export function parseRecipeMarkdown(md, file = "") {
     if (!forWhom) return problems.push({ ...where, message: `"For" must be baby, kid or family (found "${r.fields.for || ""}").` });
     if (!r.ingredients.length) return problems.push({ ...where, message: "No ingredients listed under **Ingredients**." });
     if (!r.steps.length) return problems.push({ ...where, message: "No numbered steps under **Steps**." });
-    const meal = String(r.fields.meal || "").toLowerCase().replace(/school\s+lunch\s*box|lunch\s+box/, "lunchbox").trim();
+    const meal = String(r.fields.meal || "").toLowerCase().replace(/school\s+lunch\s*box|lunch\s+box/, "lunchbox").replace(/^(dip|chutney|side dish)\b.*/, "side").trim();
     const mealType = MEALS.find((m) => meal === m || meal.startsWith(m)) || (forWhom === "family" ? "dinner" : "");
-    if (!mealType) problems.push({ ...where, message: `Unknown meal "${r.fields.meal || ""}", use breakfast, lunchbox, lunch, snack or dinner.` });
+    if (!mealType) problems.push({ ...where, message: `Unknown meal "${r.fields.meal || ""}", use breakfast, lunchbox, lunch, snack, dinner or side.` });
     const recipe = {
       id: r.fields.id || "lib-" + slug(r.title),
       title: r.title,
@@ -142,6 +143,11 @@ export function parseRecipeMarkdown(md, file = "") {
     const busy = String(r.fields["busy morning"] || "").toLowerCase();
     if (/ahead|night|overnight/.test(busy)) recipe.busyMorning = "make-ahead";
     else if (/no[- ]?cook/.test(busy)) recipe.busyMorning = "no-cook";
+    // Made the night before and warmed in the morning: how ("1½ min in the microwave, covered").
+    if (r.fields.reheat) recipe.reheat = r.fields.reheat;
+    // Dips served on the side, by their titles in the book.
+    const dips = r.fields["side dip"] || r.fields["side dips"] || r.fields.dip;
+    if (dips) recipe.sideDips = dips.split(/\s*(?:,|·|\bor\b)\s*/).map((x) => x.trim()).filter(Boolean);
     if (r.fields.leftover) recipe.leftover = r.fields.leftover.toLowerCase().split(/\s*(?:,|\bor\b|·)\s*/).map((x) => x.trim()).filter(Boolean);
     const declared = String(r.fields["good for"] || "").toLowerCase();
     const tags = new Set(nutritionTags(recipe));
@@ -243,6 +249,8 @@ export function recipeToMarkdown(r) {
   if (r.airFryer?.text) out.push(`- **Air fryer:** ${r.airFryer.text}`);
   if (r.oven?.text) out.push(`- **Oven:** ${r.oven.text}`);
   if (r.busyMorning) out.push(`- **Busy morning:** ${r.busyMorning.replace("-", " ")}`);
+  if (r.reheat) out.push(`- **Reheat:** ${r.reheat}`);
+  if (r.sideDips?.length) out.push(`- **Side dip:** ${r.sideDips.join(", ")}`);
   if (r.leftover?.length) out.push(`- **Leftover:** ${r.leftover.join(", ")}`);
   if (r.familyFavorite) out.push(`- **Family favorite:** yes`);
   if (r.id && r.id !== "lib-" + slug(r.title)) out.push(`- **ID:** ${r.id}`);

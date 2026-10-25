@@ -1091,7 +1091,7 @@ test("E2E BRK-03 weekday suggestions: breakfast made the night before or no-cook
   const { page, ctx, errors } = await open();
   await cell(page, "2026-10-26").click();   // a Monday
   const kid = page.locator("[data-testid=suggestion][data-slot=kid_breakfast]");
-  assert.match(await kid.innerText(), /Make the night before|No cooking/);
+  assert.match(await kid.innerText(), /Made the night before, reheat in the microwave|Make the night before|No cooking/);
   const baby = page.locator("[data-testid=suggestion][data-slot=baby_breakfast]");
   const text = await baby.innerText();
   assert.ok(/banana|avocado|papaya|mango|chikoo|apple|pear/i.test(text), text);
@@ -1150,6 +1150,39 @@ test("E2E UI-20 less scrolling: the calendar opens on one week, sections start f
   await tid(page, "tab-shopping").click();
   await addShopItems(page, ["bananas"]);
   assert.equal(await tid(page, "shop-item").locator(".art").innerText(), "🍌");
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test("E2E BRK-04 weekday family breakfasts: warm ones made the night before first, with a side dip that opens its recipe", async () => {
+  const { page, ctx, errors } = await open(off);
+  await tid(page, "tab-recipes").click();
+  await tid(page, "gen-for").selectOption("family");
+  await tid(page, "gen-meal").selectOption("breakfast");
+  await tid(page, "generate-recipes").click();
+  await tid(page, "ai-notice").waitFor({ timeout: 5000 });
+  const first = tid(page, "recipe-card").first();
+  assert.match(await first.getByTestId("busy-morning-tag").innerText(), /reheat in the microwave/);
+  assert.match(await first.getByTestId("reheat").innerText(), /microwave/);
+  const cards = tid(page, "recipe-card");
+  const n = await cards.count();
+  let dipCard = null;
+  for (let i = 0; i < n && !dipCard; i++) if (await cards.nth(i).getByTestId("recipe-side-dips").count()) dipCard = cards.nth(i);
+  assert.ok(dipCard, "a breakfast with a side dip");
+  const dip = dipCard.getByTestId("recipe-side-dips").getByRole("button").first();
+  const name = await dip.innerText();
+  await dip.click();
+  await page.getByRole("dialog").getByRole("heading", { name }).waitFor({ timeout: 5000 });
+  assert.deepEqual(errors.filter((e) => !/503/.test(e)), []);
+  await ctx.close();
+});
+
+test("E2E BRK-05 the 4-year-old's weekday breakfast suggestion is warm and names its side dip", async () => {
+  const { page, ctx, errors } = await open();
+  await cell(page, "2026-10-26").click();   // a Monday
+  const kid = page.locator("[data-testid=suggestion][data-slot=kid_breakfast]");
+  assert.match(await kid.innerText(), /reheat in the microwave/);
+  assert.match(await kid.getByTestId("side-dip").innerText(), /With .*(dip|chutney|salsa)/);
   assert.deepEqual(errors, []);
   await ctx.close();
 });

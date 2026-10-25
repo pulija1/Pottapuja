@@ -4,7 +4,7 @@ import { getAiKey, setAiKey, looksLikeKey, browserRecipes } from "./ai-browser.j
 import { QUICK_MINUTES } from "./shared/ai-prompt.js";
 import { todayKey, addDays, addMonths, monthGrid, monthLabel, prettyDate, fromKey, isDateKey, isSchoolDay, occurrences, daysBetween } from "./shared/dates.js";
 import { checkRecipe, checkForAudience, isNutIngredient, isSchoolFood } from "./shared/safety.js";
-import { LIBRARY, suggestFromLibrary, readyToCook, RECIPE_BOOK_STATUS, cookByVegetables, missingForRecipe, CUISINES, inCuisines, topPicks, leftoverKind, leftoverRecipesFor, freezerSet } from "./shared/recipes.js";
+import { LIBRARY, suggestFromLibrary, readyToCook, RECIPE_BOOK_STATUS, cookByVegetables, missingForRecipe, CUISINES, inCuisines, topPicks, leftoverKind, leftoverRecipesFor, freezerSet, sideDipsFor } from "./shared/recipes.js";
 import { nutritionTags, TAG_LABELS } from "./shared/recipe-book.js";
 import { groupKitchen, babyFruitFor, recipeHasFruit } from "./shared/kitchen.js";
 import { APPLIANCES, ownedAppliances, methodsFor, fastestMinutes, basketPairs, applianceRequest } from "./shared/appliances.js";
@@ -902,6 +902,18 @@ function fromFreezer(recipe) {
 }
 
 // The baby has a fruit every morning: one from the kitchen, or a ripe banana to buy.
+// How a busy-morning breakfast fits the morning: warmed up, made the night before, or no cooking.
+function busyLabel(r) {
+  if (r.busyMorning === "no-cook") return "⏱️ No cooking";
+  return r.reheat ? "🔥 Made the night before, reheat in the microwave" : "🌙 Make the night before";
+}
+
+// A breakfast's reheating line and its side dips, each dip opening its own recipe.
+function morningExtras(r) {
+  const dips = sideDipsFor(r);
+  return `${r.reheat ? `<p class="small" style="margin:0" data-testid="reheat">🔥 <strong>In the morning:</strong> ${esc(r.reheat)}</p>` : ""}${dips.length ? `<p class="small" style="margin:0" data-testid="recipe-side-dips">🥣 <strong>Side dip:</strong> ${dips.map((d) => `<button type="button" class="linkish" data-action="view-recipe" data-id="${esc(d.id)}">${esc(d.title)}</button>`).join(" or ")}</p>` : ""}`;
+}
+
 function babyFruitNote(seed = 0, inline = false) {
   const f = babyFruitFor(state.pantry, seed);
   const name = String(state.settings?.babyName || "").trim() || "the baby";
@@ -928,7 +940,7 @@ function renderSuggestions(key) {
       const cold = fromFreezer(r);
       return `<div class="suggest-row" data-testid="suggestion" data-slot="${s.id}">
         <span class="small muted">${esc(slotLabel(s, state.settings))}</span>
-        <span class="grow">${from ? `<span class="small" data-testid="leftover-idea">♻️ Uses yesterday's ${esc(from)}</span><br>` : ""}${r.busyMorning && isSchoolDay(key) ? `<span class="small muted" data-testid="busy-morning">${r.busyMorning === "make-ahead" ? "🌙 Make the night before" : "⏱️ No cooking"}</span><br>` : ""}${art(r, "xs")} ${esc(r.title)}${r.familyFavorite ? " ⭐" : ""}${tagIcons(r) ? ` <span aria-hidden="true">${tagIcons(r)}</span>` : ""}${applianceNote(r)}${need.length ? ` <span class="small" style="color:var(--warn)">· need ${esc(need.map((i) => i.name).join(", "))}</span>` : ' <span class="small" style="color:var(--ok)">· all in the kitchen</span>'}${cold.length ? ` <span class="small" data-testid="from-freezer">· 🧊 ${esc(cold.join(", "))} from the freezer</span>` : ""}${s.id === "baby_breakfast" && !recipeHasFruit(r) ? `<br>${babyFruitNote(ui.suggest[key]?.seed || 0, true)}` : ""}</span>
+        <span class="grow">${from ? `<span class="small" data-testid="leftover-idea">♻️ Uses yesterday's ${esc(from)}</span><br>` : ""}${r.busyMorning && isSchoolDay(key) ? `<span class="small muted" data-testid="busy-morning">${esc(busyLabel(r))}</span><br>` : ""}${art(r, "xs")} ${esc(r.title)}${r.familyFavorite ? " ⭐" : ""}${tagIcons(r) ? ` <span aria-hidden="true">${tagIcons(r)}</span>` : ""}${applianceNote(r)}${need.length ? ` <span class="small" style="color:var(--warn)">· need ${esc(need.map((i) => i.name).join(", "))}</span>` : ' <span class="small" style="color:var(--ok)">· all in the kitchen</span>'}${cold.length ? ` <span class="small" data-testid="from-freezer">· 🧊 ${esc(cold.join(", "))} from the freezer</span>` : ""}${sideDipsFor(r).length ? `<br><span class="small" data-testid="side-dip">🥣 With ${esc(sideDipsFor(r).map((d) => d.title.toLowerCase()).join(" or "))}</span>` : ""}${s.id === "baby_breakfast" && !recipeHasFruit(r) ? `<br>${babyFruitNote(ui.suggest[key]?.seed || 0, true)}` : ""}</span>
         <button type="button" class="iconbtn" data-action="suggest-swap" data-slot="${s.id}" title="Another idea" aria-label="Another idea for ${esc(slotLabel(s, state.settings))}">🔀</button>
       </div>`;
     }).join("")}
@@ -1321,13 +1333,14 @@ function recipeCard(r, { saved = false } = {}) {
     <div class="recipe-art tone-${a.tone}" aria-hidden="true"><span>${a.emoji}</span>${r.prepMinutes ? `<i>⏱️ ${esc(r.prepMinutes)} min</i>` : ""}</div>
     <div class="row between"><h3>${esc(r.title)}</h3><span>${r.familyFavorite ? '<span class="pill warn" data-testid="family-favorite">⭐ Family favorite</span> ' : ""}${whoPill(r.forWhom)}</span></div>
     ${hasNuts && !nutFreeOn() ? `<div class="small muted" data-testid="contains-nuts">🥜 Contains nuts${r.nutFreeSwap ? ". Nut-free swap: " + esc(r.nutFreeSwap) : ""}</div>` : ""}
-    <div class="small muted">${r.cuisine ? esc(r.cuisine) + " · " : ""}${esc(r.mealType || "")}${r.prepMinutes ? " · " + esc(r.prepMinutes) + " min" : ""}${r.busyMorning ? ` · <span data-testid="busy-morning-tag">${r.busyMorning === "make-ahead" ? "🌙 Make the night before" : "⏱️ No cooking"}</span>` : ""}${r.texture ? " · " + esc(r.texture) : ""}${r.source === "ai" ? " · ✨ AI" : r.source === "library" ? " · Family recipe book" : ""}</div>
+    <div class="small muted">${r.cuisine ? esc(r.cuisine) + " · " : ""}${esc(r.mealType || "")}${r.prepMinutes ? " · " + esc(r.prepMinutes) + " min" : ""}${r.busyMorning && r.mealType !== "side" ? ` · <span data-testid="busy-morning-tag">${esc(busyLabel(r))}</span>` : ""}${r.texture ? " · " + esc(r.texture) : ""}${r.source === "ai" ? " · ✨ AI" : r.source === "library" ? " · Family recipe book" : ""}</div>
     ${methods.length ? `<div class="appliance-methods" data-testid="appliance-methods">${methods.map((m) => `<p class="small" data-appliance="${m.key}"><strong>${m.icon} ${esc(m.label)}${m.key === "airFryer" && state.settings.airFryer === "dual" ? " (two baskets)" : ""}:</strong> ${esc(m.text)}</p>`).join("")}</div>` : ""}
     ${r.tags?.length ? `<div class="small" data-testid="recipe-tags">${r.tags.map((t) => esc(TAG_LABELS[t])).join(" · ")}</div>` : ""}
     <div class="safety ${safety.safe && !safety.warnings.length ? "ok" : safety.safe ? "warn" : "warn"}" data-testid="safety-badge">
       ${safety.safe ? (safety.warnings.length ? "⚠️ Safe with care" : "✅ Age-safe") : "⛔ Not safe as written"}
       ${issues.length ? `<ul>${issues.map((i) => `<li>${esc(i.message)}</li>`).join("")}</ul>` : ""}
     </div>
+    ${morningExtras(r)}
     ${nutritionPanel(r)}
     <details><summary>Ingredients (${r.ingredients.length})${missing.size ? ` · ${missing.size} to buy` : ""}</summary>
       <ul>${r.ingredients.map((i) => `<li class="${missing.has(normName(i.name)) ? "missing" : ""}">${esc(i.name)} ${i.quantity != null ? `<span class="muted">${esc(i.quantity)} ${esc(i.unit || "")}</span>` : ""}${missing.has(normName(i.name)) ? " (need)" : ""}</li>`).join("")}</ul>
@@ -1343,7 +1356,7 @@ function recipeCard(r, { saved = false } = {}) {
 
 // Weekdays are busy mornings unless the parent unticks it.
 const genBusy = () => ui.gen.busy ?? isSchoolDay(TODAY);
-const BUSY_NOTE = "Busy weekday morning: only breakfasts made the night before (overnight oats, idlis steamed in the evening, boiled eggs) or with no cooking (bread with peanut butter or avocado).";
+const BUSY_NOTE = "Busy weekday morning: the family likes a warm breakfast made the night before and reheated in the microwave (egg burritos, upma, parathas, idlis), with an easy side dip like a yogurt dip; otherwise no cooking (bread with peanut butter or avocado).";
 
 async function generate(form) {
   ui.gen = { forWhom: form.forWhom.value, mealType: form.mealType.value, notes: form.notes.value, quick: form.quick.checked, busy: form.busy.checked };

@@ -1,7 +1,7 @@
 // Family breakfasts, busy weekday mornings, the baby's morning fruit, and the kitchen's groups.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { LIBRARY, suggestFromLibrary } from "../public/shared/recipes.js";
+import { LIBRARY, suggestFromLibrary, sideDipsFor, topPicks } from "../public/shared/recipes.js";
 import { parseRecipeMarkdown, recipeToMarkdown } from "../public/shared/recipe-book.js";
 import { checkForAudience, isNutIngredient } from "../public/shared/safety.js";
 import { normName } from "../public/shared/shopping.js";
@@ -134,4 +134,77 @@ test("BRK-09 the Busy morning line is read and written back", () => {
   assert.deepEqual(recipes.map((r) => r.busyMorning), ["make-ahead", "no-cook"]);
   const again = parseRecipeMarkdown(recipeToMarkdown(recipes[0])).recipes[0];
   assert.equal(again.busyMorning, "make-ahead");
+});
+
+test("BRK-10 busy mornings: warm breakfasts made the night before come first, then no-cook ones", () => {
+  for (const forWhom of ["family", "kid"]) {
+    const list = suggestFromLibrary(PANTRY, { forWhom, mealType: "breakfast", busyMorning: true, limit: 30 });
+    const firstCold = list.findIndex((r) => !r.reheat);
+    assert.ok(firstCold >= 4, `${forWhom}: at least four warm ones first: ${list.map((r) => r.title)}`);
+    assert.ok(list.slice(firstCold).every((r) => !r.reheat), `${forWhom}: warm ones are all ahead`);
+    assert.ok(list.some((r) => r.busyMorning === "no-cook"), `${forWhom}: no-cook ones are still offered`);
+  }
+  const family = LIBRARY.filter((r) => r.forWhom === "family" && r.mealType === "breakfast");
+  assert.ok(family.filter((r) => r.reheat).length >= 8, "plenty of warm make-ahead family breakfasts");
+  for (const r of family.filter((x) => x.reheat)) assert.equal(r.busyMorning, "make-ahead", r.title);
+  for (const r of LIBRARY.filter((x) => x.reheat)) assert.match(r.reheat, /microwave/i, r.title);
+  assert.ok(LIBRARY.some((r) => /burrito/i.test(r.title) && r.reheat && r.forWhom === "family"), "an egg burrito made the night before");
+});
+
+test("BRK-11 breakfasts name easy side dips that are in the book, and dips are never a meal on their own", () => {
+  const dips = LIBRARY.filter((r) => r.mealType === "side");
+  assert.ok(dips.length >= 5);
+  for (const r of LIBRARY.filter((x) => x.sideDips?.length)) {
+    assert.equal(sideDipsFor(r).length, r.sideDips.length, `${r.title}: ${r.sideDips.join(", ")} must all be in the book`);
+  }
+  const burrito = LIBRARY.find((r) => /egg and potato breakfast burrito/i.test(r.title));
+  assert.ok(sideDipsFor(burrito).some((d) => /yogurt/i.test(d.title)), "burrito comes with a yogurt dip");
+  assert.ok(LIBRARY.filter((r) => r.mealType === "breakfast" && sideDipsFor(r).length).length >= 8);
+  for (const mealType of ["", "breakfast", "snack", "dinner"]) {
+    for (const forWhom of ["family", "kid", "both"]) {
+      assert.ok(!suggestFromLibrary(["curd", "mint leaves", "avocado", "tomato", "coconut"], { forWhom, mealType, limit: 300 }).some((r) => r.mealType === "side"), `${forWhom} ${mealType}`);
+    }
+  }
+  assert.ok(!topPicks(["curd", "mint leaves", "avocado", "cucumber"], { limit: 300 }).some((x) => x.recipe.mealType === "side"));
+  assert.ok(suggestFromLibrary(["curd"], { forWhom: "family", mealType: "side" }).length >= 5, "asked for, dips are found");
+});
+
+test("BRK-12 the Reheat and Side dip lines are read and written back, and a dip's meal is a side", () => {
+  const { recipes, problems } = parseRecipeMarkdown(`
+### Night burrito
+
+- **For:** family
+- **Meal:** breakfast
+- **Busy morning:** make ahead
+- **Reheat:** 1 min in the microwave
+- **Side dip:** Mint yogurt dip, Mild salsa
+
+**Ingredients**
+
+- 1 flour tortilla
+
+**Steps**
+
+1. Roll.
+
+### Green dip
+
+- **For:** family
+- **Meal:** Dip
+
+**Ingredients**
+
+- 1 cup curd
+
+**Steps**
+
+1. Stir.
+`);
+  assert.deepEqual(problems, []);
+  assert.equal(recipes[0].reheat, "1 min in the microwave");
+  assert.deepEqual(recipes[0].sideDips, ["Mint yogurt dip", "Mild salsa"]);
+  assert.equal(recipes[1].mealType, "side");
+  const again = parseRecipeMarkdown(recipeToMarkdown(recipes[0])).recipes[0];
+  assert.equal(again.reheat, "1 min in the microwave");
+  assert.deepEqual(again.sideDips, ["Mint yogurt dip", "Mild salsa"]);
 });
