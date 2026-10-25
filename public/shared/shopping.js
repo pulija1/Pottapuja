@@ -197,6 +197,6 @@ export function missingFromPantry(recipe, pantry) {
   const BASICS = new Set(["water", "salt", "oil"]);
   return (recipe?.ingredients || []).filter((i) => {
     const n = normName(i.name);
-    return n && !have.has(n) && !BASICS.has(n);
+    return n && !have.has(n) && !BASICS.has(n) && !/^leftover\b/.test(n);
   });
 }

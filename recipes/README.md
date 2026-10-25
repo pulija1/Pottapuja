@@ -8,6 +8,7 @@ All the recipes the meal planner suggests live in these Markdown files. They rea
 | [baby-8-months.md](baby-8-months.md) | The 8-month-old: purees, porridges, mashes and soft finger food |
 | [family-dinners.md](family-dinners.md) | One-pot family dinners, each with a step to take out the baby's and the 4-year-old's portions |
 | [telugu-curries.md](telugu-curries.md) | Telugu pappu, kura, vepudu, pulusu and charu by their Telugu names, each with a baby portion step |
+| [leftover-makeovers.md](leftover-makeovers.md) | Yesterday's curry made into something new: roti quesadillas, kathi rolls, kari dosai, tacos, plus curries worth cooking double |
 
 Cuisines: Telugu, South Indian, North Indian, Indian American, Mexican and Mexican American, Tex-Mex, American, Italian, Middle Eastern and Mediterranean, Japanese, Korean and Chinese.
 
@@ -30,7 +31,9 @@ Swap any recipe for another one from the same section. Search the file for 🥚,
 ## How the app uses this book
 
 - **Ready to cook:** the Recipes tab lists recipes whose ingredients are all in the kitchen list, and the ones that need just one more thing. Water, salt, oil, turmeric and anything used by the pinch don't count.
-- **Suggested meals:** empty days on the calendar get suggestions picked from this book, best match to the kitchen first, and checked for each child's safety.
+- **Suggested meals:** empty days on the calendar get suggestions picked from this book, best match to the kitchen first, and checked for each child's safety. The cuisines picked in 👤 Profile (Telugu, Tamil, North Indian, Mexican) come first; "South Indian" counts as Telugu and Tamil.
+- **Top picks:** the Recipes tab shows the five easiest recipes that use the vegetables in the kitchen, from the picked cuisines.
+- **Leftovers:** when the day before had a curry for the family dinner, one suggestion is a makeover from [leftover-makeovers.md](leftover-makeovers.md), like a roti chicken curry quesadilla for the lunchbox.
 - **Shopping:** a planned recipe's missing ingredients go to the shopping list with their quantities.
 - **AI recipes** (when the server has an API key) are extra. The book works without the AI, including on GitHub Pages where there is no server.
 
@@ -64,7 +67,7 @@ Copy an existing recipe and change it. The format:
 
 - `###` starts a recipe; the title is the recipe's name. `##` headings only group recipes and can be anything.
 - **For** is `baby`, `kid` or `family`. **Meal** is `breakfast`, `lunchbox`, `lunch`, `snack` or `dinner`. Both are required.
-- Optional lines: **Cuisine**, **Time**, **Texture** (baby: `puree`, `mashed`, `porridge`, `soft finger food`), **Nut-free swap** (what to do if the school goes nut-free), **Family favorite:** yes, and **ID** (only for older recipes, so plans that already use them keep working).
+- Optional lines: **Cuisine** (two can be named for fusion, like `Telugu / Mexican fusion`), **Leftover** (what yesterday's dish it uses: `chicken curry`, `paneer curry`, `beans curry`, `vegetable curry`, `dal`, `sambar` or `any curry`), **Time**, **Texture** (baby: `puree`, `mashed`, `porridge`, `soft finger food`), **Nut-free swap** (what to do if the school goes nut-free), **Family favorite:** yes, and **ID** (only for older recipes, so plans that already use them keep working).
 - **Good for** is for people reading the file. The app works out egg, milk/dairy and nuts from the ingredients by itself.
 - Each ingredient is one line: amount, unit, name, then a comma and any note. `1½ cups rice, washed`, `2 tbsp almond powder`, `6 curry leaves`, `Salt, to taste`. Units the app understands: g, kg, ml, l, tsp, tbsp, cup, pinch, slice, clove, sprig, handful, inch, bunch, can, packet, dozen. Keep the name the way you'd write it on a shopping list (`paneer`, `cheddar cheese`, `black beans`) so it matches the kitchen list.
 - Steps are a numbered list.

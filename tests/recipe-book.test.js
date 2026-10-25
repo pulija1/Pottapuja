@@ -3,7 +3,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { parseIngredient, parseRecipeMarkdown, combineBooks, nutritionTags, recipeToMarkdown, RECIPE_FILES } from "../public/shared/recipe-book.js";
-import { LIBRARY, RECIPE_BOOK_STATUS, readyToCook, missingForRecipe, suggestFromLibrary } from "../public/shared/recipes.js";
+import { LIBRARY, RECIPE_BOOK_STATUS, readyToCook, missingForRecipe, suggestFromLibrary, cuisinesOf, inCuisines, topPicks, leftoverKind, leftoverRecipesFor, freezerSet } from "../public/shared/recipes.js";
+import { aisleFor, missingFromPantry } from "../public/shared/shopping.js";
 import { checkForAudience, checkRecipe, isSchoolFood } from "../public/shared/safety.js";
 import { normName } from "../public/shared/shopping.js";
 
@@ -169,4 +170,75 @@ test("BOOK-11 Telugu curries: family dinners with a baby portion, and Telugu veg
   // A kitchen filled with Telugu names is ready to cook a Telugu curry.
   const pantry = ["Vankaya (brinjal)", "Ullipaya (onion)", "Tamata (tomato)", "rice", "mustard seeds", "curry leaves", "red chilli powder", "coriander powder"];
   assert.ok(readyToCook(pantry, { maxMissing: 0, limit: 100 }).some((x) => x.recipe.title.startsWith("Vankaya kura")));
+});
+
+test("BOOK-12 cuisines from Profile: South Indian counts as Telugu and Tamil, and suggestions lean toward the picked ones", () => {
+  assert.deepEqual(cuisinesOf({ cuisine: "South Indian" }), ["telugu", "tamil"]);
+  assert.deepEqual(cuisinesOf({ cuisine: "Telugu (Hyderabadi)" }), ["telugu"]);
+  assert.deepEqual(cuisinesOf({ cuisine: "Telugu / Mexican fusion" }), ["telugu", "mexican"]);
+  assert.deepEqual(cuisinesOf({ cuisine: "Punjabi" }), ["north"]);
+  assert.deepEqual(cuisinesOf({ cuisine: "Mexican American" }), ["mexican"]);
+  assert.deepEqual(cuisinesOf({ cuisine: "Japanese" }), []);
+  assert.ok(inCuisines({ cuisine: "Japanese" }, []), "nothing picked means every cuisine");
+  for (const c of ["telugu", "tamil", "north", "mexican"]) assert.ok(LIBRARY.filter((r) => cuisinesOf(r).includes(c)).length >= 8, c);
+  const picks = suggestFromLibrary([], { forWhom: "kid", mealType: "lunchbox", limit: 6, cuisines: ["mexican"] });
+  assert.ok(picks.filter((r) => inCuisines(r, ["mexican"])).length >= 4, picks.map((r) => r.cuisine).join(", "));
+});
+
+test("BOOK-13 top picks: easy recipes that use the kitchen's vegetables, from the picked cuisines only", () => {
+  const isVeg = (n) => aisleFor(n) === "Vegetables" && !/onion|tomato|chill?i|curry leaves|garlic|ginger/.test(n);
+  const pantry = ["Bendakaya (okra)", "onion", "tomato", "rice", "curry leaves", "mustard seeds", "red chilli powder"];
+  const top = topPicks(pantry, { cuisines: ["telugu"], isVegetable: isVeg, limit: 5 });
+  assert.ok(top.length > 0 && top.length <= 5);
+  for (const x of top) assert.ok(inCuisines(x.recipe, ["telugu"]), x.recipe.title + " " + x.recipe.cuisine);
+  assert.ok(top[0].veg > 0, top[0].recipe.title + " should use the okra");
+  // Ranked by score, and nothing in it needs yesterday's leftovers.
+  for (let i = 1; i < top.length; i++) assert.ok(top[i - 1].score >= top[i].score);
+  assert.ok(!top.some((x) => x.recipe.leftover));
+  // Nothing in the picked cuisines fits: the other cuisines are used rather than showing nothing.
+  const other = topPicks(["sushi rice", "nori", "cucumber"], { cuisines: ["telugu"], maxMissing: 6 });
+  assert.ok(other.length > 0 && other.some((x) => !inCuisines(x.recipe, ["telugu"])));
+  assert.deepEqual(topPicks([], { cuisines: ["telugu"] }), []);
+});
+
+test("BOOK-14 leftovers: yesterday's curry suggests a makeover, and the leftover never goes on the shopping list", () => {
+  const byTitle = (t) => LIBRARY.find((r) => r.title.startsWith(t));
+  assert.equal(leftoverKind(byTitle("Kodi kura")), "chicken curry");
+  assert.equal(leftoverKind(byTitle("Hyderabadi chicken curry")), "chicken curry");
+  assert.equal(leftoverKind(byTitle("Mild butter chicken")), "chicken curry");
+  assert.equal(leftoverKind(byTitle("Tomato pappu")), "dal");
+  assert.equal(leftoverKind(byTitle("Palak paneer with roti")), "paneer curry");
+  assert.equal(leftoverKind(byTitle("Chicken tinga tacos")), "");
+  assert.equal(leftoverKind(byTitle("Sambar rice")), "");
+  assert.equal(leftoverKind({ title: "Chicken curry" }), "chicken curry");
+  assert.equal(leftoverKind({ title: "Rajma chawal" }), "beans curry");
+  const ideas = leftoverRecipesFor("chicken curry");
+  assert.ok(ideas.some((r) => r.title === "Roti chicken curry quesadilla" && r.forWhom === "kid"));
+  assert.ok(ideas.some((r) => r.forWhom === "family"));
+  assert.ok(leftoverRecipesFor("vegetable curry").some((r) => r.leftover.includes("any curry")));
+  assert.deepEqual(leftoverRecipesFor(""), []);
+  const q = byTitle("Roti chicken curry quesadilla");
+  assert.deepEqual(q.leftover, ["chicken curry"]);
+  assert.deepEqual(missingForRecipe(q, ["roti"]).sort(), ["cheese", "butter", "coriander leaves"].map(normName).sort());
+  assert.ok(!missingFromPantry(q, []).some((i) => /leftover/.test(i.name)));
+  // Makeovers are never offered as plain "ready to cook" recipes: they need the leftover.
+  assert.ok(!readyToCook(["roti", "cheese", "butter", "coriander leaves"], { maxMissing: 0, limit: 100 }).some((x) => x.recipe.leftover));
+  for (const r of LIBRARY.filter((x) => x.leftover)) assert.ok(r.forWhom !== "baby", r.title + ": leftovers are not for the baby");
+});
+
+test("BOOK-15 the freezer counts as in the kitchen, after fresh vegetables", () => {
+  const cold = freezerSet([{ name: "Frozen peas", qty: 2 }, { name: "Parathas", qty: 4 }, { name: "Idli batter", qty: 0 }, "sweet corn"]);
+  assert.ok(cold.has("peas") && cold.has(normName("paratha")) && cold.has("sweet corn"));
+  assert.ok(!cold.has("idli batter"), "none left");
+  const isVeg = (n) => aisleFor(n) === "Vegetables";
+  const pantry = ["rice", "onion", "tomato", "cumin seeds", "ghee"];
+  const withFreezer = topPicks(pantry, { frozen: [{ name: "Frozen peas", qty: 1 }], isVegetable: isVeg, limit: 15, maxMissing: 3 });
+  const peas = withFreezer.find((x) => x.fromFreezer.includes("peas"));
+  assert.ok(peas, "a recipe uses the frozen peas");
+  // Frozen peas are not on the shopping list for a recipe that uses them.
+  const ready = readyToCook(pantry, { frozen: ["peas"], maxMissing: 3, limit: 200 });
+  for (const x of ready) assert.ok(!x.missing.includes("peas"));
+  // The same peas fresh rank at least as high as frozen ones.
+  const fresh = topPicks([...pantry, "peas"], { isVegetable: isVeg, limit: 200, maxMissing: 3 }).find((x) => x.recipe.id === peas.recipe.id);
+  assert.ok(fresh.score >= peas.score);
 });
