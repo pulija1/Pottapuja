@@ -98,6 +98,7 @@ const FOODS = [
   F(/chicken/, [140, 20, 0, 0, 6.5, 0.8, 10]),
 
   // Grains, flours and breads (dry weight, unless the note says cooked).
+  F(/baby cereal/, [400, 10, 75, 3, 4, 45, 400], { cup: 60 }),   // iron-fortified: about 7 mg iron in 15 g
   F(/poha|flattened rice|atukulu/, [350, 6.6, 77, 1.5, 1.2, 4, 20], { cup: 80 }),
   F(/rice flour/, [366, 6, 80, 2.4, 1.4, 0.35, 10], { cup: 160 }),
   F(/idli podi|gunpowder|podi/, [400, 18, 50, 12, 14, 7, 200], { cup: 140 }),

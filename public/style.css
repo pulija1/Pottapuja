@@ -225,6 +225,13 @@ input[type=date], input[type=time] { height: 42px; }
 .chip button { border: 0; background: none; width: 36px; height: 36px; border-radius: 50%; color: var(--muted); }
 .chip button:hover { background: var(--card); color: var(--bad); }
 .chip.add { background: var(--bg); border: 1px dashed var(--line); padding: 4px 12px; cursor: pointer; }
+/* Kitchen item: the name opens its use-by date; food running out soon is tinted. */
+.chip .chip-name { width: auto; height: auto; min-height: 32px; border-radius: 999px; padding: 0 2px; color: inherit; font: inherit; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.chip .chip-name:hover { background: none; color: inherit; text-decoration: underline; }
+.chip .exp { font-size: .75rem; color: var(--muted); white-space: nowrap; }
+.chip .exp.soon { color: var(--warn); font-weight: 600; }
+.chip.soon { background: var(--warn-soft); }
+.pantry-form .field { margin-top: 8px; max-width: 220px; }
 .kitchen-groups { display: flex; flex-direction: column; }
 .kitchen-group { border-bottom: 1px solid var(--line); }
 .kitchen-group:last-child { border-bottom: 0; }
@@ -463,7 +470,7 @@ body.in-store:has(.toast.show) .fab { bottom: calc(92px + env(safe-area-inset-bo
 .cloud-btn[data-status="offline"], .cloud-btn[data-status="error"], .cloud-btn[data-status="no-family"], .cloud-btn[data-status="choose"] { border-color: var(--warn); color: var(--warn); }
 .members { list-style: none; margin: 0; padding: 0; }
 .members li { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px dashed var(--line); word-break: break-all; }
-.linkish { background: none; border: 0; padding: 0; color: var(--brand); text-decoration: underline; font: inherit; cursor: pointer; }
+.linkish { background: none; border: 0; padding: 0; color: var(--brand); text-decoration: underline; font: inherit; cursor: pointer; display: inline; text-align: left; }
 .family-choice { display: flex; flex-direction: column; gap: 8px; margin: 0; }
 
 /* ---------- Collapsible sections ---------- */
