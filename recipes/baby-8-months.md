@@ -44,6 +44,7 @@ How to read and edit this file: see [README.md](README.md).
 
 - **For:** baby
 - **Meal:** breakfast
+- **Serves:** 2
 - **Cuisine:** South Indian
 - **Time:** 5 min
 - **Texture:** mashed
@@ -111,6 +112,7 @@ How to read and edit this file: see [README.md](README.md).
 
 - **For:** baby
 - **Meal:** lunch
+- **Serves:** 2
 - **Cuisine:** South Indian
 - **Time:** 5 min
 - **Texture:** mashed
@@ -153,6 +155,7 @@ How to read and edit this file: see [README.md](README.md).
 
 - **For:** baby
 - **Meal:** snack
+- **Serves:** 2
 - **Cuisine:** South Indian
 - **Time:** 15 min
 - **Texture:** mashed
@@ -219,6 +222,7 @@ How to read and edit this file: see [README.md](README.md).
 
 - **For:** baby
 - **Meal:** snack
+- **Serves:** 2
 - **Cuisine:** South Indian
 - **Time:** 15 min
 - **Texture:** soft finger food
@@ -631,6 +635,7 @@ How to read and edit this file: see [README.md](README.md).
 
 - **For:** baby
 - **Meal:** lunch
+- **Serves:** 2
 - **Cuisine:** American
 - **Time:** 15 min
 - **Texture:** mashed
@@ -761,6 +766,7 @@ How to read and edit this file: see [README.md](README.md).
 
 - **For:** baby
 - **Meal:** lunch
+- **Serves:** 2
 - **Cuisine:** Japanese
 - **Time:** 15 min
 - **Texture:** mashed

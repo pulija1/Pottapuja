@@ -14,6 +14,7 @@ How to read and edit this file: see [README.md](README.md).
 
 - **For:** family
 - **Meal:** dinner
+- **Serves:** 3
 - **Cuisine:** South Indian
 - **Time:** 40 min
 
