@@ -263,6 +263,79 @@ How to read and edit this file: see [README.md](README.md).
 
 ---
 
+## Iron-fortified cereal and a gentle tummy
+
+Iron-fortified baby cereal (rice, oat or multigrain) covers most of an 8-month-old's iron. Make it with breast milk, formula or water as the packet says, never with cow's milk as the main liquid. For a gassy tummy: well-cooked moong dal, rice, ripe banana, papaya, pear, pumpkin and bottle gourd are gentle; a pinch of roasted jeera or hing helps; hold back cabbage, cauliflower, broccoli, whole beans, chana and rajma for now.
+
+### Iron-fortified cereal with mashed banana
+
+- **For:** baby
+- **Meal:** breakfast
+- **Cuisine:** American
+- **Time:** 3 min
+- **Busy morning:** no cook
+- **Texture:** porridge
+
+**Ingredients**
+
+- 3 tbsp iron-fortified baby cereal
+- 4 tbsp water (or breast milk or formula), warm
+- ½ banana, ripe
+
+**Steps**
+
+1. Stir the cereal into the warm liquid until smooth, as thick as the baby likes.
+2. Mash the ripe banana and stir it in.
+3. Check it's lukewarm, not hot, before feeding.
+
+**Notes:** Gentle on a gassy tummy. Vitamin C from fruit later in the day helps the iron be absorbed.
+
+### Iron-fortified cereal with pear puree
+
+- **For:** baby
+- **Meal:** breakfast
+- **Cuisine:** American
+- **Time:** 3 min
+- **Busy morning:** no cook
+- **Texture:** porridge
+
+**Ingredients**
+
+- 3 tbsp iron-fortified baby cereal
+- 4 tbsp water (or breast milk or formula), warm
+- 3 tbsp pear, ripe, steamed and mashed
+
+**Steps**
+
+1. Stir the cereal into the warm liquid until smooth.
+2. Swirl in the mashed pear (steamed the night before, or a soft ripe pear mashed raw).
+3. Serve lukewarm.
+
+**Notes:** Pear keeps things moving and is easy on the tummy.
+
+### Iron-fortified cereal with moong dal water and jeera
+
+- **For:** baby
+- **Meal:** lunch
+- **Cuisine:** South Indian
+- **Time:** 15 min
+- **Texture:** porridge
+
+**Ingredients**
+
+- 2 tbsp moong dal, washed
+- 1 cup water
+- 1 pinch jeera, roasted and powdered
+- 2 tbsp iron-fortified baby cereal
+
+**Steps**
+
+1. Pressure cook the moong dal in the water for 3 whistles until very soft.
+2. Strain out 5 tbsp of the warm dal water and mash a spoon of the dal into it.
+3. Stir in the cereal and the jeera until smooth. Serve lukewarm.
+
+**Notes:** Moong dal and jeera are gentle on a gassy tummy.
+
 ## North Indian
 
 ### Palak dal khichdi

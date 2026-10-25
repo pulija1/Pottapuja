@@ -38,6 +38,7 @@ export function kitchenGroupFor(name) {
   // "Raw banana" and "raw mango" are cooked as vegetables.
   if (/\braw (banana|mango|papaya|jackfruit)\b/.test(n)) return "vegetables";
   if (/\b(almond|nut|seed) (powder|flour)\b/.test(n)) return "nuts";
+  if (/\bbaby cereal\b/.test(n)) return "grains";
   for (const [id, re] of RULES) if (re.test(n)) return id;
   return FROM_AISLE[aisleFor(n)] || "other";
 }

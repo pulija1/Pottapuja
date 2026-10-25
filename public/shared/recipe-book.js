@@ -143,6 +143,9 @@ export function parseRecipeMarkdown(md, file = "") {
     const busy = String(r.fields["busy morning"] || "").toLowerCase();
     if (/ahead|night|overnight/.test(busy)) recipe.busyMorning = "make-ahead";
     else if (/no[- ]?cook/.test(busy)) recipe.busyMorning = "no-cook";
+    // When and how long the make-ahead work is: "night before · 15 min" or "weekend · 35 min · keeps 4 days in the fridge".
+    const prep = parsePrepAhead(r.fields["prep ahead"]);
+    if (prep) recipe.prepAhead = prep;
     // Made the night before and warmed in the morning: how ("1½ min in the microwave, covered").
     if (r.fields.reheat) recipe.reheat = r.fields.reheat;
     // Dips served on the side, by their titles in the book.
@@ -204,6 +207,17 @@ export function parseRecipeMarkdown(md, file = "") {
   return { recipes, problems };
 }
 
+// "weekend · 35 min · bake a tray, keeps 4 days in the fridge" -> { when: "weekend", minutes: 35, keepsDays: 4, frozen: false, text }
+// A batch that also goes in the freezer ("a month in the freezer") keeps all week.
+export function parsePrepAhead(line) {
+  const text = String(line || "").trim();
+  if (!text) return null;
+  const when = /weekend|sunday|saturday|batch/i.test(text) ? "weekend" : "night";
+  const minutes = parseInt((text.match(/(\d+)\s*min/) || [])[1], 10) || null;
+  const keepsDays = parseInt((text.match(/keeps\s+(\d+)\s*days?/i) || [])[1], 10) || (/keeps a day/i.test(text) ? 1 : null);
+  return { when, minutes, keepsDays, frozen: /freez/i.test(text), text };
+}
+
 // Combine parsed files into one list. A repeated id keeps the first recipe and reports the rest.
 export function combineBooks(parsed) {
   const seen = new Map();
@@ -249,6 +263,7 @@ export function recipeToMarkdown(r) {
   if (r.airFryer?.text) out.push(`- **Air fryer:** ${r.airFryer.text}`);
   if (r.oven?.text) out.push(`- **Oven:** ${r.oven.text}`);
   if (r.busyMorning) out.push(`- **Busy morning:** ${r.busyMorning.replace("-", " ")}`);
+  if (r.prepAhead?.text) out.push(`- **Prep ahead:** ${r.prepAhead.text}`);
   if (r.reheat) out.push(`- **Reheat:** ${r.reheat}`);
   if (r.sideDips?.length) out.push(`- **Side dip:** ${r.sideDips.join(", ")}`);
   if (r.leftover?.length) out.push(`- **Leftover:** ${r.leftover.join(", ")}`);

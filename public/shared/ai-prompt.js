@@ -53,7 +53,7 @@ export const RECIPE_LIST_SCHEMA = obj({
 
 export const QUICK_MINUTES = 20;
 
-export function buildPrompt({ ingredients, forWhom, mealType, notes, count, schoolNutFree, quick, appliances = [], useSoon = [], staples = [] }) {
+export function buildPrompt({ ingredients, forWhom, mealType, notes, count, schoolNutFree, quick, appliances = [], useSoon = [], staples = [], childNeeds = "" }) {
   const who = forWhom === "both" ? "the baby and the 4-year-old (mix of both)" : forWhom === "baby" ? "the 8-month-old baby" : forWhom === "kid" ? "the 4-year-old" : "the whole family";
   return [
     `Ingredients we have: ${ingredients.join(", ") || "(nothing listed, suggest staples)"}.`,
@@ -63,6 +63,7 @@ export function buildPrompt({ ingredients, forWhom, mealType, notes, count, scho
     mealType ? `Meal: ${mealType}.` : "",
     quick ? `It must be quick: ready in ${QUICK_MINUTES} minutes or less, with few ingredients and short steps.` : "",
     schoolNutFree ? "The school is nut-free." : "",
+    childNeeds ? `Each child's needs, always keep to them:\n${childNeeds}` : "",
     appliancePrompt(appliances),
     notes ? `Extra notes from the parent: ${notes}` : "",
   ].filter(Boolean).join("\n");
@@ -78,7 +79,8 @@ export function parseRequest(body) {
     .slice(0, 60);
   const forWhom = ["baby", "kid", "family", "both"].includes(b.forWhom) ? b.forWhom : "both";
   const mealType = ["breakfast", "lunch", "lunchbox", "snack", "dinner", ""].includes(b.mealType ?? "") ? (b.mealType ?? "") : "";
-  const notes = String(b.notes ?? "").slice(0, 300);
+  const notes = String(b.notes ?? "").slice(0, 400);
+  const childNeeds = String(b.childNeeds ?? "").slice(0, 1200);
   const quick = b.quick === true;
   const count = quick ? 1 : Math.min(6, Math.max(1, Number.parseInt(b.count, 10) || 4));
   const schoolNutFree = b.schoolNutFree === true;
@@ -87,7 +89,7 @@ export function parseRequest(body) {
   // "okra (2 days left)" is fine: the AI reads it as text.
   const useSoon = names(b.useSoon, 20);
   const staples = names(b.staples, 40);
-  return { ingredients, forWhom, mealType, notes, count, schoolNutFree, quick, appliances, useSoon, staples };
+  return { ingredients, forWhom, mealType, notes, count, schoolNutFree, quick, appliances, useSoon, staples, childNeeds };
 }
 
 // Attach safety results; drop recipes that fail the age rules.

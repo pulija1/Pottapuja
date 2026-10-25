@@ -9,7 +9,8 @@ const refOf = (pred) => [...refs].find(([, r]) => pred(r));
 test("CHAT-01 the rules keep the age, nut-free and busy-morning rules and the slots", () => {
   assert.match(PLAN_RULES, /never honey/);
   assert.match(PLAN_RULES, /nut-free, the lunchbox and the snack box never contain/);
-  assert.match(PLAN_RULES, /made the night before/);
+  assert.match(PLAN_RULES, /easy prep the night before/);
+  assert.match(PLAN_RULES, /nothing is baked or cooked for long that morning/);
   for (const id of SLOT_IDS) assert.match(PLAN_RULES, new RegExp(id));
   assert.equal(PLAN_CHAT_SCHEMA.additionalProperties, false);
   assert.deepEqual(PLAN_CHAT_SCHEMA.properties.changes.items.required.sort(), ["date", "ingredients", "notes", "ref", "slot", "steps", "title"]);
