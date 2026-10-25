@@ -1256,7 +1256,7 @@ How to read and edit this file: see [README.md](README.md).
 
 ## School snack box: tiny and light
 
-The school snack box is very small, so on school days the snack suggestions come from the recipes marked **Snack box: tiny**: a few bites of finger food that keep 4 hours in a bag and need no spoon. When the school is nut-free, the nut butter ones are left out and the sunflower seed butter one takes their place.
+The school snack box is very small, so on school days the snack suggestion is cheese or a ragi cookie, from the recipes marked **Snack box: tiny**: a few bites of finger food that keep 4 hours in a bag and need no spoon. On a day the breakfast already has ragi, the snack is cheese. When the school is nut-free, the ones with nuts are left out. The apple and nut butter boxes stay in the book for after school and weekends.
 
 ### Apple slices with sunflower seed butter
 

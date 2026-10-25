@@ -865,6 +865,14 @@ function slotDatalist(who) {
   return list.filter((r) => !seen.has(r.title) && seen.add(r.title)).map((r) => `<option value="${esc(r.title)}">`).join("");
 }
 
+// What goes in the school snack box: cheese, or a ragi cookie.
+const SNACK_BOX = /cheese|ragi cookie/i;
+// A planned meal or recipe with ragi (finger millet) in its title or ingredients.
+const hasRagi = (m) => {
+  const r = m?.recipeId ? findRecipe(m.recipeId) || m : m;
+  return /ragi|finger millet|nachni/i.test([r?.title, ...(r?.ingredients || []).map((i) => typeof i === "string" ? i : i?.name)].join(" "));
+};
+
 // Suggested meals for the empty slots of a date, built from what's in the kitchen.
 // Picks are safety-checked for the slot, avoid repeating the day before, and rotate with `seed`.
 function suggestionsFor(key) {
@@ -877,6 +885,8 @@ function suggestionsFor(key) {
   entry.leftover = {};
   const prev = getDay(state, addDays(key, -1));
   const avoid = new Set(Object.values(prev?.meals || {}).map((m) => m?.recipeId).filter(Boolean));
+  // Everything planned in the 6 days before: the same lunch shouldn't come back every day of the week.
+  const lastWeek = new Set([1, 2, 3, 4, 5, 6].flatMap((n) => Object.values(getDay(state, addDays(key, -n))?.meals || {}).map((m) => m?.recipeId)).filter(Boolean));
   const used = new Set(Object.values(day.meals || {}).map((m) => m?.recipeId).filter(Boolean));
   const picks = {};
   // Food past the use-by date typed in for it is gone by this day.
@@ -892,7 +902,7 @@ function suggestionsFor(key) {
     // One leftover idea a day, in the first slot it fits. 🔀 on that slot moves on to the usual ideas.
     if (leftovers.length && !Object.keys(entry.leftover).length && !entry.offsets[s.id]) {
       const ideas = leftovers.flatMap((l) => leftoverRecipesFor(l.kind, { cuisines }).map((r) => ({ r, l })))
-        .filter(({ r }) => r.forWhom === s.who && (r.mealType === meal || (meal === "lunchbox" && r.mealType === "lunch")) && !used.has(r.id) && safe(r));
+        .filter(({ r }) => r.forWhom === s.who && (r.mealType === meal || (meal === "lunchbox" && r.mealType === "lunch")) && !used.has(r.id) && !lastWeek.has(r.id) && safe(r));
       if (ideas.length) {
         const { r, l } = ideas[entry.seed % ideas.length];
         picks[s.id] = r.id;
@@ -912,18 +922,26 @@ function suggestionsFor(key) {
       // Nothing that can't be ready that morning: no baking on a school day, and a weekend batch only while it keeps.
       .filter((r) => meal !== "breakfast" || fitsMorning(r, key, appliancesOwned()));
     if (busyMorning && candidates.some((r) => r.busyMorning)) candidates = candidates.filter((r) => r.busyMorning);
-    // The school snack box is tiny: on school days, only light finger food that fits it (apple and nut butter, cheese, a ragi cookie).
-    if (s.id === "kid_snack" && isSchoolDay(key) && candidates.some((r) => r.snackBox)) candidates = candidates.filter((r) => r.snackBox);
-    let fresh = candidates.filter((r) => !used.has(r.id) && !avoid.has(r.id));
+    // The school snack box is tiny: on school days it is cheese or a ragi cookie, and no ragi cookie when breakfast already had ragi.
+    if (s.id === "kid_snack" && isSchoolDay(key)) {
+      const breakfast = day.meals?.kid_breakfast?.title ? day.meals.kid_breakfast : findRecipe(picks.kid_breakfast);
+      const box = candidates.filter((r) => r.snackBox && SNACK_BOX.test(r.title) && !(hasRagi(r) && hasRagi(breakfast)));
+      if (box.length) candidates = box;
+    }
     // Steer the 4-year-old's empty slots toward the daily goal: an egg at breakfast, milk in the lunchbox, nuts in the snack.
+    let goal = null;
     if (s.who === "kid") {
       const want = { kid_breakfast: "egg", kid_lunchbox: "dairy", kid_snack: "nuts" }[s.id];
       const goals = kidGoals(key, picks);
       const missing = GOALS.filter((g) => !goals[g]);
-      const goal = missing.includes(want) ? want : missing.find((g) => candidates.some((r) => r.tags?.includes(g)));
-      const withGoal = (list) => list.filter((r) => r.tags?.includes(goal));
-      if (goal && withGoal(candidates).length) fresh = withGoal(fresh).length ? withGoal(fresh) : withGoal(candidates);
+      goal = missing.includes(want) ? want : missing.find((g) => candidates.some((r) => r.tags?.includes(g)));
     }
+    const withGoal = (list) => (goal ? list.filter((r) => r.tags?.includes(goal)) : []);
+    // Something not planned this week, else not yesterday, else anything; within each, the goal first.
+    const notUsed = candidates.filter((r) => !used.has(r.id));
+    const tiers = [notUsed.filter((r) => !lastWeek.has(r.id)), notUsed.filter((r) => !avoid.has(r.id)), candidates];
+    const tier = tiers.find((t) => t.length) || [];
+    const fresh = withGoal(tier).length ? withGoal(tier) : tier;
     const pool = (fresh.length ? fresh : candidates).slice(0, 6);
     if (!pool.length) continue;
     const r = pool[(entry.seed + (entry.offsets[s.id] || 0)) % pool.length];
