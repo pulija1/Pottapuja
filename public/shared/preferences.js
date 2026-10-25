@@ -2,7 +2,9 @@
 // no egg yet, and so on, plus a free-text note. Suggestions follow them, and the AI is told.
 // Pure functions, no I/O here.
 //
-// settings.prefs = { baby: { tags: ["gassy", "ironCereal"], note: "" }, kid: { tags: [], note: "" } }
+// settings.prefs = { baby: { tags: ["gassy", "ironCereal"], note: "", avoid: ["ragi"] }, kid: { tags: [], note: "", avoid: [] } }
+
+import { normName } from "./shopping.js";
 
 const word = (list) => new RegExp(`\\b(?:${list.join("|")})(?:s|es)?\\b`, "i");
 
@@ -38,18 +40,40 @@ const names = (r) => (r?.ingredients || []).map((i) => String(typeof i === "stri
 const has = (r, re) => names(r).some((n) => re.test(n));
 const hasDairy = (r) => names(r).some((n) => DAIRY.test(n) && !NOT_DAIRY.test(n));
 
-// The child's prefs from settings: { tags: Set, note }.
+// "Ragi, brinjal , ragi" -> ["ragi", "brinjal"]: the foods a child never gets, as the parent typed them.
+export function parseAvoid(v) {
+  const list = Array.isArray(v) ? v : String(v || "").split(/[,;\n]/);
+  const seen = new Set();
+  return list.map((x) => String(x ?? "").trim().toLowerCase().slice(0, 40)).filter((x) => x && !seen.has(normName(x)) && seen.add(normName(x))).slice(0, 20);
+}
+
+// The child's prefs from settings: { tags: Set, note, avoid: [names] }.
 export function prefsFor(settings, who) {
   const p = settings?.prefs?.[who];
   const allowed = new Set((PREF_OPTIONS[who] || []).map((o) => o.id));
-  return { tags: new Set((Array.isArray(p?.tags) ? p.tags : []).filter((t) => allowed.has(t))), note: String(p?.note || "").trim().slice(0, 200) };
+  return { tags: new Set((Array.isArray(p?.tags) ? p.tags : []).filter((t) => allowed.has(t))), note: String(p?.note || "").trim().slice(0, 200), avoid: parseAvoid(p?.avoid) };
+}
+
+// The first food on the child's never-use list that the recipe has, or "". "ragi" catches
+// "ragi flour" and "Ragi porridge"; Telugu or Hindi names match their English ones ("vankaya" is brinjal).
+const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+export function avoidedIn(recipe, avoid) {
+  if (!avoid?.length) return "";
+  const texts = [recipe?.title || "", ...names(recipe)].flatMap((t) => [String(t).toLowerCase(), normName(t)]);
+  for (const a of avoid) {
+    const forms = [...new Set([a.toLowerCase(), normName(a)])].filter(Boolean).map((f) => new RegExp(`\\b${esc(f)}(?:s|es)?\\b`, "i"));
+    if (texts.some((t) => forms.some((re) => re.test(t)))) return a;
+  }
+  return "";
 }
 
 // Why a recipe doesn't suit this child, or "" when it does. Only the hard rules (and, for a
 // gassy baby, the foods that cause the most gas) leave a recipe out.
 export function prefProblem(recipe, who, settings) {
   if (who !== "baby" && who !== "kid") return "";
-  const { tags } = prefsFor(settings, who);
+  const { tags, avoid } = prefsFor(settings, who);
+  const avoided = avoidedIn(recipe, avoid);
+  if (avoided) return `has ${avoided}, which you asked to leave out`;
   if (!tags.size) return "";
   if (tags.has("noEgg") && has(recipe, EGG)) return "has egg";
   if (tags.has("noDairy") && hasDairy(recipe)) return "has milk or dairy";
@@ -76,8 +100,9 @@ export function prefBoost(recipe, who, settings, { mealType = "" } = {}) {
 export function prefsPrompt(settings) {
   const lines = [];
   for (const [who, label] of [["baby", "The 8-month-old"], ["kid", "The 4-year-old"]]) {
-    const { tags, note } = prefsFor(settings, who);
+    const { tags, note, avoid } = prefsFor(settings, who);
     const parts = PREF_OPTIONS[who].filter((o) => tags.has(o.id)).map((o) => o.ai);
+    if (avoid.length) parts.push(`must never get ${avoid.join(", ")} (not in any form)`);
     if (note) parts.push(`the parent says: "${note}"`);
     if (parts.length) lines.push(`${label} ${parts.join("; ")}.`);
   }
@@ -94,7 +119,7 @@ export function cleanPrefs(v) {
   const out = {};
   for (const who of ["baby", "kid"]) {
     const p = prefsFor({ prefs: v }, who);
-    if (p.tags.size || p.note) out[who] = { tags: [...p.tags], note: p.note };
+    if (p.tags.size || p.note || p.avoid.length) out[who] = { tags: [...p.tags], note: p.note, avoid: p.avoid };
   }
   return out;
 }

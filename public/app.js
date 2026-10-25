@@ -6,7 +6,7 @@ import { QUICK_MINUTES } from "./shared/ai-prompt.js";
 import { todayKey, addDays, addMonths, monthGrid, monthLabel, prettyDate, fromKey, isDateKey, isSchoolDay, occurrences, daysBetween } from "./shared/dates.js";
 import { checkRecipe, checkForAudience, isNutIngredient, isSchoolFood } from "./shared/safety.js";
 import { LIBRARY, suggestFromLibrary, readyToCook, RECIPE_BOOK_STATUS, cookByVegetables, missingForRecipe, CUISINES, inCuisines, topPicks, leftoverKind, leftoverRecipesFor, freezerSet, sideDipsFor, quickBreakfasts, breakfastKind, fitsMorning, MORNING_MINUTES, EASY_NIGHT_MINUTES } from "./shared/recipes.js";
-import { PREF_OPTIONS, prefsFor, prefProblem, prefsPrompt, prefStaples, cleanPrefs } from "./shared/preferences.js";
+import { PREF_OPTIONS, prefsFor, prefProblem, avoidedIn, prefsPrompt, prefStaples, cleanPrefs } from "./shared/preferences.js";
 import { kitchenExpiry, useSoonWeights, goneBy, staplesFor, staplesSummary, expiryOf, dateKeyOf, daysLeftLabel, shelfLifeDays } from "./shared/freshness.js";
 import { nutritionTags, TAG_LABELS } from "./shared/recipe-book.js";
 import { groupKitchen, babyFruitFor, recipeHasFruit } from "./shared/kitchen.js";
@@ -289,8 +289,11 @@ function slotIssues(key) {
       schoolNutFree: nutFreeOn(),
       nutFreeSwap: r.nutFreeSwap,
     });
-    if (res.errors.length) {
+    // A food on the child's never-use list (Profile) is flagged like a safety problem.
+    const avoided = avoidedIn({ ...r, title: m.title }, prefsFor(state.settings, s.who).avoid);
+    if (res.errors.length || avoided) {
       const msgs = res.errors.map((e) => e.message);
+      if (avoided) msgs.push(`Has ${avoided}, which you asked to leave out for ${whoLabel(s.who, state.settings)}.`);
       if (forBaby && linked && linked.forWhom !== "baby") msgs.push("This is not a baby recipe: take out a plain, mashed portion before salt and spice.");
       out[s.id] = { label: slotLabel(s, state.settings), messages: [...new Set(msgs)] };
     }
@@ -582,9 +585,10 @@ function profileDialog({ focusKey = false } = {}) {
     const p = prefsFor(state.settings, who);
     return `<div class="field"><span>What ${who === "baby" ? "the baby's" : "their"} food should suit</span>
       <div class="chips" data-testid="${who}-prefs">${PREF_OPTIONS[who].map((o) => `<label class="chk" style="min-height:0" title="${esc(o.hint || "")}"><input type="checkbox" name="${who}Pref" value="${o.id}" ${p.tags.has(o.id) ? "checked" : ""} data-testid="${who}-pref-${o.id}"> ${esc(o.label)}</label>`).join("")}</div></div>
+      <label class="field"><span>Never use (comma separated)</span><input name="${who}Avoid" value="${esc(p.avoid.join(", "))}" maxlength="300" placeholder="${who === "baby" ? "e.g. ragi, brinjal" : "e.g. mushroom, bitter gourd"}" data-testid="${who}-avoid"></label>
       <label class="field"><span>Anything else for recipes (optional)</span><input name="${who}Note" value="${esc(p.note)}" maxlength="200" placeholder="${who === "baby" ? "e.g. started egg last week, loves pear" : "e.g. doesn't like brinjal"}" data-testid="${who}-pref-note"></label>`;
   };
-  const prefCount = ["baby", "kid"].reduce((n, w) => n + prefsFor(state.settings, w).tags.size + (prefsFor(state.settings, w).note ? 1 : 0), 0);
+  const prefCount = ["baby", "kid"].reduce((n, w) => { const p = prefsFor(state.settings, w); return n + p.tags.size + p.avoid.length + (p.note ? 1 : 0); }, 0);
   const names = `<details ${state.settings.kidName ? "" : "open"} data-testid="family-names"><summary class="small">Children's names and needs${prefCount ? ` · ${prefCount} set` : ""}</summary>
       <p class="small muted">Saved with the family's data, not in the app's public code. Suggestions, recipes and the AI follow each child's needs.</p>
       <label class="field"><span>4-year-old</span><input name="kidName" value="${esc(state.settings.kidName || "")}" maxlength="30" data-testid="kid-name"></label>
@@ -643,7 +647,7 @@ function profileDialog({ focusKey = false } = {}) {
       case "names": {
         const f = dlg.querySelector("form").elements;
         const picks = (who) => [...dlg.querySelectorAll(`input[name=${who}Pref]:checked`)].map((i) => i.value);
-        const prefs = cleanPrefs({ baby: { tags: picks("baby"), note: f.babyNote.value }, kid: { tags: picks("kid"), note: f.kidNote.value } });
+        const prefs = cleanPrefs({ baby: { tags: picks("baby"), note: f.babyNote.value, avoid: f.babyAvoid.value }, kid: { tags: picks("kid"), note: f.kidNote.value, avoid: f.kidAvoid.value } });
         state.settings = { ...state.settings, kidName: f.kidName.value.trim(), babyName: f.babyName.value.trim(), prefs };
         ui.suggest = {};
         commit();

@@ -11,7 +11,7 @@ const gassyIron = { prefs: { baby: { tags: ["gassy", "ironCereal"], note: "loves
 const byTitle = (re) => LIBRARY.find((r) => re.test(r.title));
 
 test("PREF-01 settings are cleaned: unknown needs dropped, the note trimmed", () => {
-  assert.deepEqual(cleanPrefs({ baby: { tags: ["gassy", "bogus"], note: "  x  " }, kid: { tags: [] }, dog: { tags: ["noEgg"] } }), { baby: { tags: ["gassy"], note: "x" } });
+  assert.deepEqual(cleanPrefs({ baby: { tags: ["gassy", "bogus"], note: "  x  " }, kid: { tags: [] }, dog: { tags: ["noEgg"] } }), { baby: { tags: ["gassy"], note: "x", avoid: [] } });
   assert.equal(prefsFor({}, "baby").tags.size, 0);
   assert.deepEqual(prefStaples(gassyIron), ["iron-fortified baby cereal"]);
   assert.deepEqual(prefStaples({}), []);
@@ -93,4 +93,19 @@ test("MORN-03 easy breakfasts come grouped by when: no slow ones, and the night-
   for (const x of list.filter((y) => y.kind === "night")) assert.ok((x.recipe.prepAhead?.minutes || 0) <= 20, x.recipe.title);
   const noEgg = quickBreakfasts(["egg", "bread", "milk"], { limit: 60, settings: { prefs: { kid: { tags: ["noEgg"] } } } });
   assert.ok(!noEgg.some((x) => x.recipe.forWhom === "kid" && x.recipe.ingredients.some((i) => /\beggs?\b/.test(i.name))));
+});
+
+test("PREF-05 a never-use list per child: no ragi for the baby leaves out every ragi recipe, in any name", () => {
+  const st = { prefs: { baby: { avoid: "Ragi, vankaya" } } };
+  assert.deepEqual(prefsFor(st, "baby").avoid, ["ragi", "vankaya"]);
+  assert.deepEqual(cleanPrefs({ baby: { avoid: " ragi ,, Ragi;  " } }), { baby: { tags: [], note: "", avoid: ["ragi"] } });
+  assert.match(prefProblem({ title: "Ragi porridge", ingredients: [{ name: "ragi flour" }] }, "baby", st), /has ragi/);
+  assert.match(prefProblem({ title: "Curry", ingredients: [{ name: "brinjal" }] }, "baby", st), /has vankaya/, "Telugu name matches the English one");
+  assert.equal(prefProblem({ title: "Curry", ingredients: [{ name: "brinjal" }] }, "kid", st), "", "only for that child");
+  assert.equal(prefProblem({ title: "Eggplant mash", ingredients: [{ name: "eggplant" }] }, "kid", { prefs: { kid: { avoid: ["egg"] } } }), "", "egg doesn't catch eggplant");
+  const baby = suggestFromLibrary(["ragi flour", "banana", "rice", "moong dal"], { forWhom: "baby", limit: 60, settings: st, child: "baby" });
+  assert.ok(baby.length);
+  for (const r of baby) assert.ok(!/ragi/i.test(r.title + r.ingredients.map((i) => i.name).join()), r.title);
+  for (const x of quickBreakfasts(["ragi flour", "banana"], { forWhom: "baby", limit: 20, settings: st })) assert.doesNotMatch(x.recipe.title, /ragi/i);
+  assert.match(prefsPrompt(st), /The 8-month-old must never get ragi, vankaya/);
 });

@@ -1384,7 +1384,8 @@ test("E2E PREF-01 a gassy baby on iron-fortified cereal: Profile saves it, sugge
   const page = await ctx.newPage();
   const errors = [];
   page.on("pageerror", (e) => errors.push(e.message));
-  const calls = await fakeClaude(page, { recipes: [claudeRecipe(), claudeRecipe({ title: "Cauliflower mash", ingredients: [{ name: "cauliflower", quantity: 50, unit: "g" }] })] });
+  const calls = await fakeClaude(page, { recipes: [claudeRecipe({ title: "Moong dal rice mash", ingredients: [{ name: "rice", quantity: 2, unit: "tbsp" }, { name: "moong dal", quantity: 1, unit: "tbsp" }] }),
+    claudeRecipe(), claudeRecipe({ title: "Cauliflower mash", ingredients: [{ name: "cauliflower", quantity: 50, unit: "g" }] })] });
   await page.goto(`${off.url}?today=${TODAY}`);
   await page.getByTestId("cal-grid").waitFor();
   await unfoldAll(page);
@@ -1395,9 +1396,10 @@ test("E2E PREF-01 a gassy baby on iron-fortified cereal: Profile saves it, sugge
   await tid(page, "baby-pref-gassy").check();
   await tid(page, "baby-pref-ironCereal").check();
   await tid(page, "baby-pref-note").fill("loves pear");
+  await tid(page, "baby-avoid").fill("Ragi");
   await tid(page, "kid-pref-noEgg").check();
   await tid(page, "save-names").click();
-  assert.deepEqual(await page.evaluate(() => window.__mealPlanner.state.settings.prefs), { baby: { tags: ["gassy", "ironCereal"], note: "loves pear" }, kid: { tags: ["noEgg"], note: "" } });
+  assert.deepEqual(await page.evaluate(() => window.__mealPlanner.state.settings.prefs), { baby: { tags: ["gassy", "ironCereal"], note: "loves pear", avoid: ["ragi"] }, kid: { tags: ["noEgg"], note: "", avoid: [] } });
   await page.keyboard.press("Escape");
 
   // The week's suggestions: the baby's breakfast is the cereal, nothing gassy, no egg for the 4-year-old.
@@ -1409,7 +1411,7 @@ test("E2E PREF-01 a gassy baby on iron-fortified cereal: Profile saves it, sugge
   assert.ok(meals.some((m) => /Iron-fortified cereal/.test(m.baby_breakfast?.title || "")), "cereal at breakfast");
   for (const m of meals) {
     for (const [slot, meal] of Object.entries(m)) {
-      if (slot.startsWith("baby")) assert.doesNotMatch(meal.title, /cauliflower|cabbage|broccoli|rajma|chana/i);
+      if (slot.startsWith("baby")) assert.doesNotMatch(meal.title, /cauliflower|cabbage|broccoli|rajma|chana|ragi/i);
       if (slot.startsWith("kid")) assert.doesNotMatch(meal.title, /\begg/i, `${slot}: ${meal.title}`);
     }
   }
@@ -1418,9 +1420,12 @@ test("E2E PREF-01 a gassy baby on iron-fortified cereal: Profile saves it, sugge
   await tid(page, "tab-recipes").click();
   await tid(page, "gen-for").selectOption("baby");
   await tid(page, "generate-recipes").click();
-  await page.locator("[data-testid=recipe-card]", { hasText: "Ragi banana porridge" }).waitFor({ timeout: 5000 });
+  await page.locator("[data-testid=recipe-card]", { hasText: "Moong dal rice mash" }).waitFor({ timeout: 5000 });
+  assert.equal(await page.locator("[data-testid=recipe-card]", { hasText: "Ragi banana porridge" }).count(), 0, "no ragi for the baby");
+  assert.match(await tid(page, "rejected-notice").textContent(), /Ragi banana porridge.*ragi, which you asked to leave out/);
   assert.match(calls[0].body.messages[0].content, /The 8-month-old has a gassy tummy.*"loves pear"/);
   assert.match(calls[0].body.messages[0].content, /The 4-year-old doesn't eat egg/);
+  assert.match(calls[0].body.messages[0].content, /The 8-month-old .*must never get ragi/);
   assert.equal(await page.locator("[data-testid=recipe-card]", { hasText: "Cauliflower mash" }).count(), 0);
   assert.match(await tid(page, "rejected-notice").textContent(), /Cauliflower mash.*gas/);
   assert.deepEqual(errors, []);
