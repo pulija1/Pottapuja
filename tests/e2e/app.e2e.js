@@ -1140,7 +1140,7 @@ test("E2E UI-20 less scrolling: the calendar opens on one week, sections start f
   // Recipes: picture cards for the top picks, everything else folded, so the page is short.
   await tid(page, "tab-recipes").click();
   assert.ok((await page.locator("[data-testid=top-pick] .pick-art").count()) > 0);
-  for (const id of ["sec-kitchen", "sec-cook-veg", "sec-ready", "sec-generate", "sec-saved"]) {
+  for (const id of ["sec-quick-breakfast", "sec-kitchen", "sec-cook-veg", "sec-ready", "sec-generate", "sec-saved"]) {
     assert.equal(await page.locator(`details[data-group=${id}]`).evaluate((d) => d.open), false, `${id} starts folded`);
   }
   const height = await page.evaluate(() => document.documentElement.scrollHeight);
@@ -1291,6 +1291,87 @@ test("E2E CHAT-02 without a key the chat explains and opens the key steps in Pro
   assert.ok(await tid(page, "ai-key-section").evaluate((d) => d.open));
   assert.match(await tid(page, "ai-key-steps").textContent(), /Create Key/);
   assert.equal(await tid(page, "ai-key-get").getAttribute("href"), "https://console.anthropic.com/settings/keys");
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+// ---------- use-by dates, cooking first what runs out, quick breakfasts ----------
+test("E2E FRESH-01 a use-by date on kitchen food: shown on the item, editable, and the week plan cooks it first", async () => {
+  const { page, ctx, errors } = await open(off);
+  await tid(page, "tab-recipes").click();
+  await tid(page, "pantry-input").fill("gongura");
+  await tid(page, "pantry-expires").fill(TOMORROW);
+  await tid(page, "pantry-add").click();
+  assert.match(await tid(page, "use-soon").textContent(), /gongura \(tomorrow\)/);
+  const veg = page.locator("[data-kitchen=vegetables]");
+  if (!(await veg.evaluate((d) => d.open))) await veg.locator("summary").click();
+  const chip = tid(page, "pantry-item").filter({ hasText: "gongura" });
+  assert.match(await chip.locator("[data-testid=pantry-expiry]").textContent(), /1 day 📅/);
+  assert.deepEqual(await page.evaluate(() => window.__mealPlanner.state.pantryDates.gongura), { added: "2026-10-22", expires: TOMORROW });
+  // Items without a date get the fridge estimate from when they came in.
+  assert.equal(await page.evaluate(() => window.__mealPlanner.state.pantryDates.carrot?.expires), "");
+
+  // Tap the item to change its date, then back to the estimate.
+  await chip.locator("[data-testid=pantry-date]").click();
+  assert.match(await tid(page, "pantry-date-estimate").textContent(), /Keeps about 4 days in the fridge/);
+  await tid(page, "pantry-date-input").fill("2026-10-28");
+  await tid(page, "pantry-date-save").click();
+  assert.equal(await page.evaluate(() => window.__mealPlanner.state.pantryDates.gongura.expires), "2026-10-28");
+  await tid(page, "pantry-item").filter({ hasText: "gongura" }).locator("[data-testid=pantry-date]").click();
+  await tid(page, "pantry-date-clear").click();
+  assert.equal(await page.evaluate(() => window.__mealPlanner.state.pantryDates.gongura.expires), "");
+  await tid(page, "pantry-item").filter({ hasText: "gongura" }).locator("[data-testid=pantry-date]").click();
+  await tid(page, "pantry-date-input").fill(TOMORROW);
+  await tid(page, "pantry-date-save").click();
+
+  // The week plan uses the gongura before it runs out (today or tomorrow), once.
+  await tid(page, "tab-calendar").click();
+  await cell(page, TODAY).click();
+  await tid(page, "fill-week").click();
+  await tid(page, "toast").waitFor();
+  const uses = await page.evaluate(() => {
+    const { state } = window.__mealPlanner;
+    const out = [];
+    for (const [date, day] of Object.entries(state.days)) {
+      for (const m of Object.values(day.meals)) if (/gongura/i.test(m.title)) out.push(date);
+    }
+    return out;
+  });
+  assert.ok(uses.length >= 1 && uses.every((d) => d <= TOMORROW), `gongura on ${uses.join(", ")}`);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test("E2E FRESH-02 Quick breakfasts from the kitchen, and AI breakfast ideas told what runs out and the staples at home", async () => {
+  const ctx = await newContext();
+  await ctx.addInitScript((k) => localStorage.setItem("familyMealPlanner.aiKey", k), FAKE_KEY);
+  const page = await ctx.newPage();
+  const errors = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  const calls = await fakeClaude(page, { recipes: [claudeRecipe({ title: "Egg dosa", forWhom: "family", mealType: "breakfast", texture: "", prepMinutes: 10,
+    ingredients: [{ name: "idli/dosa batter", quantity: 1, unit: "cup" }, { name: "egg", quantity: 2, unit: "pcs" }], steps: ["Spread the batter", "Crack the egg on top"] })] });
+  await page.goto(`${off.url}?today=${TODAY}`);
+  await page.getByTestId("cal-grid").waitFor();
+  await unfoldAll(page);
+  await tid(page, "tab-recipes").click();
+  const rows = tid(page, "quick-breakfast");
+  assert.ok((await rows.count()) >= 1);
+  assert.match(await rows.first().textContent(), /⚡ \d+ min/);
+  assert.ok((await tid(page, "quick-breakfast-baby").locator("[data-testid=quick-breakfast]").count()) >= 1, "the baby's quick breakfasts too");
+  // Staples are assumed at home, and that can be turned off.
+  assert.match(await page.locator("label", { has: tid(page, "assume-staples") }).textContent(), /rice, dals, spices/);
+
+  await tid(page, "ai-breakfasts").click();
+  await page.locator("[data-testid=recipe-card]", { hasText: "Egg dosa" }).waitFor({ timeout: 5000 });
+  const prompt = calls[0].body.messages[0].content;
+  assert.match(prompt, /Meal: breakfast/);
+  assert.match(prompt, /Use these first, they run out soon: .*idli\/dosa batter/);
+  assert.match(prompt, /Pantry staples always at home: rice, toor dal/);
+  assert.match(prompt, /Quick and easy breakfasts/);
+  assert.match(calls[0].body.system, /never honey/, "the age rules are still sent");
+
+  await tid(page, "assume-staples").uncheck();
+  assert.equal(await page.evaluate(() => window.__mealPlanner.state.settings.assumeStaples), false);
   assert.deepEqual(errors, []);
   await ctx.close();
 });

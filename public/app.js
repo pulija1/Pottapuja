@@ -5,7 +5,8 @@ import { catalogText, libraryRefs, savedRefs, planWindow, contextText, userTurn,
 import { QUICK_MINUTES } from "./shared/ai-prompt.js";
 import { todayKey, addDays, addMonths, monthGrid, monthLabel, prettyDate, fromKey, isDateKey, isSchoolDay, occurrences, daysBetween } from "./shared/dates.js";
 import { checkRecipe, checkForAudience, isNutIngredient, isSchoolFood } from "./shared/safety.js";
-import { LIBRARY, suggestFromLibrary, readyToCook, RECIPE_BOOK_STATUS, cookByVegetables, missingForRecipe, CUISINES, inCuisines, topPicks, leftoverKind, leftoverRecipesFor, freezerSet, sideDipsFor } from "./shared/recipes.js";
+import { LIBRARY, suggestFromLibrary, readyToCook, RECIPE_BOOK_STATUS, cookByVegetables, missingForRecipe, CUISINES, inCuisines, topPicks, leftoverKind, leftoverRecipesFor, freezerSet, sideDipsFor, quickBreakfasts } from "./shared/recipes.js";
+import { kitchenExpiry, useSoonWeights, goneBy, staplesFor, staplesSummary, expiryOf, dateKeyOf, daysLeftLabel, shelfLifeDays } from "./shared/freshness.js";
 import { nutritionTags, TAG_LABELS } from "./shared/recipe-book.js";
 import { groupKitchen, babyFruitFor, recipeHasFruit } from "./shared/kitchen.js";
 import { APPLIANCES, ownedAppliances, methodsFor, fastestMinutes, basketPairs, applianceRequest } from "./shared/appliances.js";
@@ -172,6 +173,7 @@ function refreshToday() {
 function replaceState(next) {
   for (const k of Object.keys(state)) delete state[k];
   Object.assign(state, next);
+  stampUndated();
   clearCaches();
   render();
 }
@@ -204,8 +206,45 @@ const nutFreeOn = () => !!state.settings?.schoolNutFree;
 const appliancesOwned = () => ownedAppliances(state.settings);
 // The cuisines picked in Profile (ids from CUISINES). Empty means every cuisine counts the same.
 const cuisinePicks = () => (Array.isArray(state.settings?.cuisines) ? state.settings.cuisines : []).filter((c) => CUISINES.some((x) => x.id === c));
-// What's in the freezer (the Frozen tab) counts as in the kitchen for suggestions, a little behind fresh food.
+// What's in the freezer (the Frozen tab) counts as in the kitchen for suggestions, well behind fresh food.
 const frozenOnHand = () => state.frozen || [];
+// The cuisine's basics (rice, dals, spices, oil, onions) count as at home unless the parent turns it off.
+const assumeStaples = () => state.settings?.assumeStaples !== false;
+const staplesOn = () => (assumeStaples() ? staplesFor(cuisinePicks()) : []);
+// Use-by dates of the kitchen food, typed in or estimated from how long it keeps in the fridge.
+const pantryDates = () => state.pantryDates || {};
+const expiryList = () => kitchenExpiry(state.pantry, pantryDates(), TODAY);
+const USE_SOON_DAYS = 3;   // the kitchen flags food that runs out within this many days
+// A kitchen item came in today; `expires` is its use-by date, or "" to estimate it.
+function noteAdded(name, expires = "") {
+  const k = dateKeyOf(name);
+  if (k) state.pantryDates = { ...pantryDates(), [k]: { added: TODAY, expires: isDateKey(expires) ? expires : "" } };
+}
+// Kitchen items from before use-by dates (or from an old backup) start their fridge estimate from now.
+function stampUndated() {
+  const dates = pantryDates();
+  const missing = state.pantry.filter((p) => dateKeyOf(p) && !dates[dateKeyOf(p)]);
+  if (!missing.length) return false;
+  state.pantryDates = { ...dates, ...Object.fromEntries(missing.map((p) => [dateKeyOf(p), { added: TODAY, expires: "" }])) };
+  return true;
+}
+function forgetDates(name) {
+  const k = dateKeyOf(name);
+  if (!(k in pantryDates()) || state.pantry.some((p) => dateKeyOf(p) === k)) return;
+  const { [k]: _gone, ...rest } = pantryDates();
+  state.pantryDates = rest;
+}
+// What to cook first on a date: food that runs out by then, leaving out what meals planned from
+// today up to that date (and `picks`, recipe ids about to be planned) already use up.
+function useSoonOn(key, picks = {}) {
+  const skip = new Set();
+  const mark = (r) => { for (const i of r?.ingredients || []) skip.add(normName(i.name)); };
+  for (let k = TODAY; k <= key; k = addDays(k, 1)) {
+    for (const m of Object.values(getDay(state, k)?.meals || {})) if (m?.title) mark((m.recipeId && findRecipe(m.recipeId)) || findRecipeByTitle(m.title));
+  }
+  for (const id of Object.values(picks)) mark(findRecipe(id));
+  return useSoonWeights(state.pantry, pantryDates(), { today: TODAY, onKey: key < TODAY ? TODAY : key, skip });
+}
 // Vegetables count most when ranking top picks; onion, tomato and the aromatics are in almost everything, so they don't.
 const isMainVeg = (n) => aisleFor(n) === "Vegetables" && !/onion|shallot|ginger|garlic|chill?i|curry leaves|coriander|mint|lemon|lime|tomato/.test(n);
 
@@ -821,10 +860,13 @@ function suggestionsFor(key) {
   const avoid = new Set(Object.values(prev?.meals || {}).map((m) => m?.recipeId).filter(Boolean));
   const used = new Set(Object.values(day.meals || {}).map((m) => m?.recipeId).filter(Boolean));
   const picks = {};
+  // Food past the use-by date typed in for it is gone by this day.
+  const gone = new Set(goneBy(state.pantry, pantryDates(), { today: TODAY, onKey: key }));
+  const pantry = state.pantry.filter((p) => !gone.has(p));
   for (const s of slotsFor(key)) {
     if (day.meals?.[s.id]?.title) continue;
     const meal = s.id.split("_")[1];
-    const opt = { forWhom: s.who, schoolNutFree: nutFreeOn(), limit: 40, cuisines, frozen: frozenOnHand(), appliances: appliancesOwned() };
+    const opt = { forWhom: s.who, schoolNutFree: nutFreeOn(), limit: 40, cuisines, frozen: frozenOnHand(), appliances: appliancesOwned(), staples: staplesOn(), useSoon: useSoonOn(key, picks) };
     const seen = new Set();
     const safe = (r) => checkRecipe(r, { age: s.who === "baby" ? "baby" : "kid", lunchbox: s.id === "kid_lunchbox" || s.id === "kid_snack", schoolNutFree: nutFreeOn() }).safe;
     // One leftover idea a day, in the first slot it fits. 🔀 on that slot moves on to the usual ideas.
@@ -843,8 +885,8 @@ function suggestionsFor(key) {
     const busyMorning = meal === "breakfast" && isSchoolDay(key);
     // The 4-year-old eats the family breakfast too (overnight oats, peanut butter toast).
     const fits = (r) => r.forWhom === s.who || (s.id === "kid_breakfast" && r.forWhom === "family" && r.mealType === "breakfast");
-    let candidates = suggestFromLibrary(state.pantry, { ...opt, mealType: meal, busyMorning })
-      .concat(suggestFromLibrary(state.pantry, opt))
+    let candidates = suggestFromLibrary(pantry, { ...opt, mealType: meal, busyMorning })
+      .concat(suggestFromLibrary(pantry, opt))
       .filter((r) => fits(r) && !r.leftover && !seen.has(r.id) && seen.add(r.id))
       .filter(safe);
     if (busyMorning && candidates.some((r) => r.busyMorning)) candidates = candidates.filter((r) => r.busyMorning);
@@ -922,17 +964,17 @@ function chatRefs() {
 
 function chatContext(win, refs) {
   const back = new Map([...refs].map(([ref, r]) => [r.id, ref]));
-  const cookable = readyToCook(state.pantry, { maxMissing: 0, schoolNutFree: nutFreeOn(), limit: 60, cuisines: cuisinePicks(), frozen: frozenOnHand() })
+  const cookable = readyToCook(state.pantry, { maxMissing: 0, schoolNutFree: nutFreeOn(), limit: 60, cuisines: cuisinePicks(), frozen: frozenOnHand(), staples: staplesOn(), useSoon: useSoonOn(TODAY) })
     .map((x) => back.get(x.recipe.id)).filter(Boolean);
   return contextText({
     today: TODAY, window: win, days: state.days, refOf: (m) => back.get(m.recipeId) || "",
     pantry: state.pantry, frozen: frozenOnHand(), appliances: applianceRequest(state.settings), schoolNutFree: nutFreeOn(),
     cuisines: cuisinePicks().map((id) => CUISINES.find((x) => x.id === id).label), cookable,
-    saved: [...savedRefs(state.savedRecipes)],
+    saved: [...savedRefs(state.savedRecipes)], expiry: expiryList(), staples: staplesOn(),
   });
 }
 
-const CHAT_IDEAS = ["Plan this week", "No eggs this week", "Swap Tuesday's dinner", "Use what's in the freezer", "Plan next week"];
+const CHAT_IDEAS = ["Plan this week", "Use up what runs out first", "Quick breakfasts this week", "No eggs this week", "Swap Tuesday's dinner", "Use what's in the freezer", "Plan next week"];
 
 function chatMessageHtml(m, i) {
   if (m.role === "parent") return `<div class="chat-msg parent" data-testid="chat-parent">${esc(m.text)}</div>`;
@@ -1284,14 +1326,46 @@ const FRUITS = ["Arati pandu (banana)", "Mamidi pandu (mango)", "Boppayi (papaya
 // The kitchen list in collapsed groups (vegetables, fruits, dips, bread, snacks, ...). Each group's
 // heading shows how many there are and their names, so a glance is enough; open it to remove one.
 function renderKitchenGroups() {
+  const exp = new Map(expiryList().map((e) => [e.name, e]));
   return groupKitchen(state.pantry).map((g) => {
     const id = `kitchen-${g.id}`;
     return `<details class="kitchen-group" data-testid="kitchen-group" data-kitchen="${g.id}" data-group="${id}" ${ui.openGroups.has(id) ? "open" : ""}>
       <summary><span aria-hidden="true">${g.icon}</span> <strong>${esc(g.label)}</strong> <span class="count">${g.items.length}</span>
         <span class="preview small muted">${esc(g.items.join(", "))}</span></summary>
-      <div class="chips">${g.items.map((p) => `<span class="chip" data-testid="pantry-item">${esc(p)}<button data-action="pantry-del" data-name="${esc(p)}" aria-label="Remove ${esc(p)}">✕</button></span>`).join("")}</div>
+      <div class="chips">${g.items.map((p) => pantryChip(p, exp.get(p))).join("")}</div>
     </details>`;
   }).join("");
+}
+
+// One kitchen item: tap its name to set its use-by date. Food running out within a week shows when.
+function pantryChip(p, e) {
+  const soon = e && e.daysLeft <= USE_SOON_DAYS;
+  const when = e && (e.daysLeft <= 7 || !e.estimated) ? `<span class="exp ${soon ? "soon" : ""}" data-testid="pantry-expiry">${e.daysLeft < 0 ? "past date" : esc(shortLeft(e.daysLeft))}${e.estimated ? "" : " 📅"}</span>` : "";
+  return `<span class="chip ${soon ? "soon" : ""}" data-testid="pantry-item"><button type="button" class="chip-name" data-action="pantry-date" data-name="${esc(p)}" aria-label="${esc(p)}: set its use-by date" data-testid="pantry-date">${esc(p)}${when}</button><button data-action="pantry-del" data-name="${esc(p)}" aria-label="Remove ${esc(p)}">✕</button></span>`;
+}
+const shortLeft = (d) => (d <= 0 ? "today" : d === 1 ? "1 day" : `${d} days`);
+
+// Food that runs out within USE_SOON_DAYS, soonest first, for the top of the kitchen.
+function renderUseSoon() {
+  const soon = expiryList().filter((e) => e.daysLeft <= USE_SOON_DAYS);
+  if (!soon.length) return "";
+  return `<div class="notice info small use-soon" data-testid="use-soon">⏳ <strong>Use soon:</strong> ${soon.map((e) => `<button type="button" class="linkish" data-action="pantry-date" data-name="${esc(e.name)}">${esc(e.name)}</button> (${e.daysLeft < 0 ? `past its date${e.estimated ? "?" : ""}` : esc(daysLeftLabel(e.daysLeft))})`).join(", ")}. Suggestions and the week plan cook these first.</div>`;
+}
+
+// The use-by date of one kitchen item: typed in, or the fridge estimate.
+function pantryDateSheet(name) {
+  const k = dateKeyOf(name);
+  const entry = pantryDates()[k] || {};
+  const days = shelfLifeDays(name);
+  const est = expiryOf(name, { added: entry.added }, TODAY);
+  const added = isDateKey(entry.added) ? entry.added : "";
+  sheet("pantry-date-sheet", `<form data-form="pantry-date" class="stack" data-name="${esc(name)}">
+    <div class="row between"><h2>${esc(name)}</h2><button type="button" class="iconbtn lg" data-sheet-close aria-label="Close">✕</button></div>
+    <p class="small muted" data-testid="pantry-date-estimate">${added ? `In the kitchen since ${esc(prettyDate(added))}. ` : ""}${days != null ? `Keeps about ${days} days in the fridge, so without a date it's used by ${esc(prettyDate(est.expires))}.` : "This keeps for months, so it isn't dated unless you set one."}</p>
+    <label class="field"><span>Use by</span><input type="date" name="expires" value="${esc(isDateKey(entry.expires) ? entry.expires : "")}" data-testid="pantry-date-input"></label>
+    <button class="btn primary big" data-testid="pantry-date-save">Save</button>
+    ${isDateKey(entry.expires) ? `<button type="button" class="btn big" data-action="pantry-date-clear" data-name="${esc(name)}" data-testid="pantry-date-clear">Use the fridge estimate</button>` : ""}
+  </form>`);
 }
 
 function quickAddGroup(label, items, have, testid) {
@@ -1303,21 +1377,29 @@ function renderRecipes() {
   const pantrySet = new Set(state.pantry.map(normName));
   const filt = ui.savedFilter.trim().toLowerCase();
   const saved = state.savedRecipes.filter((r) => !filt || r.title.toLowerCase().includes(filt));
+  const soonCount = expiryList().filter((e) => e.daysLeft <= USE_SOON_DAYS).length;
 
   $("#view-recipes").innerHTML = `
+    ${renderQuickBreakfasts()}
     ${renderReadyToCook()}
 
     ${section({ id: "sec-kitchen", icon: "🧺", title: "What's in the kitchen",
       open: !state.pantry.length,
-      meta: state.pantry.length ? `${state.pantry.length} item${state.pantry.length > 1 ? "s" : ""} · ${esc(state.pantry.slice(0, 4).join(", "))}${state.pantry.length > 4 ? "…" : ""}` : "Empty: add what you have",
+      meta: state.pantry.length ? `${state.pantry.length} item${state.pantry.length > 1 ? "s" : ""}${soonCount ? ` · ⏳ ${soonCount} to use soon` : ""} · ${esc(state.pantry.slice(0, 4).join(", "))}${state.pantry.length > 4 ? "…" : ""}` : "Empty: add what you have",
       body: `
+      ${renderUseSoon()}
       <div class="kitchen-groups" data-testid="pantry-list">
         ${renderKitchenGroups() || '<span class="muted small">Add what you have at home.</span>'}
       </div>
-      <form class="row" data-form="pantry-add" style="margin-top:10px">
-        <input type="text" name="items" class="grow" placeholder="Add items, comma separated (e.g. drumstick, paneer)" aria-label="Add pantry items" data-testid="pantry-input">
-        <button class="btn primary" data-testid="pantry-add">Add</button>
+      <form class="pantry-form" data-form="pantry-add" style="margin-top:10px">
+        <div class="row">
+          <input type="text" name="items" class="grow" placeholder="Add items, comma separated (e.g. drumstick, paneer)" aria-label="Add pantry items" data-testid="pantry-input">
+          <button class="btn primary" data-testid="pantry-add">Add</button>
+        </div>
+        <label class="field small"><span>Use by (optional)</span><input type="date" name="expires" min="${TODAY}" data-testid="pantry-expires"></label>
       </form>
+      <p class="small muted">No date? It's estimated from how long the food keeps in the fridge. Tap an item to change its date. Freezer food comes last in suggestions.</p>
+      <label class="chk full small" style="min-height:0"><input type="checkbox" data-action="assume-staples" ${assumeStaples() ? "checked" : ""} data-testid="assume-staples"> 🧂 Always at home: ${esc(staplesSummary(cuisinePicks()))}</label>
       ${quickAddGroup("Quick add common items", STAPLES, pantrySet, "quick-common")}
       ${quickAddGroup("Pandlu (fruits)", FRUITS, pantrySet, "quick-fruits")}
       ${quickAddGroup("Kuragayalu (Telugu vegetables)", TELUGU_VEG, pantrySet, "quick-telugu-veg")}
@@ -1394,6 +1476,32 @@ function renderCookByVegetable() {
       ${list("🍲 Curry (kura, pulusu, pappu)", res.curry, "curry")}` : ""}` });
 }
 
+// Quick, easy breakfasts from the kitchen (ready in QUICK_MINUTES, at most one thing to buy), the
+// food running out first. With AI on, a button asks Claude for more ideas from the same kitchen.
+function renderQuickBreakfasts() {
+  const opt = { schoolNutFree: nutFreeOn(), cuisines: cuisinePicks(), frozen: frozenOnHand(), staples: staplesOn(), useSoon: useSoonOn(TODAY), appliances: appliancesOwned(), maxMinutes: QUICK_MINUTES };
+  const list = quickBreakfasts(state.pantry, { ...opt, limit: 6 });
+  const baby = quickBreakfasts(state.pantry, { ...opt, forWhom: "baby", limit: 3 });
+  const soon = useSoonOn(TODAY);
+  const row = (x) => {
+    const r = x.recipe;
+    const uses = r.ingredients.map((i) => i.name).filter((n) => soon.get(normName(n)) >= 0.7);
+    return `<button type="button" class="ready-item" data-action="view-recipe" data-id="${esc(r.id)}" data-testid="quick-breakfast">
+      ${art(r, "sm")}<span class="grow"><strong>${esc(r.title)}</strong>${r.familyFavorite ? " ⭐" : ""} <span aria-hidden="true">${tagIcons(r)}</span>
+        <span class="small muted">⚡ ${esc(x.minutes)} min · ${esc(whoLabel(r.forWhom, state.settings))}${x.missing.length ? ` · need ${esc(x.missing.join(", "))}` : " · all at home"}${uses.length ? ` · <span style="color:var(--warn)">uses ${esc(uses.join(", "))} before it runs out</span>` : ""}</span></span>
+      <span aria-hidden="true">›</span></button>`;
+  };
+  const ai = aiOnline()
+    ? `<button type="button" class="btn sm" data-action="ai-breakfasts" data-testid="ai-breakfasts" ${ui.aiBusy ? "disabled" : ""}>✨ More breakfast ideas with AI</button>`
+    : `<p class="small muted">For more ideas from your kitchen, <button type="button" class="linkish" data-action="open-ai-key">add a Claude API key</button>.</p>`;
+  return section({ id: "sec-quick-breakfast", icon: "⚡", title: "Quick breakfasts", testid: "quick-breakfasts",
+    meta: list.length ? `${list.length} ready in ${QUICK_MINUTES} minutes from your kitchen` : `Ready in ${QUICK_MINUTES} minutes`,
+    body: `
+    ${list.length ? `<div class="ready-list" data-testid="quick-breakfast-list">${list.map(row).join("")}</div>` : `<p class="small muted" data-testid="quick-breakfast-none">No breakfast in the recipe book is ready in ${QUICK_MINUTES} minutes with what's in the kitchen. Add eggs, bread, rava or batter and they show up here.</p>`}
+    ${baby.length ? `<h3>${esc(whoLabel("baby", state.settings))}</h3><div class="ready-list" data-testid="quick-breakfast-baby">${baby.map(row).join("")}</div>` : ""}
+    <div class="row" style="margin-top:8px">${ai}</div>` });
+}
+
 // Recipes from the Markdown recipe book that the pantry can make now, or with one item to buy.
 function renderReadyToCook() {
   const book = RECIPE_BOOK_STATUS;
@@ -1401,7 +1509,7 @@ function renderReadyToCook() {
       ${book.failed.length ? `Couldn't read ${book.failed.map((f) => esc(f.file)).join(", ")} from the recipe book. ` : ""}
       ${book.problems.length ? `${book.problems.length} recipe${book.problems.length > 1 ? "s" : ""} in the recipe book need fixing: ${book.problems.slice(0, 5).map((p) => `${esc(p.file)}${p.line ? " line " + p.line : ""} “${esc(p.title)}”: ${esc(p.message)}`).join("; ")}` : ""}
     </div>` : "";
-  const opt = { schoolNutFree: nutFreeOn(), cuisines: cuisinePicks(), frozen: frozenOnHand() };
+  const opt = { schoolNutFree: nutFreeOn(), cuisines: cuisinePicks(), frozen: frozenOnHand(), staples: staplesOn(), useSoon: useSoonOn(TODAY) };
   const picks = topPicks(state.pantry, { ...opt, isVegetable: isMainVeg, limit: ui.morePicks ? 15 : 5 });
   const now = readyToCook(state.pantry, { ...opt, limit: 8 });
   const nearly = readyToCook(state.pantry, { ...opt, maxMissing: 1, limit: 30 }).filter((x) => x.missing.length === 1).slice(0, 8);
@@ -1514,23 +1622,51 @@ function recipeCard(r, { saved = false } = {}) {
 const genBusy = () => ui.gen.busy ?? isSchoolDay(TODAY);
 const BUSY_NOTE = "Busy weekday morning: the family likes a warm breakfast made the night before and reheated in the microwave (egg burritos, upma, parathas, idlis), with an easy side dip like a yogurt dip; otherwise no cooking (bread with peanut butter or avocado).";
 
-async function generate(form) {
-  ui.gen = { forWhom: form.forWhom.value, mealType: form.mealType.value, notes: form.notes.value, quick: form.quick.checked, busy: form.busy.checked };
-  const busyMorning = ui.gen.busy && ui.gen.mealType === "breakfast";
-  const body = {
+// What the recipe AI is told about the kitchen: what runs out soon and the staples always at home.
+function kitchenRequest() {
+  return {
     ingredients: state.pantry,
-    forWhom: form.forWhom.value,
-    mealType: form.mealType.value,
-    notes: [form.notes.value.trim(), busyMorning ? BUSY_NOTE : "", cuisinePicks().length ? `The family mostly cooks ${cuisinePicks().map((id) => CUISINES.find((x) => x.id === id).label).join(", ")}.` : ""].filter(Boolean).join(" ").slice(0, 300),
-    count: ui.gen.quick ? 1 : 4,
-    quick: ui.gen.quick,
+    useSoon: expiryList().filter((e) => e.daysLeft <= 4).map((e) => `${e.name} (${e.daysLeft < 0 ? "use now" : `runs out ${daysLeftLabel(e.daysLeft)}`})`),
+    staples: staplesOn(),
     schoolNutFree: nutFreeOn(),
     appliances: applianceRequest(state.settings),
   };
+}
+const cuisineNote = () => (cuisinePicks().length ? `The family mostly cooks ${cuisinePicks().map((id) => CUISINES.find((x) => x.id === id).label).join(", ")}.` : "");
+
+async function generate(form) {
+  ui.gen = { forWhom: form.forWhom.value, mealType: form.mealType.value, notes: form.notes.value, quick: form.quick.checked, busy: form.busy.checked };
+  const busyMorning = ui.gen.busy && ui.gen.mealType === "breakfast";
+  await askRecipes({
+    ...kitchenRequest(),
+    forWhom: form.forWhom.value,
+    mealType: form.mealType.value,
+    notes: [form.notes.value.trim(), busyMorning ? BUSY_NOTE : "", cuisineNote()].filter(Boolean).join(" ").slice(0, 300),
+    count: ui.gen.quick ? 1 : 4,
+    quick: ui.gen.quick,
+  }, { busyMorning });
+}
+
+// "✨ More breakfast ideas with AI" in Quick breakfasts: three quick, easy family breakfasts the
+// 4-year-old eats too, from the kitchen, cooking first what runs out. Shown with the AI results.
+async function aiBreakfasts() {
+  ui.gen = { ...ui.gen, forWhom: "family", mealType: "breakfast", quick: false };
+  await askRecipes({
+    ...kitchenRequest(),
+    forWhom: "family",
+    mealType: "breakfast",
+    notes: [`Quick and easy breakfasts, ready in ${QUICK_MINUTES} minutes with few ingredients and short steps, that the 4-year-old eats too (mild, nothing whole).`, isSchoolDay(TODAY) ? "It's a school morning, so fast or made the night before." : "", cuisineNote()].filter(Boolean).join(" ").slice(0, 300),
+    count: 3,
+    quick: false,
+  }, { busyMorning: false, maxMinutes: QUICK_MINUTES });
+  $("[data-testid=recipe-results]")?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+async function askRecipes(body, { busyMorning = false, maxMinutes = 0 } = {}) {
   ui.aiNotice = "";
   ui.rejected = [];
   const fallback = (why) => {
-    ui.results = suggestFromLibrary(state.pantry, { forWhom: body.forWhom, mealType: body.mealType, limit: body.quick ? 1 : 6, schoolNutFree: body.schoolNutFree, maxMinutes: body.quick ? QUICK_MINUTES : 0, cuisines: cuisinePicks(), frozen: frozenOnHand(), appliances: appliancesOwned(), busyMorning });
+    ui.results = suggestFromLibrary(state.pantry, { forWhom: body.forWhom, mealType: body.mealType, limit: body.quick ? 1 : 6, schoolNutFree: body.schoolNutFree, maxMinutes: body.quick ? QUICK_MINUTES : maxMinutes, cuisines: cuisinePicks(), frozen: frozenOnHand(), appliances: appliancesOwned(), busyMorning, staples: staplesOn(), useSoon: useSoonOn(TODAY) });
     ui.aiNotice = ui.results.length ? `${why} Showing recipes from the built-in family recipe book that best match your kitchen.`
       : `${why} The built-in family recipe book has nothing for ${body.forWhom === "family" ? "the whole family" : whoLabel(body.forWhom, state.settings)}${body.mealType ? ` at ${body.mealType}` : ""} yet. Try another meal, or add a recipe to the recipes/ folder.`;
   };
@@ -1761,12 +1897,14 @@ function setBought(it, bought) {
   const name = it.label || it.name;
   if (bought && aisleFor(it.name) !== "Baby care" && aisleFor(it.name) !== "School & household" && !state.pantry.some((p) => normName(p) === normName(it.name))) {
     state.pantry.push(it.name);
+    noteAdded(it.name);
     it.addedToPantry = true;
     clearCaches();
     return `Got ${name} · added to your kitchen`;
   }
   if (!bought && it.addedToPantry) {
     state.pantry = state.pantry.filter((p) => normName(p) !== normName(it.name));
+    forgetDates(it.name);
     delete it.addedToPantry;
     clearCaches();
     return `${name} is back on the list and out of your kitchen`;
@@ -2141,7 +2279,17 @@ document.addEventListener("click", (e) => {
     case "new-reminder": setTab("reminders"); renderReminders(el.dataset.date); $("[data-testid=rem-title]")?.focus(); break;
     case "export": downloadBackup(); break;
 
-    case "pantry-del": state.pantry = state.pantry.filter((p) => p !== el.dataset.name); commit(); break;
+    case "pantry-del": state.pantry = state.pantry.filter((p) => p !== el.dataset.name); forgetDates(el.dataset.name); commit(); break;
+    case "pantry-date": pantryDateSheet(el.dataset.name); break;
+    case "pantry-date-clear": {
+      const k = dateKeyOf(el.dataset.name);
+      state.pantryDates = { ...pantryDates(), [k]: { ...(pantryDates()[k] || { added: TODAY }), expires: "" } };
+      el.closest("dialog")?.close();
+      commit();
+      toast(`${el.dataset.name}: using the fridge estimate`);
+      break;
+    }
+    case "ai-breakfasts": aiBreakfasts(); break;
     case "cook-veg": {
       const n = normName(el.dataset.name);
       ui.cookVeg = ui.cookVeg.some((v) => normName(v) === n) ? ui.cookVeg.filter((v) => normName(v) !== n) : [...ui.cookVeg, el.dataset.name];
@@ -2149,7 +2297,7 @@ document.addEventListener("click", (e) => {
       break;
     }
     case "cook-veg-clear": ui.cookVeg = []; render(); break;
-    case "pantry-quick": if (!state.pantry.some((p) => normName(p) === normName(el.dataset.name))) state.pantry.push(el.dataset.name); commit(); break;
+    case "pantry-quick": if (!state.pantry.some((p) => normName(p) === normName(el.dataset.name))) { state.pantry.push(el.dataset.name); noteAdded(el.dataset.name); } commit(); break;
     case "cancel-ai": ui.aiController?.abort("cancel"); break;
     case "save-recipe": {
       const r = findRecipe(el.dataset.id);
@@ -2256,6 +2404,11 @@ document.addEventListener("change", (e) => {
       break;
     }
     case "shop-toggle": toggleShopItem(el.dataset.id, el.checked); break;
+    case "assume-staples":
+      state.settings = { ...state.settings, assumeStaples: el.checked };
+      commit();
+      toast(el.checked ? "Staples count as at home in suggestions." : "Staples count only when they're on the kitchen list.");
+      break;
     case "nut-free":
       state.settings = { ...state.settings, schoolNutFree: el.checked };
       ui.results = ui.results.filter((r) => !el.checked || checkForAudience(r, { schoolNutFree: true }).safe || !isSchoolFood(r));
@@ -2315,9 +2468,23 @@ document.addEventListener("submit", (e) => {
     }
     case "pantry-add": {
       const items = f.items.value.split(",").map((s) => s.trim()).filter(Boolean);
-      for (const it of items) if (!state.pantry.some((p) => normName(p) === normName(it))) state.pantry.push(it.toLowerCase());
+      const expires = f.expires?.value || "";
+      for (const it of items) {
+        if (!state.pantry.some((p) => normName(p) === normName(it))) state.pantry.push(it.toLowerCase());
+        noteAdded(state.pantry.find((p) => normName(p) === normName(it)), expires);
+      }
       commit();
       $("[data-testid=pantry-input]")?.focus();
+      break;
+    }
+    case "pantry-date": {
+      const name = form.dataset.name;
+      const k = dateKeyOf(name);
+      const expires = isDateKey(f.expires.value) ? f.expires.value : "";
+      state.pantryDates = { ...pantryDates(), [k]: { added: pantryDates()[k]?.added || TODAY, expires } };
+      form.closest("dialog")?.close();
+      commit();
+      toast(expires ? `${name}: use by ${prettyDate(expires)}` : `${name}: using the fridge estimate`);
       break;
     }
     case "generate": generate(f); break;
@@ -2524,6 +2691,7 @@ window.addEventListener("offline", () => { ui.ai = "unreachable"; renderHeader()
 
 // ---------- start ----------
 const initialTab = location.hash.replace("#", "");
+if (stampUndated()) save(state, { now: true });   // a quiet save: it doesn't count as an edit for family sync
 setTab(["calendar", "recipes", "shopping", "frozen", "reminders"].includes(initialTab) ? initialTab : "calendar");
 onChange(() => { renderSyncButtons(); cloud.pushSoon(); });
 startFamilySync();

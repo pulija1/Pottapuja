@@ -9,6 +9,7 @@ function sample() {
   s.shopping = [{ id: "a1", name: "toor dal", bought: false }, { id: "b2", name: "ghee", bought: false }];
   s.todos = [{ id: "t1", text: "Pack the school bag", date: "2026-10-23", done: false }, { id: "t2", text: "Buy dresses", date: "2026-11-02", done: false }];
   s.frozen = [{ id: "f1", name: "Parathas", qty: 2, unit: "packs", date: "2026-10-01", note: "" }];
+  s.pantryDates = { carrot: { added: "2026-10-20", expires: "" }, okra: { added: "2026-10-22", expires: "2026-10-25" } };
   s.reminders = [{ id: "r1", title: "Vaccine", date: "2026-11-05", done: {} }];
   s.savedRecipes = [{ id: "rec1", title: "Ragi porridge", forWhom: "baby" }];
   s.days = { "2026-10-23": { meals: { baby_breakfast: { title: "Ragi porridge" } }, schedule: [] } };
@@ -23,7 +24,7 @@ test("SYNC-01 items go to small documents: one per list, per month for to-dos an
   assert.ok(docs["days-2026-10"]["2026-10-23"]);
   assert.ok(docs.reminders.r1);
   assert.equal(Object.keys(docs).filter((d) => d.startsWith("recipes-")).length, 1);
-  assert.deepEqual(Object.keys(docs.meta).sort(), ["frozen", "pantry", "settings", "stores"]);
+  assert.deepEqual(Object.keys(docs.meta).sort(), ["frozen", "pantry", "pantryDates", "settings", "stores"]);
   for (const d of Object.keys(docs)) assert.ok(sectionOf(d), d);
   assert.equal(sectionOf("bogus"), null);
   assert.equal(docFor("todos", "x", { date: "" }), "todos-none");
@@ -35,7 +36,7 @@ test("SYNC-02 encode then decode gives the same data back, and the alerts list s
   const other = defaultState();
   other.notified = { mine: true };
   assert.equal(decodeInto(other, docs), true);
-  for (const k of ["shopping", "todos", "reminders", "savedRecipes", "days", "pantry", "stores", "settings", "frozen"]) assert.deepEqual(other[k], s[k], k);
+  for (const k of ["shopping", "todos", "reminders", "savedRecipes", "days", "pantry", "stores", "settings", "frozen", "pantryDates"]) assert.deepEqual(other[k], s[k], k);
   assert.deepEqual(other.notified, { mine: true });
   assert.equal(decodeInto(other, docs), false, "nothing changes the second time");
 });

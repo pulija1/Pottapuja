@@ -9,7 +9,7 @@ export const MODEL = "claude-opus-5-5";
 
 export const SYSTEM = `You plan meals for a South Indian family (Telugu, Tamil, Kannada and Kerala home cooking) with an 8-month-old baby and a 4-year-old who goes to school.
 
-Write practical home recipes that use the ingredients the family already has, adding as few extra ingredients as possible.
+Write practical home recipes that use the ingredients the family already has, adding as few extra ingredients as possible. When the parent lists food that runs out soon, build the recipes around it first. Freezer food keeps for months, so use it only when it helps. The pantry staples the parent lists are always at home: use them freely and never count them as extra ingredients.
 
 Rules for the 8-month-old (forWhom "baby"):
 - No salt, no sugar or jaggery, and never honey.
@@ -53,10 +53,12 @@ export const RECIPE_LIST_SCHEMA = obj({
 
 export const QUICK_MINUTES = 20;
 
-export function buildPrompt({ ingredients, forWhom, mealType, notes, count, schoolNutFree, quick, appliances = [] }) {
+export function buildPrompt({ ingredients, forWhom, mealType, notes, count, schoolNutFree, quick, appliances = [], useSoon = [], staples = [] }) {
   const who = forWhom === "both" ? "the baby and the 4-year-old (mix of both)" : forWhom === "baby" ? "the 8-month-old baby" : forWhom === "kid" ? "the 4-year-old" : "the whole family";
   return [
     `Ingredients we have: ${ingredients.join(", ") || "(nothing listed, suggest staples)"}.`,
+    useSoon.length ? `Use these first, they run out soon: ${useSoon.join(", ")}.` : "",
+    staples.length ? `Pantry staples always at home: ${staples.join(", ")}.` : "",
     `Suggest ${count} recipe${count === 1 ? "" : "s"} for ${who}.`,
     mealType ? `Meal: ${mealType}.` : "",
     quick ? `It must be quick: ready in ${QUICK_MINUTES} minutes or less, with few ingredients and short steps.` : "",
@@ -81,7 +83,11 @@ export function parseRequest(body) {
   const count = quick ? 1 : Math.min(6, Math.max(1, Number.parseInt(b.count, 10) || 4));
   const schoolNutFree = b.schoolNutFree === true;
   const appliances = [...new Set((Array.isArray(b.appliances) ? b.appliances : []).filter((a) => ["airFryer", "airFryerDual", "oven"].includes(a)))];
-  return { ingredients, forWhom, mealType, notes, count, schoolNutFree, quick, appliances };
+  const names = (v, max) => [...new Set((Array.isArray(v) ? v : []).map((s) => String(s ?? "").trim().slice(0, 60)).filter(Boolean))].slice(0, max);
+  // "okra (2 days left)" is fine: the AI reads it as text.
+  const useSoon = names(b.useSoon, 20);
+  const staples = names(b.staples, 40);
+  return { ingredients, forWhom, mealType, notes, count, schoolNutFree, quick, appliances, useSoon, staples };
 }
 
 // Attach safety results; drop recipes that fail the age rules.
