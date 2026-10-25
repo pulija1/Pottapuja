@@ -113,6 +113,7 @@ const FOODS = [
   F(/bread/, [250, 12, 43, 6, 3.5, 2.5, 160], { slice: 30 }),
   F(/corn tortilla/, [218, 5.7, 45, 6.3, 2.9, 1.2, 80], { pc: 25 }),
   F(/tortilla|wrap/, [300, 8, 50, 3.5, 7.5, 3.2, 140], { pc: 45 }),
+  F(/besan|gram flour|senaga ?pindi/, [387, 22, 58, 11, 6.7, 4.9, 45], { cup: 92 }),
   F(/cornstarch|corn flour/, [381, 0.3, 91, 0.9, 0.1, 0.5, 2], { cup: 128 }),
 
   // Vegetables (raw weight).
@@ -145,6 +146,13 @@ const FOODS = [
   F(/raw banana|aratikaya|plantain/, [122, 1.3, 32, 2.3, 0.4, 0.6, 3], { pc: 180 }),
   F(/raw mango|mamidikaya/, [60, 0.7, 15, 1.2, 0.1, 0.3, 15], { pc: 200 }),
   F(/cucumber|dosakaya/, [15, 0.65, 3.6, 0.5, 0.1, 0.3, 16], { cup: 120, pc: 200, slice: 7 }),
+  F(/snake gourd|potlakaya/, [18, 0.6, 3.7, 0.6, 0.3, 0.3, 26], { cup: 100, pc: 400 }),
+  F(/bitter gourd|kakarakaya|karela/, [17, 1, 3.7, 2.8, 0.2, 0.4, 19], { cup: 95, pc: 100 }),
+  F(/taro|chamadumpa|arbi|colocasia/, [112, 1.5, 26, 4.1, 0.2, 0.55, 43], { cup: 105, pc: 60 }),
+  F(/radish|mullangi|mooli/, [16, 0.7, 3.4, 1.6, 0.1, 0.3, 25], { cup: 116, pc: 150 }),
+  F(/\byam\b|kandagadda|suran/, [118, 1.5, 28, 4.1, 0.2, 0.5, 17], { cup: 150 }),
+  F(/amaranth|thotakura/, [23, 2.5, 4, 2.2, 0.3, 2.3, 215], { cup: 30, bunch: 200 }),
+  F(/(dry|dried) red chill/, [318, 12, 57, 27, 17, 7.8, 148], { pc: 0.5 }),
   F(/zucchini/, [17, 1.2, 3.1, 1, 0.3, 0.4, 16], { cup: 120, pc: 200 }),
   F(/celery/, [16, 0.7, 3, 1.6, 0.2, 0.2, 40], { cup: 100 }),
   F(/mixed vegetables/, [60, 3, 12, 4, 0.4, 0.9, 30], { cup: 135 }),

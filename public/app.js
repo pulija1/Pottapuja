@@ -4,7 +4,7 @@ import { getAiKey, setAiKey, looksLikeKey, browserRecipes } from "./ai-browser.j
 import { QUICK_MINUTES } from "./shared/ai-prompt.js";
 import { todayKey, addDays, addMonths, monthGrid, monthLabel, prettyDate, fromKey, isDateKey, isSchoolDay, occurrences, daysBetween } from "./shared/dates.js";
 import { checkRecipe, checkForAudience, isNutIngredient, isSchoolFood } from "./shared/safety.js";
-import { LIBRARY, suggestFromLibrary, readyToCook, RECIPE_BOOK_STATUS } from "./shared/recipes.js";
+import { LIBRARY, suggestFromLibrary, readyToCook, RECIPE_BOOK_STATUS, cookByVegetables, missingForRecipe } from "./shared/recipes.js";
 import { nutritionTags, TAG_LABELS } from "./shared/recipe-book.js";
 import { NUTRIENTS, DAILY_NEEDS, estimateNutrition, dailyShare } from "./shared/nutrition.js";
 import { mergeItems, groupByAisle, formatQty, missingFromPantry, normName, normUnit, aisleFor } from "./shared/shopping.js";
@@ -31,6 +31,8 @@ const ui = {
   suggest: {},                    // date -> { seed, picks: { slotId: recipeId } } meal suggestions shown in the day panel
   savedFilter: "",
   gen: { forWhom: "both", mealType: "", notes: "", quick: false },
+  cookVeg: [],            // vegetables picked in "Cook by vegetable"
+  cookQuick: true,        // ...and only the ones ready in QUICK_MINUTES
   confirmUnsafe: null,    // date whose unsafe plan the parent was warned about
   // recipe form values survive re-renders
 };
@@ -934,6 +936,8 @@ function renderRecipes() {
       ${quickAddGroup("Aakukuralu (leafy greens)", TELUGU_LEAVES, pantrySet, "quick-telugu-leaves")}
     </div>
 
+    ${renderCookByVegetable()}
+
     ${renderReadyToCook()}
 
     <div class="card">
@@ -970,6 +974,38 @@ function renderRecipes() {
         <input type="text" placeholder="Search saved" value="${esc(ui.savedFilter)}" data-action="saved-filter" style="max-width:220px" aria-label="Search saved recipes"></div>
       <div class="recipe-grid" data-testid="saved-recipes" style="margin-top:8px">${saved.map((r) => recipeCard(r, { saved: true })).join("") || '<p class="muted small">Save recipes you like and they will work even when offline.</p>'}</div>
     </div>`;
+}
+
+// Cook by vegetable: tap one or more vegetables and see the book's fries and curries made with them.
+const COOK_VEG = [...TELUGU_VEG, ...TELUGU_LEAVES].filter((v) => !["onion", "garlic", "ginger", "green chilli", "curry leaves", "coriander leaves", "mint leaves"].includes(normName(v)));
+
+function renderCookByVegetable() {
+  const picked = new Set(ui.cookVeg.map(normName));
+  const res = cookByVegetables(ui.cookVeg, { maxMinutes: QUICK_MINUTES, onlyQuick: ui.cookQuick });
+  const kitchen = new Set(state.pantry.map(normName));
+  const row = (x) => {
+    const r = x.recipe;
+    const need = state.pantry.length ? missingForRecipe(r, state.pantry).filter((n) => !picked.has(n)) : [];
+    return `<button type="button" class="ready-item" data-action="view-recipe" data-id="${esc(r.id)}" data-testid="cook-recipe" data-dish="${x.dish}">
+      <span class="grow"><strong>${esc(r.title)}</strong>${r.familyFavorite ? " ⭐" : ""}
+        <span class="small muted">${r.prepMinutes ? `${x.quick ? "⚡ " : ""}${esc(r.prepMinutes)} min` : ""}${x.all ? "" : ` · has ${esc(x.has.join(", "))}`}${need.length ? ` · need ${esc(need.join(", "))}` : ""}</span></span>
+      <span aria-hidden="true">›</span></button>`;
+  };
+  const list = (label, items, dish) => `<h3>${label} <span class="small muted">(${items.length})</span></h3>
+    ${items.length ? `<div class="ready-list" data-testid="cook-${dish}">${items.slice(0, 8).map(row).join("")}</div>`
+      : `<p class="small muted" data-testid="cook-${dish}-none">No ${dish} with ${ui.cookVeg.length > 1 ? "these" : "this"} in the recipe book${ui.cookQuick ? ` in ${QUICK_MINUTES} minutes. Untick ⚡ to see slower ones` : ""}.</p>`}`;
+  return `<div class="card" data-testid="cook-by-veg">
+    <h2>Cook by vegetable</h2>
+    <p class="small muted">Tap a vegetable (or two) and pick a fry or a curry.</p>
+    <div class="chips" style="margin-top:8px" data-testid="cook-veg-chips">${COOK_VEG.map((v) => {
+      const on = picked.has(normName(v));
+      return `<button type="button" class="chip add veg${on ? " on" : ""}" aria-pressed="${on}" data-action="cook-veg" data-name="${esc(v)}" data-testid="cook-veg">${on ? "✓ " : ""}${esc(v)}${kitchen.has(normName(v)) ? " 🏠" : ""}</button>`;
+    }).join("")}</div>
+    <label class="chk full" style="min-height:0;margin-top:8px"><input type="checkbox" data-action="cook-quick" ${ui.cookQuick ? "checked" : ""} data-testid="cook-quick"> ⚡ Only ready in ${QUICK_MINUTES} minutes</label>
+    ${ui.cookVeg.length ? `<div class="row" style="margin-top:6px"><button type="button" class="btn sm" data-action="cook-veg-clear">Clear</button></div>
+      ${list("🍳 Fry (vepudu)", res.fry, "fry")}
+      ${list("🍲 Curry (kura, pulusu, pappu)", res.curry, "curry")}` : ""}
+  </div>`;
 }
 
 // Recipes from the Markdown recipe book that the pantry can make now, or with one item to buy.
@@ -1652,6 +1688,13 @@ document.addEventListener("click", (e) => {
     case "export": downloadBackup(); break;
 
     case "pantry-del": state.pantry = state.pantry.filter((p) => p !== el.dataset.name); commit(); break;
+    case "cook-veg": {
+      const n = normName(el.dataset.name);
+      ui.cookVeg = ui.cookVeg.some((v) => normName(v) === n) ? ui.cookVeg.filter((v) => normName(v) !== n) : [...ui.cookVeg, el.dataset.name];
+      render();
+      break;
+    }
+    case "cook-veg-clear": ui.cookVeg = []; render(); break;
     case "pantry-quick": if (!state.pantry.some((p) => normName(p) === normName(el.dataset.name))) state.pantry.push(el.dataset.name); commit(); break;
     case "cancel-ai": ui.aiController?.abort("cancel"); break;
     case "save-recipe": {
@@ -1788,6 +1831,7 @@ document.addEventListener("input", (e) => {
     ui.gen[e.target.name] = e.target.type === "checkbox" ? e.target.checked : e.target.value;
     if (e.target.type === "checkbox") render();   // the button says "quick recipe"
   }
+  if (e.target.dataset?.action === "cook-quick") { ui.cookQuick = e.target.checked; render(); }
   if (e.target.dataset?.action === "saved-filter") {
     ui.savedFilter = e.target.value;
     const pos = e.target.selectionStart;

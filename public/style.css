@@ -389,6 +389,7 @@ dialog details > * + * { margin-top: 8px; }
 .goal.done .goal-label { color: var(--ok); }
 .goal.idea { border-style: dashed; border-color: var(--brand); }
 .goal.todo { border-style: dashed; border-color: var(--warn); }
+.chip.veg.on { background: var(--brand-soft); border: 1px solid var(--brand); font-weight: 600; }
 .ready-list { display: grid; gap: 6px; }
 .ready-item { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 52px; text-align: left; border: 1px solid var(--line); border-radius: 12px; background: var(--card); color: var(--ink); padding: 8px 12px; font: inherit; cursor: pointer; }
 .ready-item:hover { border-color: var(--brand); }

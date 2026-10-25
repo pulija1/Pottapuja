@@ -117,6 +117,7 @@ export function parseRecipeMarkdown(md, file = "") {
       texture: (r.fields.texture || "").toLowerCase(),
       prepMinutes: parseInt(r.fields.time, 10) || null,
       cuisine: r.fields.cuisine || "",
+      dish: (r.fields.dish || "").toLowerCase().trim(),
       ingredients: r.ingredients,
       steps: r.steps,
       notes: r.notes.join(" ").trim(),
@@ -226,6 +227,7 @@ export function recipeToMarkdown(r) {
   if (r.prepMinutes) out.push(`- **Time:** ${r.prepMinutes} min`);
   if (r.servings) out.push(`- **Serves:** ${r.servings}${r.servingNote ? ` (${r.servingNote})` : ""}`);
   if (r.texture) out.push(`- **Texture:** ${r.texture}`);
+  if (r.dish) out.push(`- **Dish:** ${r.dish}`);
   if (tags.length) out.push(`- **Good for:** ${tags.map((t) => TAG_LABELS[t]).join(" · ")}`);
   if (r.nutFreeSwap) out.push(`- **Nut-free swap:** ${r.nutFreeSwap}`);
   if (r.familyFavorite) out.push(`- **Family favorite:** yes`);

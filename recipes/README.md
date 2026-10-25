@@ -29,6 +29,7 @@ Swap any recipe for another one from the same section. Search the file for 🥚,
 
 ## How the app uses this book
 
+- **Cook by vegetable:** tap one or more vegetables (by their Telugu names) on the Recipes tab and see the family fries and curries made with them, the ones with all the picked vegetables first. ⚡ keeps it to recipes ready in 20 minutes; [telugu-curries.md](telugu-curries.md) has a quick fry and a quick curry for each Telugu vegetable.
 - **Ready to cook:** the Recipes tab lists recipes whose ingredients are all in the kitchen list, and the ones that need just one more thing. Water, salt, oil, turmeric and anything used by the pinch don't count.
 - **Suggested meals:** empty days on the calendar get suggestions picked from this book, best match to the kitchen first, and checked for each child's safety.
 - **Shopping:** a planned recipe's missing ingredients go to the shopping list with their quantities.
@@ -68,7 +69,7 @@ Copy an existing recipe and change it. The format:
 
 - `###` starts a recipe; the title is the recipe's name. `##` headings only group recipes and can be anything.
 - **For** is `baby`, `kid` or `family`. **Meal** is `breakfast`, `lunchbox`, `lunch`, `snack` or `dinner`. Both are required.
-- Optional lines: **Cuisine**, **Time**, **Serves** (how many portions it makes, for the nutrition numbers; `Serves: 6 (1 muffin each)`. Without it, a baby or kid recipe is one portion and a family recipe is four), **Texture** (baby: `puree`, `mashed`, `porridge`, `soft finger food`), **Nut-free swap** (what to do if the school goes nut-free), **Family favorite:** yes, and **ID** (only for older recipes, so plans that already use them keep working).
+- Optional lines: **Dish** (`fry` or `curry`: the **Cook by vegetable** card lists the recipe under that heading; without it the title decides, so "vepudu" or "fry" is a fry and "kura", "pulusu" or "pappu" a curry), **Cuisine**, **Time**, **Serves** (how many portions it makes, for the nutrition numbers; `Serves: 6 (1 muffin each)`. Without it, a baby or kid recipe is one portion and a family recipe is four), **Texture** (baby: `puree`, `mashed`, `porridge`, `soft finger food`), **Nut-free swap** (what to do if the school goes nut-free), **Family favorite:** yes, and **ID** (only for older recipes, so plans that already use them keep working).
 - **Good for** is for people reading the file. The app works out egg, milk/dairy and nuts from the ingredients by itself.
 - Each ingredient is one line: amount, unit, name, then a comma and any note. `1½ cups rice, washed`, `2 tbsp almond powder`, `6 curry leaves`, `Salt, to taste`. Units the app understands: g, kg, ml, l, tsp, tbsp, cup, pinch, slice, clove, sprig, handful, inch, bunch, can, packet, dozen. Keep the name the way you'd write it on a shopping list (`paneer`, `cheddar cheese`, `black beans`) so it matches the kitchen list.
 - Steps are a numbered list.
