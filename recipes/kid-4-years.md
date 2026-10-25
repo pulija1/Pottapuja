@@ -155,6 +155,7 @@ How to read and edit this file: see [README.md](README.md).
 - **Time:** 15 min
 - **Good for:** 🥚 Egg · 🥛 Milk/dairy · 🥜 Nuts
 - **Nut-free swap:** Leave out the almond powder and add a pinch more cinnamon.
+- **Air fryer:** 8 min at 180°C. Dip the bread sticks, lay them on a greased tray or parchment in one layer and turn at 4 minutes, until the egg is fully set and golden.
 
 **Ingredients**
 
@@ -322,6 +323,7 @@ How to read and edit this file: see [README.md](README.md).
 - **Cuisine:** Andhra
 - **Time:** 15 min
 - **Good for:** 🥚 Egg
+- **Air fryer:** 15 min at 135°C for the eggs, straight into the basket, then into cold water before peeling. Fully cooked, no pan to watch.
 
 **Ingredients**
 
@@ -397,6 +399,8 @@ How to read and edit this file: see [README.md](README.md).
 - **Cuisine:** American
 - **Time:** 25 min
 - **Good for:** 🥚 Egg · 🥛 Milk/dairy
+- **Air fryer:** 12 min at 160°C in silicone muffin cups, until fully set in the centre.
+- **Oven:** 18 min at 175°C (350°F) in a mini muffin tin, as in the steps.
 
 **Ingredients**
 
@@ -424,6 +428,7 @@ How to read and edit this file: see [README.md](README.md).
 - **Cuisine:** Indian American
 - **Time:** 15 min
 - **Good for:** 🥚 Egg · 🥛 Milk/dairy
+- **Air fryer:** 6 min at 180°C, turning at 3 minutes, instead of the sandwich toaster.
 
 **Ingredients**
 
@@ -474,6 +479,8 @@ How to read and edit this file: see [README.md](README.md).
 - **Cuisine:** Italian
 - **Time:** 25 min
 - **Good for:** 🥚 Egg · 🥛 Milk/dairy
+- **Oven:** 18 min at 180°C in a greased small baking dish, until set in the centre, then cut into fingers.
+- **Air fryer:** 14 min at 160°C in a small tin that fits the basket.
 
 **Ingredients**
 
@@ -877,6 +884,7 @@ How to read and edit this file: see [README.md](README.md).
 - **Cuisine:** Indian American
 - **Time:** 15 min
 - **Good for:** 🥛 Milk/dairy
+- **Air fryer:** 6 min at 190°C. Fill and fold the tortilla, brush the top with a little oil and pin it with a toothpick so it doesn't flip open; turn at 3 minutes.
 
 **Ingredients**
 
@@ -926,6 +934,7 @@ How to read and edit this file: see [README.md](README.md).
 - **Cuisine:** Mexican American
 - **Time:** 15 min
 - **Good for:** 🥛 Milk/dairy
+- **Air fryer:** 6 min at 190°C. Pin the folded tortilla with a toothpick and turn at 3 minutes, until the cheese melts.
 
 **Ingredients**
 
@@ -1086,6 +1095,7 @@ How to read and edit this file: see [README.md](README.md).
 - **Cuisine:** Indian American
 - **Time:** 10 min
 - **Good for:** 🥛 Milk/dairy
+- **Air fryer:** 6 min at 180°C, turning at 3 minutes, until the cheese melts.
 
 **Ingredients**
 
@@ -1157,6 +1167,7 @@ How to read and edit this file: see [README.md](README.md).
 - **Time:** 10 min
 - **Good for:** 🥛 Milk/dairy
 - **ID:** ds-cheese-veg-sandwich
+- **Air fryer:** 5 min at 180°C, turning halfway, for a toasted sandwich.
 
 **Ingredients**
 
@@ -1496,6 +1507,8 @@ How to read and edit this file: see [README.md](README.md).
 - **Time:** 35 min
 - **Good for:** 🥚 Egg · 🥛 Milk/dairy · 🥜 Nuts
 - **Nut-free swap:** Leave out the walnuts or use chocolate chips.
+- **Oven:** 22 min at 175°C (350°F), as in the steps.
+- **Air fryer:** 14 min at 160°C in silicone muffin cups, until a toothpick comes out clean.
 
 **Ingredients**
 
@@ -1525,6 +1538,7 @@ How to read and edit this file: see [README.md](README.md).
 - **Cuisine:** Mexican
 - **Time:** 10 min
 - **Good for:** 🥛 Milk/dairy
+- **Air fryer:** 10 min at 200°C. Toss the corn with butter and air fry until lightly charred, shaking halfway, then mix with the rest.
 
 **Ingredients**
 
@@ -1549,6 +1563,8 @@ How to read and edit this file: see [README.md](README.md).
 - **Cuisine:** North Indian
 - **Time:** 20 min
 - **Good for:** 🥛 Milk/dairy
+- **Air fryer:** 15 min at 200°C: 10 minutes to marinate, then 5 to 6 minutes in the basket in one layer, turned once, until charred at the edges.
+- **Oven:** 22 min at 220°C: 10 minutes to marinate, then 12 minutes on a lined tray under the grill setting.
 
 **Ingredients**
 

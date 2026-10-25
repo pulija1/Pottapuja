@@ -6,6 +6,7 @@
 import { normName } from "./shopping.js";
 import { checkForAudience } from "./safety.js";
 import { RECIPE_FILES, parseRecipeMarkdown, combineBooks } from "./recipe-book.js";
+import { usesAppliance, fastestMinutes } from "./appliances.js";
 
 async function readBook(file) {
   if (typeof process !== "undefined" && process.versions?.node && typeof window === "undefined") {
@@ -79,18 +80,21 @@ export function readyToCook(pantry, { forWhom = "", maxMissing = 0, schoolNutFre
 // With schoolNutFree, recipes that are not nut-free are left out of lunchbox and snack suggestions.
 // maxMinutes (quick mode) puts recipes ready in that time first, then the fastest of the rest,
 // so there is always an answer even when nothing in the book is that quick.
-export function suggestFromLibrary(pantry, { forWhom = "both", mealType = "", limit = 6, schoolNutFree = false, maxMinutes = 0 } = {}) {
+// appliances (["airFryer", "oven"], what the family has) gives a small lift to recipes with a method
+// for one of them, and quick mode counts the faster of the stove and appliance times.
+export const APPLIANCE_BOOST = 0.1;
+export function suggestFromLibrary(pantry, { forWhom = "both", mealType = "", limit = 6, schoolNutFree = false, maxMinutes = 0, appliances = [] } = {}) {
   const have = pantrySet(pantry);
   const wanted = forWhom === "both" ? ["baby", "kid", "family"] : [forWhom, "family"];
-  const quick = (r) => r.prepMinutes > 0 && r.prepMinutes <= maxMinutes;
-  const minutes = (r) => r.prepMinutes || Infinity;
+  const minutes = (r) => fastestMinutes(r, appliances) || Infinity;
+  const quick = (r) => minutes(r) <= maxMinutes;
   return LIBRARY.filter((x) => wanted.includes(x.forWhom))
     .filter((x) => !mealType || x.mealType === mealType || (mealType === "lunch" && x.mealType === "lunchbox"))
     .filter((x) => !schoolNutFree || x.forWhom !== "kid" || checkForAudience(x, { schoolNutFree: true }).safe)
     .map((x) => {
       const needed = neededNames(x);
       const hit = needed.filter((n) => have.has(n)).length;
-      const score = (needed.length ? hit / needed.length : 0) + (x.familyFavorite ? 0.15 : 0);
+      const score = (needed.length ? hit / needed.length : 0) + (x.familyFavorite ? 0.15 : 0) + (usesAppliance(x, appliances) ? APPLIANCE_BOOST : 0);
       return { recipe: x, score, hit };
     })
     .sort((a, b) => b.score - a.score || b.hit - a.hit)

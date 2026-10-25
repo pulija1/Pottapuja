@@ -6,6 +6,7 @@ import { todayKey, addDays, addMonths, monthGrid, monthLabel, prettyDate, fromKe
 import { checkRecipe, checkForAudience, isNutIngredient, isSchoolFood } from "./shared/safety.js";
 import { LIBRARY, suggestFromLibrary, readyToCook, RECIPE_BOOK_STATUS } from "./shared/recipes.js";
 import { nutritionTags, TAG_LABELS } from "./shared/recipe-book.js";
+import { APPLIANCES, ownedAppliances, methodsFor, fastestMinutes, basketPairs, applianceRequest } from "./shared/appliances.js";
 import { mergeItems, groupByAisle, formatQty, missingFromPantry, normName, normUnit, aisleFor } from "./shared/shopping.js";
 import { SLOTS, emptyDay, getDay, dayHasPlan, markEdited, approveDay, unapproveDay, slotsFor, todosOn, MEAL_GROUPS, whoLabel, slotLabel, remindersOn, pendingFor, dayStatus } from "./shared/plan.js";
 
@@ -180,6 +181,8 @@ function findRecipeByTitle(title, who) {
 }
 
 const nutFreeOn = () => !!state.settings?.schoolNutFree;
+// The air fryer and oven the family has, from 👤 Profile.
+const appliancesOwned = () => ownedAppliances(state.settings);
 
 // Missing ingredients for a recipe, leaving nuts off the list for school food when the school is nut-free.
 function shoppingNeeds(recipe) {
@@ -473,6 +476,13 @@ function profileDialog({ focusKey = false } = {}) {
       <label class="field"><span>8-month-old</span><input name="babyName" value="${esc(state.settings.babyName || "")}" maxlength="30" data-testid="baby-name"></label>
       <button type="button" class="btn sm" data-sync="names" data-testid="save-names">Save names</button>
     </details>`;
+  const fryer = state.settings.airFryer || "";
+  const appliances = `<details ${fryer || state.settings.oven ? "" : "open"} data-testid="appliances-section"><summary class="small">Cooking appliances${appliancesOwned().length ? " · " + esc(appliancesOwned().map((k) => APPLIANCES[k].label).join(", ")) : ""}</summary>
+      <p class="small muted">Recipes and suggestions use these for quicker cooking: air fryer and oven times, and both baskets at once.</p>
+      <div class="field"><span>🍟 Air fryer</span>${chipRadios("airFryer", [["dual", "Two baskets (Ninja dual zone)"], ["single", "One basket"], ["", "None"]], fryer, "air-fryer")}</div>
+      <label class="chk" style="min-height:0"><input type="checkbox" name="oven" ${state.settings.oven ? "checked" : ""} data-testid="has-oven"> ♨️ Oven</label>
+      <button type="button" class="btn sm" data-sync="appliances" data-testid="save-appliances">Save appliances</button>
+    </details>`;
   const fam = c.family;
   const members = fam ? `<div class="stack" data-testid="family-members">
       <strong class="small">Family members</strong>
@@ -494,6 +504,7 @@ function profileDialog({ focusKey = false } = {}) {
     ${c.configured ? `<p class="small sync-status" data-testid="cloud-status-text" role="status">${esc(cloudStatusText(c))}</p>` : ""}
     ${members}
     ${names}
+    ${appliances}
     ${aiKey}
     <p class="small muted">A backup file is still handy: <button type="button" class="linkish" data-sync="export" data-testid="profile-export">Export backup</button></p>
     <div class="row between">
@@ -510,6 +521,16 @@ function profileDialog({ focusKey = false } = {}) {
         state.settings = { ...state.settings, kidName: f.kidName.value.trim(), babyName: f.babyName.value.trim() };
         commit();
         toast("Names saved.");
+        break;
+      }
+      case "appliances": {
+        const f = dlg.querySelector("form").elements;
+        const fryer = dlg.querySelector("input[name=airFryer]:checked")?.value || "";
+        state.settings = { ...state.settings, airFryer: ["dual", "single"].includes(fryer) ? fryer : "", oven: f.oven.checked };
+        ui.suggest = {};
+        commit();
+        toast("Appliances saved. Recipes will use them.");
+        profileDialog();
         break;
       }
       case "add": {
@@ -706,7 +727,7 @@ function suggestionsFor(key) {
   for (const s of slotsFor(key)) {
     if (day.meals?.[s.id]?.title) continue;
     const meal = s.id.split("_")[1];
-    const opt = { forWhom: s.who, schoolNutFree: nutFreeOn(), limit: 40 };
+    const opt = { forWhom: s.who, schoolNutFree: nutFreeOn(), limit: 40, appliances: appliancesOwned() };
     const seen = new Set();
     const candidates = suggestFromLibrary(state.pantry, { ...opt, mealType: meal })
       .concat(suggestFromLibrary(state.pantry, opt))
@@ -746,6 +767,34 @@ function applySuggestions(key) {
   return n;
 }
 
+// "· 🍟 12 min" when the family can make it in the air fryer or oven.
+function applianceNote(r) {
+  const m = methodsFor(r, appliancesOwned());
+  return m.length ? ` <span class="small" data-testid="appliance-note">· ${m.map((x) => `${x.icon} ${x.minutes ? esc(x.minutes) + " min" : esc(x.label)}`).join(" · ")}</span>` : "";
+}
+
+// Two-basket air fryer: the day's air fryer dishes (planned and suggested), paired to cook side by side.
+function renderBasketPlan(key) {
+  if (key < TODAY) return "";
+  const day = getDay(state, key) || emptyDay();
+  const picks = suggestionsFor(key);
+  // Only dishes cooked at the same time share a load: the morning (breakfast and lunchbox), the snack, dinner.
+  const when = { breakfast: "Morning", lunchbox: "Morning", lunch: "Lunch", snack: "Snack time", dinner: "Dinner" };
+  const byTime = {};
+  for (const s of slotsFor(key)) {
+    const r = findRecipe(day.meals?.[s.id]?.recipeId || picks[s.id]);
+    if (r) (byTime[when[s.id.split("_")[1]]] ||= []).push(r);
+  }
+  const pairs = Object.entries(byTime).flatMap(([time, list]) => basketPairs(list, state.settings).map((p) => ({ ...p, time })));
+  if (!pairs.length) return "";
+  const basket = (b, n) => `<li>Basket ${n}: <strong>${esc(b.recipe.title)}</strong>${b.minutes ? ` · ${esc(b.minutes)} min` : ""}${b.tempC ? ` at ${esc(b.tempC)}°C` : ""}</li>`;
+  return `<div class="notice info small" data-testid="basket-plan">
+    <strong>🍟 Use both air fryer baskets</strong>
+    ${pairs.map((p) => `<div data-testid="basket-pair"><span>${esc(p.time)}:</span><ul style="margin:4px 0">${basket(p.baskets[0], 1)}${basket(p.baskets[1], 2)}</ul>
+      <span class="muted">Press Sync (Smart Finish) so both come out together${p.minutes ? ` in about ${esc(p.minutes)} min` : ""}.</span></div>`).join("")}
+  </div>`;
+}
+
 function renderSuggestions(key) {
   if (key < TODAY) return "";
   const picks = suggestionsFor(key);
@@ -759,7 +808,7 @@ function renderSuggestions(key) {
       const need = shoppingNeeds(r);
       return `<div class="suggest-row" data-testid="suggestion" data-slot="${s.id}">
         <span class="small muted">${esc(slotLabel(s, state.settings))}</span>
-        <span class="grow">${esc(r.title)}${r.familyFavorite ? " ⭐" : ""}${tagIcons(r) ? ` <span aria-hidden="true">${tagIcons(r)}</span>` : ""}${need.length ? ` <span class="small" style="color:var(--warn)">· need ${esc(need.map((i) => i.name).join(", "))}</span>` : ' <span class="small" style="color:var(--ok)">· all in the kitchen</span>'}</span>
+        <span class="grow">${esc(r.title)}${r.familyFavorite ? " ⭐" : ""}${tagIcons(r) ? ` <span aria-hidden="true">${tagIcons(r)}</span>` : ""}${applianceNote(r)}${need.length ? ` <span class="small" style="color:var(--warn)">· need ${esc(need.map((i) => i.name).join(", "))}</span>` : ' <span class="small" style="color:var(--ok)">· all in the kitchen</span>'}</span>
         <button type="button" class="iconbtn" data-action="suggest-swap" data-slot="${s.id}" title="Another idea" aria-label="Another idea for ${esc(slotLabel(s, state.settings))}">🔀</button>
       </div>`;
     }).join("")}
@@ -850,6 +899,7 @@ function renderDayPanel(key) {
     <h3>Meals</h3>
     ${renderKidGoals(key)}
     ${renderSuggestions(key)}
+    ${renderBasketPlan(key)}
     <div data-testid="day-meals">
     ${MEAL_GROUPS.map((g) => {
       const groupSlots = slots.filter((s) => s.who === g.who);
@@ -946,7 +996,7 @@ function renderRecipes() {
           <select name="mealType" data-testid="gen-meal" data-action="gen-field">
             ${[["", "Any"], ["breakfast", "Breakfast"], ["lunchbox", "School lunchbox"], ["lunch", "Lunch"], ["snack", "Snack"], ["dinner", "Dinner"]].map(([v, l]) => `<option value="${v}" ${ui.gen.mealType === v ? "selected" : ""}>${l}</option>`).join("")}
           </select></label>
-        <label class="chk full" style="min-height:0"><input type="checkbox" name="quick" data-action="gen-field" ${ui.gen.quick ? "checked" : ""} data-testid="gen-quick"> ⚡ Quick: just one recipe, ready in ${QUICK_MINUTES} minutes</label>
+        <label class="chk full" style="min-height:0"><input type="checkbox" name="quick" data-action="gen-field" ${ui.gen.quick ? "checked" : ""} data-testid="gen-quick"> ⚡ Quick: just one recipe, ready in ${QUICK_MINUTES} minutes${appliancesOwned().length ? ` (${appliancesOwned().map((k) => APPLIANCES[k].label.toLowerCase()).join(" and ")} count)` : ""}</label>
         <label class="chk full" style="min-height:0"><input type="checkbox" data-action="nut-free" ${nutFreeOn() ? "checked" : ""} data-testid="school-nut-free"> School is nut-free (no peanuts or tree nuts in the lunchbox or snack box)</label>
         <label class="field full"><span>Anything else? (optional)</span>
           <input type="text" name="notes" maxlength="300" value="${esc(ui.gen.notes)}" placeholder="e.g. baby just started eggs, no onion today" data-testid="gen-notes" data-action="gen-field"></label>
@@ -1000,10 +1050,12 @@ function recipeCard(r, { saved = false } = {}) {
   const hasNuts = r.nutFree === false || r.ingredients.some((i) => isNutIngredient(i.name));
   const isSaved = state.savedRecipes.some((s) => s.id === r.id || s.title === r.title);
   const issues = [...safety.errors, ...safety.warnings];
+  const methods = methodsFor(r, appliancesOwned());
   return `<article class="card recipe" data-testid="recipe-card" data-recipe-id="${esc(r.id)}" data-safe="${safety.safe}">
     <div class="row between"><h3>${esc(r.title)}</h3><span>${r.familyFavorite ? '<span class="pill warn" data-testid="family-favorite">⭐ Family favorite</span> ' : ""}${whoPill(r.forWhom)}</span></div>
     ${hasNuts && !nutFreeOn() ? `<div class="small muted" data-testid="contains-nuts">🥜 Contains nuts${r.nutFreeSwap ? ". Nut-free swap: " + esc(r.nutFreeSwap) : ""}</div>` : ""}
     <div class="small muted">${r.cuisine ? esc(r.cuisine) + " · " : ""}${esc(r.mealType || "")}${r.prepMinutes ? " · " + esc(r.prepMinutes) + " min" : ""}${r.texture ? " · " + esc(r.texture) : ""}${r.source === "ai" ? " · ✨ AI" : r.source === "library" ? " · Family recipe book" : ""}</div>
+    ${methods.length ? `<div class="appliance-methods" data-testid="appliance-methods">${methods.map((m) => `<p class="small" data-appliance="${m.key}"><strong>${m.icon} ${esc(m.label)}${m.key === "airFryer" && state.settings.airFryer === "dual" ? " (two baskets)" : ""}:</strong> ${esc(m.text)}</p>`).join("")}</div>` : ""}
     ${r.tags?.length ? `<div class="small" data-testid="recipe-tags">${r.tags.map((t) => esc(TAG_LABELS[t])).join(" · ")}</div>` : ""}
     <div class="safety ${safety.safe && !safety.warnings.length ? "ok" : safety.safe ? "warn" : "warn"}" data-testid="safety-badge">
       ${safety.safe ? (safety.warnings.length ? "⚠️ Safe with care" : "✅ Age-safe") : "⛔ Not safe as written"}
@@ -1031,11 +1083,12 @@ async function generate(form) {
     count: ui.gen.quick ? 1 : 4,
     quick: ui.gen.quick,
     schoolNutFree: nutFreeOn(),
+    appliances: applianceRequest(state.settings),
   };
   ui.aiNotice = "";
   ui.rejected = [];
   const fallback = (why) => {
-    ui.results = suggestFromLibrary(state.pantry, { forWhom: body.forWhom, mealType: body.mealType, limit: body.quick ? 1 : 6, schoolNutFree: body.schoolNutFree, maxMinutes: body.quick ? QUICK_MINUTES : 0 });
+    ui.results = suggestFromLibrary(state.pantry, { forWhom: body.forWhom, mealType: body.mealType, limit: body.quick ? 1 : 6, schoolNutFree: body.schoolNutFree, maxMinutes: body.quick ? QUICK_MINUTES : 0, appliances: appliancesOwned() });
     ui.aiNotice = `${why} Showing recipes from the built-in family recipe book that best match your kitchen.`;
   };
   if (!aiOnline()) {

@@ -204,6 +204,7 @@ How to read and edit this file: see [README.md](README.md).
 - **Meal:** dinner
 - **Cuisine:** Telugu
 - **Time:** 25 min
+- **Air fryer:** 15 min at 200°C. Toss the okra with 2 tsp of the oil and spread it out (split 250 g between both baskets), shaking every 5 minutes until crisp and not sticky. Take the kid's portion out, toss the rest with turmeric, chilli powder and salt, then stir it into the mustard, jeera, curry leaf and onion tadka in a pan for 1 minute.
 
 **Ingredients**
 
@@ -235,6 +236,7 @@ How to read and edit this file: see [README.md](README.md).
 - **Cuisine:** Telugu
 - **Time:** 25 min
 - **Family favorite:** yes
+- **Air fryer:** 15 min at 200°C. Toss the boiled potato cubes with 2 tsp oil and turmeric and air fry until crisp at the edges, shaking at 8 minutes. Take the kid's portion out, toss the rest with chilli powder and salt, and stir into the tadka (mustard, dals, curry leaves, golden onion) in a pan.
 
 **Ingredients**
 
@@ -265,6 +267,7 @@ How to read and edit this file: see [README.md](README.md).
 - **Meal:** dinner
 - **Cuisine:** Telugu
 - **Time:** 30 min
+- **Air fryer:** 18 min at 190°C. Toss the thin dondakaya rounds with 2 tsp oil and spread them over both baskets, shaking every 5 minutes until browned and tender. Take the kid's portion out, then season the rest and toss it into the tadka in a pan.
 
 **Ingredients**
 
@@ -295,6 +298,7 @@ How to read and edit this file: see [README.md](README.md).
 - **Meal:** dinner
 - **Cuisine:** Telugu
 - **Time:** 25 min
+- **Air fryer:** 14 min at 200°C. Toss the raw banana cubes with 2 tsp oil and turmeric and air fry, shaking at 7 minutes, until golden. Take the kid's portion out, season the rest and toss it into the tadka in a pan.
 
 **Ingredients**
 

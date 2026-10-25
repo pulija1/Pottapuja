@@ -3,9 +3,10 @@
 // format is forgiving. See recipes/README.md for the format. Pure functions, no I/O here.
 
 import { isNutIngredient } from "./safety.js";
+import { parseApplianceLine } from "./appliances.js";
 
 // The files the app loads, in this order. A new file must be added here to be loaded.
-export const RECIPE_FILES = ["kid-4-years.md", "baby-8-months.md", "family-dinners.md", "telugu-curries.md"];
+export const RECIPE_FILES = ["kid-4-years.md", "baby-8-months.md", "family-dinners.md", "telugu-curries.md", "air-fryer-and-oven.md"];
 
 const WHO = {
   baby: "baby", "8-month-old": "baby", "8 month old": "baby", "8 months": "baby", infant: "baby",
@@ -126,6 +127,10 @@ export function parseRecipeMarkdown(md, file = "") {
     };
     if (/^(yes|true|y|⭐)/i.test(r.fields["family favorite"] || r.fields["family favourite"] || "")) recipe.familyFavorite = true;
     if (r.fields["nut-free swap"]) recipe.nutFreeSwap = r.fields["nut-free swap"];
+    const airFryer = parseApplianceLine(r.fields["air fryer"] || r.fields["air-fryer"] || r.fields.airfryer);
+    if (airFryer) recipe.airFryer = airFryer;
+    const oven = parseApplianceLine(r.fields.oven);
+    if (oven) recipe.oven = oven;
     const declared = String(r.fields["good for"] || "").toLowerCase();
     const tags = new Set(nutritionTags(recipe));
     if (/\begg/.test(declared)) tags.add("egg");
@@ -221,6 +226,8 @@ export function recipeToMarkdown(r) {
   if (r.texture) out.push(`- **Texture:** ${r.texture}`);
   if (tags.length) out.push(`- **Good for:** ${tags.map((t) => TAG_LABELS[t]).join(" · ")}`);
   if (r.nutFreeSwap) out.push(`- **Nut-free swap:** ${r.nutFreeSwap}`);
+  if (r.airFryer?.text) out.push(`- **Air fryer:** ${r.airFryer.text}`);
+  if (r.oven?.text) out.push(`- **Oven:** ${r.oven.text}`);
   if (r.familyFavorite) out.push(`- **Family favorite:** yes`);
   if (r.id && r.id !== "lib-" + slug(r.title)) out.push(`- **ID:** ${r.id}`);
   out.push("", "**Ingredients**", "");
