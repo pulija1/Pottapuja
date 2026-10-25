@@ -35,8 +35,10 @@ after(async () => { await browser?.close(); mock?.proc.kill(); off?.proc.kill();
 // (tests/firebase/ covers sync against the Firebase emulator).
 // These tests cover the app on one device; family sync has its own tests against the Firebase
 // emulator (npm run test:firebase), so the real project's settings are switched off here.
-async function newContext(opts = {}) {
+// The calendar opens on one week by default; most tests click dates across the month, so they use the month view.
+async function newContext({ weekView = false, ...opts } = {}) {
   const ctx = await browser.newContext(opts);
+  if (!weekView) await ctx.addInitScript(() => { try { localStorage.setItem("mealPlanner.calView", "month"); } catch {} });
   await ctx.route("**/firebase-config.js", (route) =>
     route.fulfill({ contentType: "text/javascript", body: "export const firebaseConfig = null;" }));
   return ctx;
@@ -51,7 +53,20 @@ async function open(server = mock, { today = TODAY, viewport } = {}) {
   page.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
   await page.goto(`${server.url}?today=${today}`);
   await page.getByTestId("cal-grid").waitFor();
+  await unfoldAll(page);
   return { page, ctx, errors };
+}
+
+// Sections start folded to save scrolling. The app remembers what the parent opens, so opening
+// every section once on each tab lets the tests below reach the fields inside them.
+// (UI-20 checks the folded defaults.) Call it again after a reload.
+async function unfoldAll(page) {
+  for (const t of ["recipes", "shopping", "frozen", "reminders", "calendar"]) {
+    await page.getByTestId("tab-" + t).click();
+    await page.evaluate(() => {
+      for (const s of document.querySelectorAll(".view:not([hidden]) details.section:not([open]) > summary, .view:not([hidden]) details.suggest-list:not([open]) > summary")) s.click();
+    });
+  }
 }
 const tid = (page, id) => page.getByTestId(id);
 const cell = (page, date) => tid(page, `cal-day-${date}`);
@@ -487,6 +502,7 @@ test("E2E FRZ-02 to-dos saved before the change are kept and still show and work
   page.on("pageerror", (e) => errors.push(e.message));
   await page.goto(`${mock.url}?today=${TODAY}#todo`);
   await tid(page, "cal-grid").waitFor();
+  await unfoldAll(page);
   await cell(page, TOMORROW).click();
   const row = tid(page, "day-todos").getByTestId("todo-item");
   assert.match(await row.innerText(), /Buy shoes/);
@@ -946,6 +962,7 @@ test("E2E AIKEY-05 a rejected key falls back to the recipe book and says to chec
   await fakeClaude(page, { status: 401 });
   await page.goto(`${off.url}?today=${TODAY}`);
   await page.waitForFunction(() => /your key/.test(document.querySelector("#ai-chip").textContent));
+  await unfoldAll(page);
   await tid(page, "tab-recipes").click();
   await tid(page, "generate-recipes").click();
   await tid(page, "ai-notice").waitFor({ timeout: 5000 });
@@ -1003,6 +1020,7 @@ test("E2E CUI-01 cuisines picked in the profile steer suggestions and top picks;
   page.on("pageerror", (e) => errors.push(e.message));
   await page.goto(`${mock.url}?today=${TODAY}`);
   await tid(page, "cal-grid").waitFor();
+  await unfoldAll(page);
 
   await tid(page, "profile").click();
   await tid(page, "cuisine-telugu").check();
@@ -1080,6 +1098,58 @@ test("E2E BRK-03 weekday suggestions: breakfast made the night before or no-cook
   assert.match(await baby.innerText(), /Make the night before|No cooking/);
   await cell(page, "2026-10-24").click();   // a Saturday: no rush
   assert.equal(await tid(page, "busy-morning").count(), 0);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test("E2E UI-20 less scrolling: the calendar opens on one week, sections start folded and remember being opened, food has pictures", async () => {
+  const ctx = await newContext({ weekView: true, viewport: { width: 390, height: 844 } });
+  const page = await ctx.newPage();
+  const errors = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await page.goto(`${mock.url}?today=${TODAY}`);
+  await tid(page, "cal-grid").waitFor();
+  const visibleDays = () => page.locator("[data-testid^=cal-day-]:visible").count();
+
+  // One week, with arrows that step a week; "Show the whole month" opens the month and is remembered.
+  assert.equal(await visibleDays(), 7);
+  assert.ok(await cell(page, TOMORROW).isVisible());
+  await tid(page, "cal-next").click();
+  assert.equal(await tid(page, "day-panel").getAttribute("data-date"), "2026-10-29");
+  await tid(page, "cal-today").click();
+  await tid(page, "cal-view").click();
+  assert.equal(await visibleDays(), 42);
+  await page.reload();
+  await tid(page, "cal-grid").waitFor();
+  assert.equal(await visibleDays(), 42);
+  await tid(page, "cal-view").click();
+  assert.equal(await visibleDays(), 7);
+
+  // The day's schedule, to-dos and reminders are one line each until opened; opened stays opened.
+  const todoSection = page.locator("details[data-group=day-todos]");
+  assert.equal(await todoSection.evaluate((d) => d.open), false);
+  assert.equal(await page.locator("details[data-group=suggest]").evaluate((d) => d.open), false);
+  assert.match(await todoSection.locator("summary").innerText(), /To do[\s\S]*Nothing yet/);
+  await todoSection.locator("summary").click();
+  await tid(page, "day-todo-input").fill("Pack the water bottle");
+  await tid(page, "day-todo-add").click();
+  assert.equal(await todoSection.evaluate((d) => d.open), true);
+  assert.match(await todoSection.locator("summary").innerText(), /1 left/);
+  assert.match(await page.locator(".hero-stats").innerText(), /1 to do/);
+
+  // Recipes: picture cards for the top picks, everything else folded, so the page is short.
+  await tid(page, "tab-recipes").click();
+  assert.ok((await page.locator("[data-testid=top-pick] .pick-art").count()) > 0);
+  for (const id of ["sec-kitchen", "sec-cook-veg", "sec-ready", "sec-generate", "sec-saved"]) {
+    assert.equal(await page.locator(`details[data-group=${id}]`).evaluate((d) => d.open), false, `${id} starts folded`);
+  }
+  const height = await page.evaluate(() => document.documentElement.scrollHeight);
+  assert.ok(height < 1600, `Recipes page is ${height}px tall`);
+
+  // Shopping rows show a picture of the item.
+  await tid(page, "tab-shopping").click();
+  await addShopItems(page, ["bananas"]);
+  assert.equal(await tid(page, "shop-item").locator(".art").innerText(), "🍌");
   assert.deepEqual(errors, []);
   await ctx.close();
 });

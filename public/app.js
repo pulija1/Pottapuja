@@ -10,6 +10,7 @@ import { groupKitchen, babyFruitFor, recipeHasFruit } from "./shared/kitchen.js"
 import { APPLIANCES, ownedAppliances, methodsFor, fastestMinutes, basketPairs, applianceRequest } from "./shared/appliances.js";
 import { NUTRIENTS, DAILY_NEEDS, estimateNutrition, dailyShare } from "./shared/nutrition.js";
 import { mergeItems, groupByAisle, formatQty, missingFromPantry, normName, normUnit, aisleFor } from "./shared/shopping.js";
+import { foodArt } from "./shared/food-art.js";
 import { SLOTS, emptyDay, getDay, dayHasPlan, markEdited, approveDay, unapproveDay, slotsFor, todosOn, MEAL_GROUPS, whoLabel, slotLabel, remindersOn, pendingFor, dayStatus } from "./shared/plan.js";
 
 const state = load();
@@ -30,6 +31,8 @@ const ui = {
   storeMode: false,
   cartOpen: false,       // the "In the cart" section on the shopping list is expanded
   openGroups: new Set(),          // meal sections the parent has expanded in the day panel
+  closedGroups: new Set(),        // sections that start open but the parent has closed
+  calView: calViewPref(),         // "week": only the chosen day's week shows, "month": the whole month
   suggest: {},                    // date -> { seed, picks: { slotId: recipeId } } meal suggestions shown in the day panel
   savedFilter: "",
   morePicks: false,       // Recipes tab: show 15 top picks instead of 5
@@ -41,6 +44,14 @@ const ui = {
 };
 
 // ---------- helpers ----------
+// The calendar opens on one week to save scrolling; the parent's choice is remembered on this phone.
+function calViewPref() {
+  try { return localStorage.getItem("mealPlanner.calView") === "month" ? "month" : "week"; } catch { return "week"; }
+}
+function setCalView(v) {
+  ui.calView = v;
+  try { localStorage.setItem("mealPlanner.calView", v); } catch {}
+}
 const $ = (sel, root = document) => root.querySelector(sel);
 const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
 const ESC = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
@@ -99,11 +110,11 @@ function chipRadios(name, options, selected, testid) {
 
 // A list row that can be ticked by a tap anywhere on it or a swipe to the right, and
 // deleted with a swipe to the left. `check` is the checkbox, `more` the details button.
-function swipeRow({ testid, cls = "", data = "", check, body, more, leftLabel, rightLabel = "Delete" }) {
+function swipeRow({ testid, cls = "", data = "", check, pic = "", body, more, leftLabel, rightLabel = "Delete" }) {
   return `<div class="swipe ${cls}" data-testid="${testid}" ${data}>
     <div class="swipe-bg" aria-hidden="true"><span class="swipe-l">✓ ${esc(leftLabel)}</span><span class="swipe-r">${esc(rightLabel)} 🗑</span></div>
     <div class="swipe-fg">
-      <label class="tap-main">${check}<span class="tap-text">${body}</span></label>
+      <label class="tap-main">${check}${pic}<span class="tap-text">${body}</span></label>
       ${more || ""}
     </div>
   </div>`;
@@ -275,6 +286,22 @@ function renderKidGoals(key) {
         <span class="goal-label">${GOAL_LABELS[g]} ${hit ? "✓" : ""}</span><span class="goal-how">${esc(how)}</span></div>`;
     }).join("")}
   </div>`;
+}
+
+// A picture tile for a dish or an item: a big emoji on a soft colour (see shared/food-art.js).
+function art(x, cls = "", fallback = "") {
+  const a = foodArt(x);
+  return `<span class="art tone-${a.tone} ${cls}" aria-hidden="true">${a.emoji === "🍽️" && fallback ? fallback : a.emoji}</span>`;
+}
+
+// A collapsible card: one line with an icon, a title and a short summary (a count, a few names).
+// Sections start closed unless `open`; whatever the parent opens or closes stays that way.
+function section({ id, icon, title, meta = "", open = false, testid = "", cls = "", body }) {
+  const isOpen = ui.openGroups.has(id) || (open && !ui.closedGroups.has(id));
+  return `<details class="card section ${cls}" data-group="${id}" ${testid ? `data-testid="${testid}"` : ""} ${isOpen ? "open" : ""}>
+    <summary class="sec-head"><span class="sec-icon" aria-hidden="true">${icon}</span><span class="sec-title"><strong>${title}</strong>${meta ? `<span class="sec-meta">${meta}</span>` : ""}</span><span class="chev" aria-hidden="true"></span></summary>
+    <div class="sec-body">${body}</div>
+  </details>`;
 }
 
 const tagIcons = (r) => (r?.tags || []).map((t) => TAG_LABELS[t].split(" ")[0]).join("");
@@ -667,13 +694,13 @@ function render() {
 }
 
 // ---------- calendar ----------
-function calCell(c) {
+function calCell(c, wk) {
   const st = dayStatus(state, c.key);
   const pending = pend(c.key);
   const rems = remsOn(c.key).length;
   const cls = ["cal-cell", c.inMonth ? "" : "out", c.key === TODAY ? "today" : "", c.key === ui.selected ? "sel" : ""].join(" ");
   const label = `${prettyDate(c.key)}: ${st === "approved" ? "approved" : st === "pending" ? "waiting for approval" : "no plan"}${pending.length ? ", " + pending.length + " pending" : ""}`;
-  return `<button type="button" class="${cls}" data-action="select-day" data-date="${c.key}" data-testid="cal-day-${c.key}" data-status="${st}" data-pending="${pending.length}" aria-label="${esc(label)}">
+  return `<button type="button" class="${cls}" data-action="select-day" data-date="${c.key}" data-wk="${wk}" data-testid="cal-day-${c.key}" data-status="${st}" data-pending="${pending.length}" aria-label="${esc(label)}">
     <span class="d">${c.day}</span>
     <span class="marks"><span class="dot ${st}"></span>${pending.length ? `<span class="badge" title="Pending">${pending.length}</span>` : ""}${rems ? `<span class="badge rem" title="Reminders">⏰${rems}</span>` : ""}</span>
   </button>`;
@@ -685,7 +712,7 @@ function renderDay(key = ui.selected) {
   if (ui.tab !== "calendar" || !$("#cal-day")) return render();
   renderHeader();
   const cell = $(`[data-testid=cal-day-${key}]`);
-  if (cell) cell.outerHTML = calCell({ key, day: Number(key.slice(8)), inMonth: key.slice(0, 7) === ui.month.slice(0, 7) });
+  if (cell) cell.outerHTML = calCell({ key, day: Number(key.slice(8)), inMonth: key.slice(0, 7) === ui.month.slice(0, 7) }, cell.dataset.wk);
   $("#cal-upcoming").innerHTML = renderUpcomingPending();
   $("#cal-day").innerHTML = renderDayPanel(ui.selected);
 }
@@ -693,35 +720,39 @@ function renderDay(key = ui.selected) {
 function renderCalendar() {
   const cells = monthGrid(ui.month);
   const dows = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-  const grid = cells.map(calCell).join("");
+  const grid = cells.map((c, i) => calCell(c, Math.floor(i / 7))).join("");
+  const at = cells.findIndex((c) => c.key === ui.selected);
+  const week = ui.calView === "week";
 
+  // On a phone the chosen day comes straight after the month; the pending list and backup are folded away below it.
   $("#view-calendar").innerHTML = `
     <div class="cal-layout">
-      <div>
-        <div class="card">
-          <div class="cal-head">
-            <button class="btn sm" data-action="month" data-delta="-1" aria-label="Previous month" data-testid="cal-prev">‹</button>
-            <h2 data-testid="cal-month">${esc(monthLabel(ui.month))}</h2>
-            <div class="row">
-              <button class="btn sm" data-action="goto-today" data-testid="cal-today">Today</button>
-              <button class="btn sm" data-action="month" data-delta="1" aria-label="Next month" data-testid="cal-next">›</button>
-            </div>
-          </div>
-          <div class="cal-grid" data-testid="cal-grid">
-            ${dows.map((d) => `<div class="cal-dow">${d}</div>`).join("")}
-            ${grid}
-          </div>
-          <div class="legend">
-            <span><i class="dot approved"></i>Approved</span>
-            <span><i class="dot pending"></i>Waiting for approval</span>
-            <span><i class="dot empty"></i>No plan</span>
-            <span><b class="badge">2</b>Pending items</span>
+      <div class="card cal-month">
+        <div class="cal-head">
+          <h2 data-testid="cal-month">${esc(monthLabel(ui.month))}</h2>
+          <div class="row">
+            <button class="btn sm" data-action="goto-today" data-testid="cal-today">Today</button>
+            <button class="btn sm round" data-action="month" data-delta="-1" aria-label="Previous ${week ? "week" : "month"}" data-testid="cal-prev">‹</button>
+            <button class="btn sm round" data-action="month" data-delta="1" aria-label="Next ${week ? "week" : "month"}" data-testid="cal-next">›</button>
           </div>
         </div>
+        <div class="cal-grid ${ui.calView}" data-testid="cal-grid" data-wk="${Math.max(0, Math.floor(at / 7))}">
+          ${dows.map((d) => `<div class="cal-dow">${d.slice(0, 2)}</div>`).join("")}
+          ${grid}
+        </div>
+        <button type="button" class="cal-view" data-action="cal-view" data-testid="cal-view" aria-expanded="${!week}">${week ? "Show the whole month" : "Show one week"}<span class="chev" aria-hidden="true"></span></button>
+        <div class="legend">
+          <span><i class="dot approved"></i>Approved</span>
+          <span><i class="dot pending"></i>To approve</span>
+          <span><i class="dot empty"></i>No plan</span>
+          <span><b class="badge">2</b>Pending</span>
+        </div>
+      </div>
+      <div id="cal-day">${renderDayPanel(ui.selected)}</div>
+      <div class="cal-more">
         <div id="cal-upcoming">${renderUpcomingPending()}</div>
         ${renderBackupCard()}
       </div>
-      <div id="cal-day">${renderDayPanel(ui.selected)}</div>
     </div>`;
 }
 
@@ -732,22 +763,26 @@ function renderUpcomingPending() {
     const p = pend(k);
     if (p.length) rows.push({ k, p });
   }
-  if (!rows.length) return `<div class="card"><h2>Pending</h2><p class="muted">Nothing pending in the next two weeks.</p></div>`;
-  return `<div class="card" data-testid="upcoming-pending"><h2>Pending, next two weeks</h2>
-    ${rows.map(({ k, p }) => `<div class="row between" style="padding:6px 0;border-bottom:1px dashed var(--line)">
+  const late = rows.filter(({ k }) => k < TODAY).length;
+  return section({
+    id: "sec-upcoming", icon: "🗓️", title: "Pending, next two weeks", testid: "upcoming-pending",
+    meta: rows.length ? `${rows.length} date${rows.length > 1 ? "s" : ""}${late ? ` · ${late} overdue` : ""}` : "All clear",
+    body: rows.length ? rows.map(({ k, p }) => `<div class="pend-row">
       <button class="btn ghost sm" data-action="select-day" data-date="${k}">${k < TODAY ? "⚠️ " : ""}${esc(prettyDate(k))}${k === TODAY ? " (today)" : ""}</button>
-      <span class="small muted grow" style="text-align:right">${p.map((x) => esc(x.text)).join(" · ")}</span>
-    </div>`).join("")}
-  </div>`;
+      <span class="small muted grow">${p.map((x) => esc(x.text)).join(" · ")}</span>
+    </div>`).join("") : '<p class="muted small">Nothing pending in the next two weeks.</p>',
+  });
 }
 
 function renderBackupCard() {
-  return `<div class="card"><h2>Backup</h2>
-    <p class="small muted">${cloud.getCloud().ready ? "Everything syncs with your family on its own. A backup file is a copy you keep yourself." : "Everything is saved on this device. Download a backup to move it to another phone or browser."}</p>
+  return section({
+    id: "sec-backup", icon: "💾", title: "Backup", meta: cloud.getCloud().ready ? "Synced with your family" : "Saved on this phone",
+    body: `<p class="small muted">${cloud.getCloud().ready ? "Everything syncs with your family on its own. A backup file is a copy you keep yourself." : "Everything is saved on this device. Download a backup to move it to another phone or browser."}</p>
     <div class="row">
       <button class="btn sm" data-action="export" data-testid="export">Download backup</button>
       <label class="btn sm">Restore backup<input type="file" accept="application/json" data-action="import" hidden data-testid="import"></label>
-    </div></div>`;
+    </div>`,
+  });
 }
 
 function slotDatalist(who) {
@@ -879,8 +914,12 @@ function renderSuggestions(key) {
   const picks = suggestionsFor(key);
   const rows = MEAL_GROUPS.flatMap((g) => slotsFor(key).filter((s) => s.who === g.who && picks[s.id]));
   if (!rows.length) return "";
+  // Folded to one line of dish pictures; open it to see each idea, swap one, or see what's missing.
+  const pics = [...new Set(rows.map((s) => foodArt(findRecipe(picks[s.id])).emoji))].join("");
   return `<div class="suggest" data-testid="day-suggestions">
-    <div class="row between"><strong>💡 Suggested from your kitchen</strong>
+    <details class="suggest-list" data-group="suggest" ${ui.openGroups.has("suggest") ? "open" : ""}>
+    <summary><span class="grow"><strong>💡 ${rows.length} meal idea${rows.length > 1 ? "s" : ""} from your kitchen</strong><span class="sug-pics" aria-hidden="true">${pics}</span></span><span class="chev" aria-hidden="true"></span></summary>
+    <div class="row between" style="margin-top:6px"><span class="small muted">Tap 🔀 for another idea</span>
       <button type="button" class="btn sm ghost" data-action="suggest-shuffle" data-testid="suggest-shuffle">🔀 Other ideas</button></div>
     ${rows.map((s) => {
       const r = findRecipe(picks[s.id]);
@@ -889,10 +928,11 @@ function renderSuggestions(key) {
       const cold = fromFreezer(r);
       return `<div class="suggest-row" data-testid="suggestion" data-slot="${s.id}">
         <span class="small muted">${esc(slotLabel(s, state.settings))}</span>
-        <span class="grow">${from ? `<span class="small" data-testid="leftover-idea">♻️ Uses yesterday's ${esc(from)}</span><br>` : ""}${r.busyMorning && isSchoolDay(key) ? `<span class="small muted" data-testid="busy-morning">${r.busyMorning === "make-ahead" ? "🌙 Make the night before" : "⏱️ No cooking"}</span><br>` : ""}${esc(r.title)}${r.familyFavorite ? " ⭐" : ""}${tagIcons(r) ? ` <span aria-hidden="true">${tagIcons(r)}</span>` : ""}${applianceNote(r)}${need.length ? ` <span class="small" style="color:var(--warn)">· need ${esc(need.map((i) => i.name).join(", "))}</span>` : ' <span class="small" style="color:var(--ok)">· all in the kitchen</span>'}${cold.length ? ` <span class="small" data-testid="from-freezer">· 🧊 ${esc(cold.join(", "))} from the freezer</span>` : ""}${s.id === "baby_breakfast" && !recipeHasFruit(r) ? `<br>${babyFruitNote(ui.suggest[key]?.seed || 0, true)}` : ""}</span>
+        <span class="grow">${from ? `<span class="small" data-testid="leftover-idea">♻️ Uses yesterday's ${esc(from)}</span><br>` : ""}${r.busyMorning && isSchoolDay(key) ? `<span class="small muted" data-testid="busy-morning">${r.busyMorning === "make-ahead" ? "🌙 Make the night before" : "⏱️ No cooking"}</span><br>` : ""}${art(r, "xs")} ${esc(r.title)}${r.familyFavorite ? " ⭐" : ""}${tagIcons(r) ? ` <span aria-hidden="true">${tagIcons(r)}</span>` : ""}${applianceNote(r)}${need.length ? ` <span class="small" style="color:var(--warn)">· need ${esc(need.map((i) => i.name).join(", "))}</span>` : ' <span class="small" style="color:var(--ok)">· all in the kitchen</span>'}${cold.length ? ` <span class="small" data-testid="from-freezer">· 🧊 ${esc(cold.join(", "))} from the freezer</span>` : ""}${s.id === "baby_breakfast" && !recipeHasFruit(r) ? `<br>${babyFruitNote(ui.suggest[key]?.seed || 0, true)}` : ""}</span>
         <button type="button" class="iconbtn" data-action="suggest-swap" data-slot="${s.id}" title="Another idea" aria-label="Another idea for ${esc(slotLabel(s, state.settings))}">🔀</button>
       </div>`;
     }).join("")}
+    </details>
     <div class="row" style="margin-top:8px">
       <button class="btn ok sm" data-action="suggest-approve" data-testid="suggest-approve">✅ Approve these meals</button>
       <button class="btn sm" data-action="autofill" data-testid="autofill-day">Add to plan, approve later</button>
@@ -906,6 +946,7 @@ function slotRow(s, day, issues) {
   return `<div class="slot">
     <span class="slot-label">${esc(slotLabel(s, state.settings))}</span>
     <div class="slot-row">
+      ${m?.title ? art({ title: m.title }, "sm") : '<span class="art sm empty" aria-hidden="true">＋</span>'}
       <input type="text" list="dl-${s.who}" value="${esc(m?.title || "")}" placeholder="Pick a recipe or type a dish" data-action="slot" data-slot="${s.id}" data-who="${s.who}" data-testid="slot-${s.id}" aria-label="${esc(slotLabel(s, state.settings))}">
       ${r ? `<button class="iconbtn" data-action="view-recipe" data-id="${esc(r.id)}" title="View recipe" aria-label="View recipe">📖</button>` : ""}
       ${m?.title ? `<button class="iconbtn" data-action="clear-slot" data-slot="${s.id}" title="Clear" aria-label="Clear ${esc(slotLabel(s, state.settings))}">✕</button>` : ""}
@@ -970,26 +1011,47 @@ function renderDayPanel(key) {
           <button class="btn ok" data-action="approve" data-testid="approve-day">Approve day</button></div>`
       : `<div class="status-banner empty" data-testid="day-status" data-status="empty"><span>No meals or schedule yet</span></div>`;
 
-  return `<div class="card" data-testid="day-panel" data-date="${key}">
-    <div class="row between"><h2>${esc(fromKey(key).toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" }))}${key === TODAY ? " · Today" : ""}</h2>
-      ${isSchoolDay(key) ? '<span class="pill kid">School day</span>' : '<span class="pill">Weekend</span>'}</div>
+  // The day's dishes as pictures in the corner of the header: what's planned, or else what's suggested.
+  const picks = key >= TODAY ? suggestionsFor(key) : {};
+  const dishes = slots.map((s) => day.meals?.[s.id]?.title ? { title: day.meals[s.id].title } : findRecipe(picks[s.id])).filter(Boolean);
+  const pics = [...new Set(dishes.map((d) => foodArt(d).emoji))].slice(0, 3);
+  const planned = slots.filter((s) => day.meals?.[s.id]?.title).length;
+  const todosLeft = todos.filter((t) => !t.done).length;
+  const remsLeft = rems.filter((r) => !r.doneOnDate).length;
+  const sched = (day.schedule || []).slice().sort((a, b) => String(a.time).localeCompare(String(b.time)));
+  const count = (n, one, many = one + "s") => `${n} ${n === 1 ? one : many}`;
+
+  return `<div class="card day-panel" data-testid="day-panel" data-date="${key}">
+    <div class="day-hero ${st}">
+      <div class="hero-text">
+        <span class="hero-kicker">${key === TODAY ? "Today · " : ""}${isSchoolDay(key) ? '<span class="pill kid">School day</span>' : '<span class="pill">Weekend</span>'}</span>
+        <h2>${esc(fromKey(key).toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" }))}</h2>
+        <div class="hero-stats">
+          <span>🍽️ ${planned}/${slots.length} meals</span>
+          <span>✅ ${count(todosLeft, "to do", "to dos")}</span>
+          <span>⏰ ${count(remsLeft, "reminder")}</span>
+        </div>
+      </div>
+      <span class="hero-art n${pics.length || 1}" aria-hidden="true">${(pics.length ? pics : ["🍛"]).map((e) => `<span>${e}</span>`).join("")}</span>
+    </div>
     ${banner}
     ${safetyBox}
-    ${pendList.length ? `<h3>Pending for this date</h3><ul class="pending-list" data-testid="day-pending">${pendList.map((p) => `<li data-type="${p.type}">${{ approval: "⏳", plan: "📝", reminder: "⏰", todo: "✅" }[p.type]} ${esc(p.text)}${p.overdue ? ' <span class="pill bad">overdue</span>' : ""}</li>`).join("")}</ul>` : `<p class="small muted" data-testid="day-pending-none">Nothing pending for this date.</p>`}
+    ${pendList.length ? `<ul class="pending-list" data-testid="day-pending">${pendList.map((p) => `<li data-type="${p.type}">${{ approval: "⏳", plan: "📝", reminder: "⏰", todo: "✅" }[p.type]} ${esc(p.text)}${p.overdue ? ' <span class="pill bad">overdue</span>' : ""}</li>`).join("")}</ul>` : `<p class="small muted" data-testid="day-pending-none">Nothing pending for this date.</p>`}
 
-    <h3>Meals</h3>
+    <h3 class="day-h">🍽️ Meals</h3>
     ${renderKidGoals(key)}
     ${renderSuggestions(key)}
     ${renderBasketPlan(key)}
     <div data-testid="day-meals">
     ${MEAL_GROUPS.map((g) => {
       const groupSlots = slots.filter((s) => s.who === g.who);
-      const planned = groupSlots.filter((s) => day.meals?.[s.id]?.title).length;
+      const done = groupSlots.filter((s) => day.meals?.[s.id]?.title);
       const hasIssue = groupSlots.some((s) => issues[s.id]);
       const open = ui.openGroups.has(g.who) || hasIssue;
-      return `<details class="meal-group" data-group="${g.who}" data-testid="meal-group-${g.who}" ${open ? "open" : ""}>
-        <summary><span class="grow"><strong>${g.icon} ${esc(whoLabel(g.who, state.settings, { age: true }))}</strong></span>
-          <span class="small ${hasIssue ? "" : "muted"}" ${hasIssue ? 'style="color:var(--bad)"' : ""}>${hasIssue ? "⛔ check safety · " : ""}${planned} of ${groupSlots.length} planned</span></summary>
+      return `<details class="meal-group ${g.who}" data-group="${g.who}" data-testid="meal-group-${g.who}" ${open ? "open" : ""}>
+        <summary><span class="who-icon" aria-hidden="true">${g.icon}</span><span class="grow"><strong>${esc(whoLabel(g.who, state.settings, { age: true }))}</strong>
+          <span class="mini-art" aria-hidden="true">${done.map((s) => foodArt({ title: day.meals[s.id].title }).emoji).join("")}</span></span>
+          <span class="small ${hasIssue ? "" : "muted"}" ${hasIssue ? 'style="color:var(--bad)"' : ""}>${hasIssue ? "⛔ check safety · " : ""}${done.length} of ${groupSlots.length} planned</span></summary>
         ${groupSlots.map((s) => slotRow(s, day, issues)).join("")}
       </details>`;
     }).join("")}
@@ -1002,28 +1064,37 @@ function renderDayPanel(key) {
       <button class="btn sm" data-action="day-to-shopping" data-testid="day-to-shopping">🛒 Add missing to shopping</button>
     </div>
 
-    <h3>Schedule</h3>
-    <div data-testid="day-schedule">
-      ${(day.schedule || []).slice().sort((a, b) => String(a.time).localeCompare(String(b.time))).map((s) => `<div class="sched-item"><time>${esc(s.time || "--:--")}</time><span class="grow">${esc(s.text)}</span><button class="iconbtn" data-action="del-sched" data-id="${esc(s.id)}" aria-label="Remove">✕</button></div>`).join("") || '<p class="small muted">No schedule yet.</p>'}
+    <div class="day-sections">
+    ${section({
+      id: "day-schedule", icon: "🕒", title: "Schedule", cls: "sub",
+      meta: sched.length ? `${count(sched.length, "item")} · ${esc(sched.map((x) => x.time).filter(Boolean)[0] || "")}`.replace(/ · $/, "") : "Nothing yet",
+      body: `<div data-testid="day-schedule">
+      ${sched.map((x) => `<div class="sched-item"><time>${esc(x.time || "--:--")}</time><span class="grow">${esc(x.text)}</span><button class="iconbtn" data-action="del-sched" data-id="${esc(x.id)}" aria-label="Remove">✕</button></div>`).join("") || '<p class="small muted">No schedule yet.</p>'}
     </div>
     <form class="row" data-form="add-sched" style="margin-top:6px">
       <input type="time" name="time" style="width:120px" aria-label="Time" data-testid="sched-time">
       <input type="text" name="text" class="grow" placeholder="e.g. School drop-off, nap, swim class" aria-label="Schedule item" data-testid="sched-text" required>
       <button class="btn sm primary" data-testid="sched-add">Add</button>
     </form>
-    ${isSchoolDay(key) ? `<p class="small muted" style="margin-top:6px"><button type="button" class="btn ghost sm" data-action="school-schedule">+ Add usual school-day times</button></p>` : ""}
-
-    <h3>To do</h3>
-    <div data-testid="day-todos">${todos.length ? todos.map((t) => todoRow(t)).join("") : '<p class="small muted">Nothing to do for the kids on this date.</p>'}</div>
+    ${isSchoolDay(key) ? `<p class="small muted" style="margin-top:6px"><button type="button" class="btn ghost sm" data-action="school-schedule">+ Add usual school-day times</button></p>` : ""}`,
+    })}
+    ${section({
+      id: "day-todos", icon: "✅", title: "To do", cls: "sub",
+      meta: todos.length ? `${todosLeft} left${todos.length - todosLeft ? ` · ${todos.length - todosLeft} done` : ""}` : "Nothing yet",
+      body: `<div data-testid="day-todos">${todos.length ? todos.map((t) => todoRow(t)).join("") : '<p class="small muted">Nothing to do for the kids on this date.</p>'}</div>
     <form class="row" data-form="todo-add-day" style="margin-top:6px">
       <input type="text" name="text" class="grow" placeholder="e.g. Buy dresses, check school schedule" aria-label="New to-do" required data-testid="day-todo-input">
       <select name="who" style="width:120px" aria-label="For">${WHO_OPTIONS()}</select>
       <button class="btn sm primary" data-testid="day-todo-add">Add</button>
-    </form>
-
-    <h3>Reminders</h3>
-    ${rems.length ? rems.map((r) => `<label class="chk ${r.doneOnDate ? "done" : ""}"><input type="checkbox" data-action="rem-done" data-id="${esc(r.id)}" data-date="${key}" ${r.doneOnDate ? "checked" : ""}><span class="txt">${esc(r.time || "")} ${esc(r.title)}</span></label>`).join("") : '<p class="small muted">No reminders.</p>'}
-    <button class="btn sm" data-action="new-reminder" data-date="${key}">+ Reminder on this date</button>
+    </form>`,
+    })}
+    ${section({
+      id: "day-reminders", icon: "⏰", title: "Reminders", cls: "sub",
+      meta: rems.length ? `${remsLeft} to do${rems.length - remsLeft ? ` · ${rems.length - remsLeft} done` : ""}` : "None",
+      body: `${rems.length ? rems.map((r) => `<label class="chk ${r.doneOnDate ? "done" : ""}"><input type="checkbox" data-action="rem-done" data-id="${esc(r.id)}" data-date="${key}" ${r.doneOnDate ? "checked" : ""}><span class="txt">${esc(r.time || "")} ${esc(r.title)}</span></label>`).join("") : '<p class="small muted">No reminders.</p>'}
+    <button class="btn sm" data-action="new-reminder" data-date="${key}">+ Reminder on this date</button>`,
+    })}
+    </div>
   </div>`;
 }
 
@@ -1066,8 +1137,12 @@ function renderRecipes() {
   const saved = state.savedRecipes.filter((r) => !filt || r.title.toLowerCase().includes(filt));
 
   $("#view-recipes").innerHTML = `
-    <div class="card">
-      <h2>What's in the kitchen</h2>
+    ${renderReadyToCook()}
+
+    ${section({ id: "sec-kitchen", icon: "🧺", title: "What's in the kitchen",
+      open: !state.pantry.length,
+      meta: state.pantry.length ? `${state.pantry.length} item${state.pantry.length > 1 ? "s" : ""} · ${esc(state.pantry.slice(0, 4).join(", "))}${state.pantry.length > 4 ? "…" : ""}` : "Empty: add what you have",
+      body: `
       <div class="kitchen-groups" data-testid="pantry-list">
         ${renderKitchenGroups() || '<span class="muted small">Add what you have at home.</span>'}
       </div>
@@ -1078,15 +1153,13 @@ function renderRecipes() {
       ${quickAddGroup("Quick add common items", STAPLES, pantrySet, "quick-common")}
       ${quickAddGroup("Pandlu (fruits)", FRUITS, pantrySet, "quick-fruits")}
       ${quickAddGroup("Kuragayalu (Telugu vegetables)", TELUGU_VEG, pantrySet, "quick-telugu-veg")}
-      ${quickAddGroup("Aakukuralu (leafy greens)", TELUGU_LEAVES, pantrySet, "quick-telugu-leaves")}
-    </div>
+      ${quickAddGroup("Aakukuralu (leafy greens)", TELUGU_LEAVES, pantrySet, "quick-telugu-leaves")}` })}
 
     ${renderCookByVegetable()}
 
-    ${renderReadyToCook()}
-
-    <div class="card">
-      <h2>Make recipes from these ingredients</h2>
+    ${section({ id: "sec-generate", icon: "✨", title: aiOnline() ? "Make new recipes with AI" : "Find recipes for a meal",
+      meta: "Pick who it's for and the meal", open: ui.aiBusy || ui.results.length > 0,
+      body: `
       <form data-form="generate" class="form-grid">
         <label class="field"><span>For</span>
           <select name="forWhom" data-testid="gen-for" data-action="gen-field">
@@ -1106,8 +1179,7 @@ function renderRecipes() {
           ${ui.aiBusy ? `<span class="spinner" aria-hidden="true"></span><span class="small muted">Asking the AI… this can take up to a minute</span><button type="button" class="btn sm" data-action="cancel-ai" data-testid="cancel-ai">Cancel</button>` : ""}
         </div>
       </form>
-      <p class="small muted" style="margin-top:8px">Every recipe is checked for age safety: no honey, salt, sugar or whole nuts for the baby, soft textures only, chopped (not whole) nuts for the 4-year-old, and nut-free lunchboxes when the school is nut-free.</p>
-    </div>
+      <p class="small muted" style="margin-top:8px">Every recipe is checked for age safety: no honey, salt, sugar or whole nuts for the baby, soft textures only, chopped (not whole) nuts for the 4-year-old, and nut-free lunchboxes when the school is nut-free.</p>` })}
 
     <div data-testid="recipe-results">
       ${ui.aiNotice ? `<div class="notice" data-testid="ai-notice">${esc(ui.aiNotice)}</div>` : ""}
@@ -1116,11 +1188,11 @@ function renderRecipes() {
       <div class="recipe-grid">${ui.results.map((r) => recipeCard(r)).join("")}</div>
     </div>
 
-    <div class="card" style="margin-top:14px">
-      <div class="row between"><h2>Saved recipes (${state.savedRecipes.length})</h2>
-        <input type="text" placeholder="Search saved" value="${esc(ui.savedFilter)}" data-action="saved-filter" style="max-width:220px" aria-label="Search saved recipes"></div>
-      <div class="recipe-grid" data-testid="saved-recipes" style="margin-top:8px">${saved.map((r) => recipeCard(r, { saved: true })).join("") || '<p class="muted small">Save recipes you like and they will work even when offline.</p>'}</div>
-    </div>`;
+    ${section({ id: "sec-saved", icon: "⭐", title: `Saved recipes (${state.savedRecipes.length})`,
+      meta: state.savedRecipes.length ? esc(state.savedRecipes.slice(0, 3).map((r) => r.title).join(", ")) : "Save recipes you like", open: !!filt,
+      body: `
+      ${state.savedRecipes.length ? `<input type="search" placeholder="Search saved" value="${esc(ui.savedFilter)}" data-action="saved-filter" aria-label="Search saved recipes">` : ""}
+      <div class="recipe-grid" data-testid="saved-recipes" style="margin-top:8px">${saved.map((r) => recipeCard(r, { saved: true })).join("") || '<p class="muted small">Save recipes you like and they will work even when offline.</p>'}</div>` })}`;
 }
 
 // Cook by vegetable: tap one or more vegetables and see the book's fries and curries made with them.
@@ -1134,16 +1206,16 @@ function renderCookByVegetable() {
     const r = x.recipe;
     const need = state.pantry.length ? missingForRecipe(r, state.pantry).filter((n) => !picked.has(n)) : [];
     return `<button type="button" class="ready-item" data-action="view-recipe" data-id="${esc(r.id)}" data-testid="cook-recipe" data-dish="${x.dish}">
-      <span class="grow"><strong>${esc(r.title)}</strong>${r.familyFavorite ? " ⭐" : ""}
+      ${art(r, "sm")}<span class="grow"><strong>${esc(r.title)}</strong>${r.familyFavorite ? " ⭐" : ""}
         <span class="small muted">${r.prepMinutes ? `${x.quick ? "⚡ " : ""}${esc(r.prepMinutes)} min` : ""}${applianceNote(r)}${x.all ? "" : ` · has ${esc(x.has.join(", "))}`}${need.length ? ` · need ${esc(need.join(", "))}` : ""}</span></span>
       <span aria-hidden="true">›</span></button>`;
   };
   const list = (label, items, dish) => `<h3>${label} <span class="small muted">(${items.length})</span></h3>
     ${items.length ? `<div class="ready-list" data-testid="cook-${dish}">${items.slice(0, 8).map(row).join("")}</div>`
       : `<p class="small muted" data-testid="cook-${dish}-none">No ${dish} with ${ui.cookVeg.length > 1 ? "these" : "this"} in the recipe book${ui.cookQuick ? ` in ${QUICK_MINUTES} minutes. Untick ⚡ to see slower ones` : ""}.</p>`}`;
-  return `<div class="card" data-testid="cook-by-veg">
-    <h2>Cook by vegetable</h2>
-    <p class="small muted">Tap a vegetable (or two) and pick a fry or a curry.</p>
+  return section({ id: "sec-cook-veg", icon: "🥬", title: "Cook by vegetable", testid: "cook-by-veg", open: ui.cookVeg.length > 0,
+    meta: ui.cookVeg.length ? esc(ui.cookVeg.join(", ")) : "Tap a vegetable, get a fry or a curry",
+    body: `
     <div class="chips" style="margin-top:8px" data-testid="cook-veg-chips">${COOK_VEG.map((v) => {
       const on = picked.has(normName(v));
       return `<button type="button" class="chip add veg${on ? " on" : ""}" aria-pressed="${on}" data-action="cook-veg" data-name="${esc(v)}" data-testid="cook-veg">${on ? "✓ " : ""}${esc(v)}${kitchen.has(normName(v)) ? " 🏠" : ""}</button>`;
@@ -1151,8 +1223,7 @@ function renderCookByVegetable() {
     <label class="chk full" style="min-height:0;margin-top:8px"><input type="checkbox" data-action="cook-quick" ${ui.cookQuick ? "checked" : ""} data-testid="cook-quick"> ⚡ Only ready in ${QUICK_MINUTES} minutes</label>
     ${ui.cookVeg.length ? `<div class="row" style="margin-top:6px"><button type="button" class="btn sm" data-action="cook-veg-clear">Clear</button></div>
       ${list("🍳 Fry (vepudu)", res.fry, "fry")}
-      ${list("🍲 Curry (kura, pulusu, pappu)", res.curry, "curry")}` : ""}
-  </div>`;
+      ${list("🍲 Curry (kura, pulusu, pappu)", res.curry, "curry")}` : ""}` });
 }
 
 // Recipes from the Markdown recipe book that the pantry can make now, or with one item to buy.
@@ -1167,23 +1238,32 @@ function renderReadyToCook() {
   const now = readyToCook(state.pantry, { ...opt, limit: 8 });
   const nearly = readyToCook(state.pantry, { ...opt, maxMissing: 1, limit: 30 }).filter((x) => x.missing.length === 1).slice(0, 8);
   const row = (x, testid = "ready-recipe") => `<button type="button" class="ready-item" data-action="view-recipe" data-id="${esc(x.recipe.id)}" data-testid="${testid}">
-      <span class="grow"><strong>${esc(x.recipe.title)}</strong>${x.recipe.familyFavorite ? " ⭐" : ""} <span aria-hidden="true">${tagIcons(x.recipe)}</span>
+      ${art(x.recipe, "sm")}<span class="grow"><strong>${esc(x.recipe.title)}</strong>${x.recipe.familyFavorite ? " ⭐" : ""} <span aria-hidden="true">${tagIcons(x.recipe)}</span>
         <span class="small muted">${esc(whoLabel(x.recipe.forWhom, state.settings))} · ${esc(x.recipe.cuisine || x.recipe.mealType)}${x.missing.length ? ` · need ${esc(x.missing.join(", "))}` : ""}${x.fromFreezer?.length ? ` · 🧊 from the freezer: ${esc(x.fromFreezer.join(", "))}` : ""}</span></span>
       <span aria-hidden="true">›</span></button>`;
   const names = cuisinePicks().map((id) => CUISINES.find((x) => x.id === id).label.replace(/ \(.*\)/, ""));
-  const top = picks.length ? `<div class="card" data-testid="top-picks">
-    <h2>Top picks for you</h2>
-    <p class="small muted">Easy recipes that use the vegetables in your kitchen${names.length ? `, from ${esc(names.join(", "))}` : ""}. ${names.length ? "Change cuisines" : "Pick your cuisines"} in <button type="button" class="linkish" data-action="open-profile">👤 Profile</button>.</p>
-    <div class="ready-list">${picks.map((x) => row(x, "top-pick")).join("")}</div>
-    ${ui.morePicks || picks.length < 5 ? "" : '<button type="button" class="btn sm ghost" data-action="more-picks" data-testid="more-picks" style="margin-top:8px">Show more</button>'}
+  // Top picks are picture cards in a row you swipe sideways, like a recipe app's "for you" shelf.
+  const pick = (x) => {
+    const r = x.recipe;
+    const a = foodArt(r);
+    return `<button type="button" class="pick-card" data-action="view-recipe" data-id="${esc(r.id)}" data-testid="top-pick">
+      <span class="pick-art tone-${a.tone}" aria-hidden="true">${a.emoji}${r.familyFavorite ? '<i class="fav">⭐</i>' : ""}${r.prepMinutes ? `<i class="time">${esc(r.prepMinutes)} min</i>` : ""}</span>
+      <strong>${esc(r.title)}</strong>
+      <span class="small muted">${esc(whoLabel(r.forWhom, state.settings))}${x.missing.length ? ` · need ${esc(x.missing.join(", "))}` : " · all in the kitchen"}</span>
+    </button>`;
+  };
+  const top = picks.length ? `<div class="card picks" data-testid="top-picks">
+    <div class="row between"><h2>🌟 Top picks for you</h2>${ui.morePicks || picks.length < 5 ? "" : '<button type="button" class="btn sm ghost" data-action="more-picks" data-testid="more-picks">Show more</button>'}</div>
+    <p class="small muted">Easy recipes with the vegetables in your kitchen${names.length ? `, from ${esc(names.join(", "))}` : ""}. ${names.length ? "Change cuisines" : "Pick your cuisines"} in <button type="button" class="linkish" data-action="open-profile">👤 Profile</button>.</p>
+    <div class="pick-row">${picks.map(pick).join("")}</div>
   </div>` : "";
-  return `${top}${renderLeftoverIdeas()}<div class="card" data-testid="ready-to-cook">
-    <h2>Ready to cook from your kitchen</h2>
+  return `${top}${renderLeftoverIdeas()}${section({ id: "sec-ready", icon: "🍳", title: "Ready to cook from your kitchen", testid: "ready-to-cook",
+    meta: `${now.length} ready now${nearly.length ? ` · ${nearly.length} need one thing` : ""}`, open: !!trouble,
+    body: `
     ${trouble}
-    ${now.length ? `<div class="ready-list">${now.map((x) => row(x)).join("")}</div>` : `<p class="small muted">${state.pantry.length ? "Nothing in the recipe book can be made with only what's in the kitchen yet." : "Add what you have above and recipes you can make right away show up here."}</p>`}
+    ${now.length ? `<div class="ready-list">${now.map((x) => row(x)).join("")}</div>` : `<p class="small muted">${state.pantry.length ? "Nothing in the recipe book can be made with only what's in the kitchen yet." : "Add what you have in the kitchen and recipes you can make right away show up here."}</p>`}
     ${nearly.length ? `<h3>Just one thing to buy</h3><div class="ready-list" data-testid="nearly-ready">${nearly.map((x) => row(x)).join("")}</div>` : ""}
-    <p class="small muted" style="margin-top:8px">${LIBRARY.length} recipes in the family recipe book (the <code>recipes/</code> folder in the repository).</p>
-  </div>`;
+    <p class="small muted" style="margin-top:8px">${LIBRARY.length} recipes in the family recipe book (the <code>recipes/</code> folder in the repository).</p>` })}`;
 }
 
 // Leftover makeovers: when yesterday's or today's plan has a curry, what it can turn into.
@@ -1193,7 +1273,7 @@ function renderLeftoverIdeas() {
   const recent = [...leftoversFrom(addDays(TODAY, -1)), ...leftoversFrom(TODAY)];
   const fromPlan = recent.map((l) => ({ l, list: leftoverRecipesFor(l.kind, { cuisines }) })).filter((x) => x.list.length);
   const item = (r) => `<button type="button" class="ready-item" data-action="view-recipe" data-id="${esc(r.id)}" data-testid="leftover-recipe">
-      <span class="grow"><strong>${esc(r.title)}</strong> <span aria-hidden="true">${tagIcons(r)}</span>
+      ${art(r, "sm")}<span class="grow"><strong>${esc(r.title)}</strong> <span aria-hidden="true">${tagIcons(r)}</span>
         <span class="small muted">${esc(whoLabel(r.forWhom, state.settings))} · ${esc(r.cuisine || r.mealType)}${r.prepMinutes ? " · " + esc(r.prepMinutes) + " min" : ""}</span></span>
       <span aria-hidden="true">›</span></button>`;
   if (fromPlan.length) {
@@ -1203,8 +1283,8 @@ function renderLeftoverIdeas() {
   }
   const all = LIBRARY.filter((r) => r.leftover).sort((a, b) => inCuisines(b, cuisines) - inCuisines(a, cuisines)).slice(0, 4);
   if (!all.length) return "";
-  return `<details class="card" data-testid="leftover-ideas"><summary><strong>♻️ Got leftover curry?</strong> <span class="small muted">Roti quesadillas, kathi rolls, kari dosa and more</span></summary>
-    <div class="ready-list" style="margin-top:8px">${all.map(item).join("")}</div></details>`;
+  return section({ id: "sec-leftovers", icon: "♻️", title: "Got leftover curry?", testid: "leftover-ideas", meta: "Roti quesadillas, kathi rolls, kari dosa and more",
+    body: `<div class="ready-list">${all.map(item).join("")}</div>` });
 }
 
 // Estimated nutrition for one serving, worked out from the ingredients. For the baby's and the
@@ -1236,7 +1316,9 @@ function recipeCard(r, { saved = false } = {}) {
   const isSaved = state.savedRecipes.some((s) => s.id === r.id || s.title === r.title);
   const issues = [...safety.errors, ...safety.warnings];
   const methods = methodsFor(r, appliancesOwned());
+  const a = foodArt(r);
   return `<article class="card recipe" data-testid="recipe-card" data-recipe-id="${esc(r.id)}" data-safe="${safety.safe}">
+    <div class="recipe-art tone-${a.tone}" aria-hidden="true"><span>${a.emoji}</span>${r.prepMinutes ? `<i>⏱️ ${esc(r.prepMinutes)} min</i>` : ""}</div>
     <div class="row between"><h3>${esc(r.title)}</h3><span>${r.familyFavorite ? '<span class="pill warn" data-testid="family-favorite">⭐ Family favorite</span> ' : ""}${whoPill(r.forWhom)}</span></div>
     ${hasNuts && !nutFreeOn() ? `<div class="small muted" data-testid="contains-nuts">🥜 Contains nuts${r.nutFreeSwap ? ". Nut-free swap: " + esc(r.nutFreeSwap) : ""}</div>` : ""}
     <div class="small muted">${r.cuisine ? esc(r.cuisine) + " · " : ""}${esc(r.mealType || "")}${r.prepMinutes ? " · " + esc(r.prepMinutes) + " min" : ""}${r.busyMorning ? ` · <span data-testid="busy-morning-tag">${r.busyMorning === "make-ahead" ? "🌙 Make the night before" : "⏱️ No cooking"}</span>` : ""}${r.texture ? " · " + esc(r.texture) : ""}${r.source === "ai" ? " · ✨ AI" : r.source === "library" ? " · Family recipe book" : ""}</div>
@@ -1404,6 +1486,7 @@ function shopRow(i) {
     data: `data-kind="shop" data-id="${esc(i.id)}" data-name="${esc(i.name)}"`,
     leftLabel: i.bought ? "Put back" : "Got it",
     check: `<input type="checkbox" class="big-check" data-action="shop-toggle" data-id="${esc(i.id)}" ${i.bought ? "checked" : ""} aria-label="Got ${esc(i.name)}">`,
+    pic: art(i.name, "row", AISLE_ICONS[aisleFor(i.name)]),
     body: `<span class="name">${esc(i.label || i.name)}</span>${meta ? `<span class="meta" data-testid="shop-qty-label">${meta}</span>` : ""}`,
     more: `<button type="button" class="iconbtn lg" data-action="shop-more" data-id="${esc(i.id)}" aria-label="Details for ${esc(i.name)}" data-testid="shop-more">⋯</button>`,
   });
@@ -1445,8 +1528,7 @@ function renderShopping() {
       </details>` : ""}
       ${items.length ? '<p class="small muted swipe-hint">Tip: swipe an item right when you have it, or left to delete.</p>' : ""}
     </div>
-    ${ui.storeMode ? "" : `<div class="card">
-      <h2>Fill the list</h2>
+    ${ui.storeMode ? "" : section({ id: "sec-fill", icon: "📋", title: "Fill the list", meta: "From the meal plan, copy as text, stores", body: `
       <div class="row">
         <button class="btn" data-action="plan-to-shopping" data-testid="plan-to-shopping">From next 7 days of meals</button>
         <button class="btn" data-action="copy-list" data-testid="copy-list">Copy list as text</button>
@@ -1454,8 +1536,7 @@ function renderShopping() {
       <details class="shop-extra" style="margin-top:10px"><summary>Stores</summary>
         <div class="chips" style="margin-top:8px">${state.stores.map((s) => `<span class="chip">${esc(s)}<button data-action="store-del" data-store="${esc(s)}" aria-label="Remove ${esc(s)}">✕</button></span>`).join("")}</div>
         <form data-form="store-add" class="row" style="margin-top:8px"><input type="text" name="store" class="grow" placeholder="Add a store" required><button class="btn sm">Add</button></form>
-      </details>
-    </div>`}
+      </details>` })}
     <button class="fab" data-action="shop-fab" data-testid="shop-fab" aria-label="Add item"><span aria-hidden="true">＋</span> Add item</button>`;
 }
 
@@ -1610,6 +1691,7 @@ function frozenRow(i) {
     data: `data-kind="frozen" data-id="${esc(i.id)}" data-name="${esc(i.name)}"`,
     leftLabel: "Used one",
     check: `<input type="checkbox" class="big-check" data-action="frozen-use" data-id="${esc(i.id)}" aria-label="Used one ${esc(i.name)}">`,
+    pic: art(i.name, "row", "🧊"),
     body: `<span class="name">${esc(i.name)}${old ? ' <span class="pill warn" data-testid="frozen-old">Use soon</span>' : ""}</span>${meta ? `<span class="meta" data-testid="frozen-meta">${meta}</span>` : ""}`,
     more: `<button type="button" class="iconbtn lg" data-action="frozen-more" data-id="${esc(i.id)}" aria-label="Edit ${esc(i.name)}" data-testid="frozen-more">⋯</button>`,
   });
@@ -1707,8 +1789,7 @@ function renderReminders(prefillDate) {
     </div>`;
   const notifState = typeof Notification === "undefined" ? "unsupported" : Notification.permission;
   $("#view-reminders").innerHTML = `
-    <div class="card">
-      <h2>New reminder</h2>
+    ${section({ id: "sec-rem-new", icon: "➕", title: "New reminder", meta: "School events, vaccines, birthdays", open: !upcoming.length && !overdue.length, body: `
       <form data-form="rem-add" class="form-grid">
         <label class="field full"><span>What</span><input type="text" name="title" required maxlength="120" placeholder="e.g. School annual day, 9-month vaccine, PTM" data-testid="rem-title"></label>
         <label class="field"><span>Date</span><input type="date" name="date" required value="${esc(prefillDate || TODAY)}" data-testid="rem-date"></label>
@@ -1717,8 +1798,7 @@ function renderReminders(prefillDate) {
         <label class="field"><span>Repeat</span><select name="repeat" data-testid="rem-repeat"><option value="none">Does not repeat</option><option value="daily">Daily</option><option value="weekdays">School days (Mon to Fri)</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option></select></label>
         <label class="field full"><span>Notes</span><input type="text" name="notes" maxlength="200" placeholder="Optional"></label>
         <div class="full"><button class="btn primary" data-testid="rem-add">Add reminder</button></div>
-      </form>
-    </div>
+      </form>` })}
     ${overdue.length ? `<div class="card" data-testid="overdue"><h2>⚠️ Missed</h2>${overdue.map(row).join("")}</div>` : ""}
     <div class="card" data-testid="upcoming">
       <div class="row between"><h2>Coming up</h2>
@@ -1771,12 +1851,20 @@ document.addEventListener("click", (e) => {
       else if (!sameMonth || !$("#cal-day")) render();
       else {
         $(`[data-testid=cal-day-${prev}]`)?.classList.remove("sel");
-        $(`[data-testid=cal-day-${ui.selected}]`)?.classList.add("sel");
+        const sel = $(`[data-testid=cal-day-${ui.selected}]`);
+        sel?.classList.add("sel");
+        if (sel) $("[data-testid=cal-grid]").dataset.wk = sel.dataset.wk;
         $("#cal-day").innerHTML = renderDayPanel(ui.selected);
       }
       break;
     }
-    case "month": ui.month = addMonths(ui.month, Number(el.dataset.delta)); render(); break;
+    case "month":
+      // In the week view the arrows step a week at a time and the day moves with them.
+      if (ui.calView === "week") ui.month = ui.selected = addDays(ui.selected, 7 * Number(el.dataset.delta));
+      else ui.month = addMonths(ui.month, Number(el.dataset.delta));
+      render();
+      break;
+    case "cal-view": setCalView(ui.calView === "week" ? "month" : "week"); ui.month = ui.selected; render(); break;
     case "goto-today": ui.month = TODAY; ui.selected = TODAY; render(); break;
     case "approve":
       if (Object.keys(slotIssues(ui.selected)).length && ui.confirmUnsafe !== ui.selected) {
@@ -2139,13 +2227,15 @@ document.addEventListener("click", (e) => {
   const d = e.target.closest?.("summary")?.parentElement;
   const g = d?.dataset?.group;
   if (!g || e.target.closest("button, input, select, a")) return;
-  if (d.open) ui.openGroups.delete(g); else ui.openGroups.add(g);
+  remember(g, !d.open);
 }, true);
 document.addEventListener("toggle", (e) => {
   const g = e.target?.dataset?.group;
-  if (!g) return;
-  if (e.target.open) ui.openGroups.add(g); else ui.openGroups.delete(g);
+  if (g) remember(g, e.target.open);
 }, true);
+function remember(g, open) {
+  if (open) { ui.openGroups.add(g); ui.closedGroups.delete(g); } else { ui.openGroups.delete(g); ui.closedGroups.add(g); }
+}
 
 document.addEventListener("toggle", (e) => { if (e.target?.dataset && "cart" in e.target.dataset) ui.cartOpen = e.target.open; }, true);
 
