@@ -195,6 +195,54 @@ test("E2E TEL-01 Telugu vegetables can be added to the kitchen by their Telugu n
   await ctx.close();
 });
 
+test("E2E COOK-01 a time-short cook taps bendakaya and gets a quick fry or curry, then adds potato", async () => {
+  const { page, ctx, errors } = await open(mock, { viewport: { width: 390, height: 844 } });
+  await tid(page, "tab-recipes").click();
+  const card = tid(page, "cook-by-veg");
+  assert.ok(await tid(page, "cook-quick").isChecked(), "quick is on by default");
+  await card.getByRole("button", { name: "Bendakaya (okra)" }).click();
+  const fries = await tid(page, "cook-fry").locator("[data-testid=cook-recipe]").allInnerTexts();
+  const curries = await tid(page, "cook-curry").locator("[data-testid=cook-recipe]").allInnerTexts();
+  assert.ok(fries.length && fries.every((t) => /⚡ (1\d|20|\d) min/.test(t)), fries.join(" | "));
+  assert.ok(fries.some((t) => /bendakaya vepudu/i.test(t)), fries.join(" | "));
+  assert.ok(curries.some((t) => /Bendakaya tomato kura/.test(t)), curries.join(" | "));
+  // Two vegetables: the recipe with both comes first.
+  await card.getByRole("button", { name: "Bangaladumpa (potato)" }).click();
+  assert.match(await tid(page, "cook-fry").locator("[data-testid=cook-recipe]").first().innerText(), /Aloo bendakaya vepudu/);
+  await tid(page, "cook-fry").locator("[data-testid=cook-recipe]").first().click();
+  assert.match(await page.locator("dialog[open]").innerText(), /Aloo bendakaya vepudu/);
+  await page.keyboard.press("Escape");
+  // Unticking quick shows the slower ones too.
+  const quickCount = await tid(page, "cook-recipe").count();
+  await tid(page, "cook-quick").uncheck();
+  assert.ok(await tid(page, "cook-recipe").count() > quickCount, "slower recipes appear");
+  // Gongura has no fry: the card says so instead of showing nothing.
+  await card.getByRole("button", { name: "Clear" }).click();
+  await tid(page, "cook-quick").check();
+  await card.getByRole("button", { name: /Gongura/ }).click();
+  assert.ok(await tid(page, "cook-fry-none").count(), "no fry message");
+  assert.match(await tid(page, "cook-curry").innerText(), /Gongura pappu/);
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, "no sideways scroll");
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test("E2E COOK-02 ladies finger typed into the kitchen is the okra chip, and its recipes say what else to buy", async () => {
+  const { page, ctx, errors } = await open();
+  await tid(page, "tab-recipes").click();
+  await tid(page, "pantry-input").fill("ladies finger");
+  await tid(page, "pantry-add").click();
+  const chip = tid(page, "cook-by-veg").getByRole("button", { name: /Bendakaya \(okra\)/ });
+  assert.match(await chip.innerText(), /🏠/, "marked as in the kitchen");
+  await chip.click();
+  assert.equal(await chip.getAttribute("aria-pressed"), "true");
+  const rows = await tid(page, "cook-recipe").allInnerTexts();
+  assert.ok(rows.length >= 2 && rows.every((t) => /okra|bendakaya/i.test(t)), rows.join(" | "));
+  assert.ok(rows.some((t) => /need .*potato/.test(t)), "a missing item is named: " + rows.join(" | "));
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
 test("E2E REC-10 double-clicking Get recipes sends one request", async () => {
   const { page, ctx } = await open();
   let calls = 0;
