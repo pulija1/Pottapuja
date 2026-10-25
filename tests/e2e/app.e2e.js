@@ -960,6 +960,39 @@ test("E2E AIKEY-05 a rejected key falls back to the recipe book and says to chec
   await ctx.close();
 });
 
+test("E2E APPL-01 appliances in the profile: recipes show the air fryer and oven methods, and two dishes share the baskets", async () => {
+  const { page, ctx, errors } = await open();
+  await tid(page, "profile").click();
+  const section = tid(page, "appliances-section");
+  await section.getByText("Two baskets (Ninja dual zone)").click();
+  await tid(page, "has-oven").check();
+  await tid(page, "save-appliances").click();
+  assert.match(await tid(page, "appliances-section").locator("summary").innerText(), /Air fryer, Oven/);
+  await page.keyboard.press("Escape");
+
+  await tid(page, "tab-recipes").click();
+  assert.match(await tid(page, "gen-quick").locator("..").innerText(), /air fryer and oven count/);
+  await tid(page, "pantry-input").fill("eggs, whole wheat bread, milk, almond powder, banana, butter");
+  await tid(page, "pantry-add").click();
+  await tid(page, "ready-to-cook").getByText("French toast sticks", { exact: false }).click();
+  const dialog = page.locator("dialog[open]");
+  await dialog.waitFor();
+  assert.match(await dialog.getByTestId("appliance-methods").innerText(), /Air fryer \(two baskets\): 8 min at 180°C/);
+  await page.keyboard.press("Escape");
+
+  await tid(page, "tab-calendar").click();
+  await cell(page, TOMORROW).click();
+  await planSlot(page, TOMORROW, "kid_breakfast", "French toast sticks with cardamom and almond powder");
+  await planSlot(page, TOMORROW, "kid_lunchbox", "Spinach and cheddar egg muffins");
+  const morning = tid(page, "basket-pair").filter({ hasText: "Morning" });
+  const text = await morning.innerText();
+  assert.match(text, /Basket 1: Spinach and cheddar egg muffins · 12 min at 160°C/);
+  assert.match(text, /Basket 2: French toast sticks/);
+  assert.match(text, /Sync/);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
 test("E2E CUI-01 cuisines picked in the profile steer suggestions and top picks; yesterday's curry becomes a roti quesadilla", async () => {
   const ctx = await newContext();
   const seed = { version: 1, pantry: ["Bendakaya (okra)", "onion", "tomato", "rice", "roti", "cheese", "curry leaves", "mustard seeds"], frozen: [{ id: "f1", name: "Frozen peas", qty: 2, unit: "packs", date: "2026-10-01" }],

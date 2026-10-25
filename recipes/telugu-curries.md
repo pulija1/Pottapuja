@@ -204,6 +204,7 @@ How to read and edit this file: see [README.md](README.md).
 - **Meal:** dinner
 - **Cuisine:** Telugu
 - **Time:** 25 min
+- **Air fryer:** 15 min at 200°C. Toss the okra with 2 tsp of the oil and spread it out (split 250 g between both baskets), shaking every 5 minutes until crisp and not sticky. Take the kid's portion out, toss the rest with turmeric, chilli powder and salt, then stir it into the mustard, jeera, curry leaf and onion tadka in a pan for 1 minute.
 
 **Ingredients**
 
@@ -235,6 +236,7 @@ How to read and edit this file: see [README.md](README.md).
 - **Cuisine:** Telugu
 - **Time:** 25 min
 - **Family favorite:** yes
+- **Air fryer:** 15 min at 200°C. Toss the boiled potato cubes with 2 tsp oil and turmeric and air fry until crisp at the edges, shaking at 8 minutes. Take the kid's portion out, toss the rest with chilli powder and salt, and stir into the tadka (mustard, dals, curry leaves, golden onion) in a pan.
 
 **Ingredients**
 
@@ -265,6 +267,7 @@ How to read and edit this file: see [README.md](README.md).
 - **Meal:** dinner
 - **Cuisine:** Telugu
 - **Time:** 30 min
+- **Air fryer:** 18 min at 190°C. Toss the thin dondakaya rounds with 2 tsp oil and spread them over both baskets, shaking every 5 minutes until browned and tender. Take the kid's portion out, then season the rest and toss it into the tadka in a pan.
 
 **Ingredients**
 
@@ -295,6 +298,7 @@ How to read and edit this file: see [README.md](README.md).
 - **Meal:** dinner
 - **Cuisine:** Telugu
 - **Time:** 25 min
+- **Air fryer:** 14 min at 200°C. Toss the raw banana cubes with 2 tsp oil and turmeric and air fry, shaking at 7 minutes, until golden. Take the kid's portion out, season the rest and toss it into the tadka in a pan.
 
 **Ingredients**
 
@@ -614,6 +618,7 @@ For a busy evening: one vegetable, a tadka, done. Serve with rice and pappu or p
 - **Cuisine:** Telugu
 - **Time:** 15 min
 - **Dish:** fry
+- **Air fryer:** 12 min at 200°C. Toss the okra with 2 tsp oil, spread it over both baskets and shake every 4 minutes until crisp. Take the kid's portion out, then toss the rest in the mustard and curry leaf tadka with turmeric, chilli and salt.
 
 **Ingredients**
 
@@ -641,6 +646,7 @@ For a busy evening: one vegetable, a tadka, done. Serve with rice and pappu or p
 - **Cuisine:** Telugu
 - **Time:** 20 min
 - **Dish:** fry
+- **Air fryer:** 14 min at 200°C. Both baskets at once: the microwaved potato cubes with 1 tsp oil in basket 1 for 14 minutes, the okra with 1 tsp oil in basket 2 for 12 minutes, with Sync and a shake halfway. Take the kid's portion out, then toss everything into the mustard and curry leaf tadka with turmeric, chilli and salt.
 
 **Ingredients**
 
@@ -668,6 +674,7 @@ For a busy evening: one vegetable, a tadka, done. Serve with rice and pappu or p
 - **Cuisine:** Telugu
 - **Time:** 15 min
 - **Dish:** fry
+- **Air fryer:** 10 min at 200°C. Lay the dusted rounds in one layer over both baskets (kid's plain rounds in one corner), brush with oil and turn at 5 minutes, until soft inside and crisp outside.
 
 **Ingredients**
 
@@ -694,6 +701,7 @@ For a busy evening: one vegetable, a tadka, done. Serve with rice and pappu or p
 - **Cuisine:** Telugu
 - **Time:** 20 min
 - **Dish:** fry
+- **Air fryer:** 14 min at 190°C. Toss the slices with 2 tsp oil and turmeric, spread over both baskets and shake every 5 minutes. Take the kid's portion out, then toss the rest in the mustard tadka with chilli powder, roasted gram powder and salt.
 
 **Ingredients**
 
@@ -749,6 +757,7 @@ For a busy evening: one vegetable, a tadka, done. Serve with rice and pappu or p
 - **Cuisine:** Telugu
 - **Time:** 20 min
 - **Dish:** fry
+- **Air fryer:** 12 min at 190°C. After squeezing, toss with 2 tsp oil and spread thin over both baskets, shaking every 4 minutes until crisp. Add the onion for the last 4 minutes, then season the adults' share.
 
 **Ingredients**
 
@@ -885,6 +894,7 @@ For a busy evening: one vegetable, a tadka, done. Serve with rice and pappu or p
 - **Cuisine:** Telugu
 - **Time:** 20 min
 - **Dish:** fry
+- **Air fryer:** 12 min at 200°C. Toss the boiled, coated rounds with 2 tsp oil and air fry in one layer, turning at 6 minutes, until crisp on both sides.
 
 **Ingredients**
 
@@ -936,6 +946,7 @@ For a busy evening: one vegetable, a tadka, done. Serve with rice and pappu or p
 - **Cuisine:** Telugu
 - **Time:** 15 min
 - **Dish:** fry
+- **Air fryer:** 12 min at 200°C. Toss the microwaved cubes with 2 tsp oil and air fry, shaking at 6 minutes, until golden. Take the kid's portion out, then toss the rest in the tadka with chilli, turmeric and salt.
 
 **Ingredients**
 
@@ -1042,6 +1053,7 @@ For a busy evening: one vegetable, a tadka, done. Serve with rice and pappu or p
 - **Cuisine:** Telugu
 - **Time:** 20 min
 - **Dish:** fry
+- **Air fryer:** 12 min at 200°C. Toss the drained yam cubes with 2 tsp oil and air fry, shaking at 6 minutes, until golden. Take the kid's share out, then add salt and chilli powder.
 
 **Ingredients**
 
@@ -1094,6 +1106,7 @@ For a busy evening: one vegetable, a tadka, done. Serve with rice and pappu or p
 - **Cuisine:** Telugu
 - **Time:** 20 min
 - **Dish:** fry
+- **Air fryer:** 10 min at 200°C. Toss the microwaved florets with 2 tsp oil and turmeric and air fry, shaking at 5 minutes; stir in the peas at the end. Take the kid's portion out, then toss the rest in the tadka with chilli, coriander powder and salt.
 
 **Ingredients**
 
@@ -1121,6 +1134,7 @@ For a busy evening: one vegetable, a tadka, done. Serve with rice and pappu or p
 - **Cuisine:** Telugu
 - **Time:** 20 min
 - **Dish:** fry
+- **Air fryer:** 12 min at 200°C. Both baskets at once: microwaved potato in basket 1 for 12 minutes, capsicum in basket 2 for 8 minutes, each with 1 tsp oil, with Sync. Take the kid's portion out, then toss in the tadka with chilli, turmeric and salt.
 
 **Ingredients**
 
@@ -1148,6 +1162,7 @@ For a busy evening: one vegetable, a tadka, done. Serve with rice and pappu or p
 - **Cuisine:** Telugu
 - **Time:** 20 min
 - **Dish:** fry
+- **Air fryer:** 15 min at 200°C. Both baskets at once: potato cubes in basket 1 for 15 minutes, brinjal cubes in basket 2 for 10 minutes, each tossed with 1 tsp oil and turmeric, with Sync. Take the kid's portion out, then fold into the onion tadka with chilli and salt.
 
 **Ingredients**
 

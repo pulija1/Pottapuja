@@ -3,6 +3,7 @@
 // drop the same unsafe answers.
 
 import { checkForAudience } from "./safety.js";
+import { appliancePrompt } from "./appliances.js";
 
 export const MODEL = "claude-opus-5-5";
 
@@ -52,7 +53,7 @@ export const RECIPE_LIST_SCHEMA = obj({
 
 export const QUICK_MINUTES = 20;
 
-export function buildPrompt({ ingredients, forWhom, mealType, notes, count, schoolNutFree, quick }) {
+export function buildPrompt({ ingredients, forWhom, mealType, notes, count, schoolNutFree, quick, appliances = [] }) {
   const who = forWhom === "both" ? "the baby and the 4-year-old (mix of both)" : forWhom === "baby" ? "the 8-month-old baby" : forWhom === "kid" ? "the 4-year-old" : "the whole family";
   return [
     `Ingredients we have: ${ingredients.join(", ") || "(nothing listed, suggest staples)"}.`,
@@ -60,6 +61,7 @@ export function buildPrompt({ ingredients, forWhom, mealType, notes, count, scho
     mealType ? `Meal: ${mealType}.` : "",
     quick ? `It must be quick: ready in ${QUICK_MINUTES} minutes or less, with few ingredients and short steps.` : "",
     schoolNutFree ? "The school is nut-free." : "",
+    appliancePrompt(appliances),
     notes ? `Extra notes from the parent: ${notes}` : "",
   ].filter(Boolean).join("\n");
 }
@@ -78,7 +80,8 @@ export function parseRequest(body) {
   const quick = b.quick === true;
   const count = quick ? 1 : Math.min(6, Math.max(1, Number.parseInt(b.count, 10) || 4));
   const schoolNutFree = b.schoolNutFree === true;
-  return { ingredients, forWhom, mealType, notes, count, schoolNutFree, quick };
+  const appliances = [...new Set((Array.isArray(b.appliances) ? b.appliances : []).filter((a) => ["airFryer", "airFryerDual", "oven"].includes(a)))];
+  return { ingredients, forWhom, mealType, notes, count, schoolNutFree, quick, appliances };
 }
 
 // Attach safety results; drop recipes that fail the age rules.

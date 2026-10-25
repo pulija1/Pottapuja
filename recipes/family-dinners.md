@@ -346,6 +346,7 @@ How to read and edit this file: see [README.md](README.md).
 - **Cuisine:** Tex-Mex
 - **Time:** 45 min
 - **Good for:** 🥛 Milk/dairy
+- **Oven:** 45 min at 190°C (375°F), as in the steps. With an air fryer, roast the sweet potato cubes in it (15 min at 200°C) while you fill the tortillas.
 
 **Ingredients**
 

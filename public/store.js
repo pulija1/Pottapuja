@@ -16,7 +16,7 @@ export function defaultState() {
     frozen: [],        // what's in the freezer: { id, name, qty, unit, date (when it went in), note }
     reminders: [],
     notified: {},
-    settings: { schoolNutFree: false, kidName: "", babyName: "" },
+    settings: { schoolNutFree: false, kidName: "", babyName: "", airFryer: "", oven: false },   // airFryer: "dual" (two baskets), "single" or ""
     updatedAt: null,   // last change made in the app; family sync uses it to tell a used phone from a new one
   };
 }

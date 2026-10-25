@@ -159,6 +159,8 @@ How to read and edit this file: see [README.md](README.md).
 - **Cuisine:** South Indian
 - **Time:** 15 min
 - **Texture:** mashed
+- **Air fryer:** 15 min at 180°C. Cut the sweet potato in ½-inch cubes, toss with a few drops of ghee (no salt) and air fry, shaking halfway, until very soft inside. Peel off any crisp edges and mash with warm water.
+- **Oven:** 40 min at 200°C, whole and pricked with a fork, until very soft. Scoop out and mash.
 
 **Ingredients**
 
@@ -638,6 +640,7 @@ How to read and edit this file: see [README.md](README.md).
 - **Time:** 15 min
 - **Texture:** mashed
 - **Good for:** 🥚 Egg
+- **Air fryer:** 15 min. Both baskets at once: the egg in basket 1 at 135°C for 15 minutes (then cold water, fully cooked), and ½-inch sweet potato cubes with the butter in basket 2 at 180°C for 15 minutes until very soft. Mash together with warm water.
 
 **Ingredients**
 

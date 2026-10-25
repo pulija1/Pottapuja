@@ -3,9 +3,10 @@
 // format is forgiving. See recipes/README.md for the format. Pure functions, no I/O here.
 
 import { isNutIngredient } from "./safety.js";
+import { parseApplianceLine } from "./appliances.js";
 
 // The files the app loads, in this order. A new file must be added here to be loaded.
-export const RECIPE_FILES = ["kid-4-years.md", "baby-8-months.md", "family-dinners.md", "telugu-curries.md", "leftover-makeovers.md"];
+export const RECIPE_FILES = ["kid-4-years.md", "baby-8-months.md", "family-dinners.md", "telugu-curries.md", "leftover-makeovers.md", "air-fryer-and-oven.md"];
 
 const WHO = {
   baby: "baby", "8-month-old": "baby", "8 month old": "baby", "8 months": "baby", infant: "baby",
@@ -133,6 +134,10 @@ export function parseRecipeMarkdown(md, file = "") {
       if (each) recipe.servingNote = each;
     }
     if (r.fields["nut-free swap"]) recipe.nutFreeSwap = r.fields["nut-free swap"];
+    const airFryer = parseApplianceLine(r.fields["air fryer"] || r.fields["air-fryer"] || r.fields.airfryer);
+    if (airFryer) recipe.airFryer = airFryer;
+    const oven = parseApplianceLine(r.fields.oven);
+    if (oven) recipe.oven = oven;
     if (r.fields.leftover) recipe.leftover = r.fields.leftover.toLowerCase().split(/\s*(?:,|\bor\b|·)\s*/).map((x) => x.trim()).filter(Boolean);
     const declared = String(r.fields["good for"] || "").toLowerCase();
     const tags = new Set(nutritionTags(recipe));
@@ -231,6 +236,8 @@ export function recipeToMarkdown(r) {
   if (r.dish) out.push(`- **Dish:** ${r.dish}`);
   if (tags.length) out.push(`- **Good for:** ${tags.map((t) => TAG_LABELS[t]).join(" · ")}`);
   if (r.nutFreeSwap) out.push(`- **Nut-free swap:** ${r.nutFreeSwap}`);
+  if (r.airFryer?.text) out.push(`- **Air fryer:** ${r.airFryer.text}`);
+  if (r.oven?.text) out.push(`- **Oven:** ${r.oven.text}`);
   if (r.leftover?.length) out.push(`- **Leftover:** ${r.leftover.join(", ")}`);
   if (r.familyFavorite) out.push(`- **Family favorite:** yes`);
   if (r.id && r.id !== "lib-" + slug(r.title)) out.push(`- **ID:** ${r.id}`);
