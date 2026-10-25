@@ -183,6 +183,7 @@ const FOODS = [
   F(/apple/, [52, 0.3, 14, 2.4, 0.2, 0.12, 6], { cup: 125, pc: 180 }),
   F(/pear/, [57, 0.4, 15, 3.1, 0.1, 0.2, 9], { cup: 140, pc: 180 }),
   F(/plum/, [46, 0.7, 11, 1.4, 0.3, 0.17, 6], { pc: 66 }),
+  F(/chikoo|chiku|sapota|sapodilla/, [83, 0.4, 20, 5.3, 1.1, 0.8, 21], { cup: 240, pc: 100 }),
   F(/mango pulp/, [70, 0.5, 18, 1, 0.2, 0.3, 10], { cup: 250 }),
   F(/mango/, [60, 0.8, 15, 1.6, 0.4, 0.16, 11], { cup: 165, pc: 200 }),
   F(/papaya/, [43, 0.5, 11, 1.7, 0.3, 0.25, 20], { cup: 145 }),
@@ -211,7 +212,7 @@ const FOODS = [
   F(/mustard/, [508, 26, 28, 12, 36, 9.2, 266], { cup: 160 }),
   F(/fenugreek seeds|methi seeds|menthulu/, [323, 23, 58, 25, 6.4, 33.5, 176], { cup: 180 }),
   F(/coriander (powder|seeds)|dhania/, [298, 12, 55, 42, 18, 16.3, 709], { cup: 96 }),
-  F(/chilli powder|chili powder|paprika|cayenne/, [282, 13.5, 50, 35, 14, 17.3, 330], { cup: 130 }),
+  F(/chilli powder|chili powder|chilli flakes|chili flakes|paprika|cayenne/, [282, 13.5, 50, 35, 14, 17.3, 330], { cup: 130 }),
   F(/masala|powder|pepper|cardamom|cinnamon|clove|oregano|spice|seeds|hing|asafoetida|bay lea/, SPICE, { cup: 120, pc: 1 }),
 ];
 

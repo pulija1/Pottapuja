@@ -6,7 +6,7 @@ import { isNutIngredient } from "./safety.js";
 import { parseApplianceLine } from "./appliances.js";
 
 // The files the app loads, in this order. A new file must be added here to be loaded.
-export const RECIPE_FILES = ["kid-4-years.md", "baby-8-months.md", "family-dinners.md", "telugu-curries.md", "leftover-makeovers.md", "air-fryer-and-oven.md"];
+export const RECIPE_FILES = ["kid-4-years.md", "baby-8-months.md", "family-dinners.md", "telugu-curries.md", "leftover-makeovers.md", "air-fryer-and-oven.md", "busy-mornings.md"];
 
 const WHO = {
   baby: "baby", "8-month-old": "baby", "8 month old": "baby", "8 months": "baby", infant: "baby",
@@ -138,6 +138,10 @@ export function parseRecipeMarkdown(md, file = "") {
     if (airFryer) recipe.airFryer = airFryer;
     const oven = parseApplianceLine(r.fields.oven);
     if (oven) recipe.oven = oven;
+    // Busy weekday mornings: "make ahead" (the night before) or "no cook".
+    const busy = String(r.fields["busy morning"] || "").toLowerCase();
+    if (/ahead|night|overnight/.test(busy)) recipe.busyMorning = "make-ahead";
+    else if (/no[- ]?cook/.test(busy)) recipe.busyMorning = "no-cook";
     if (r.fields.leftover) recipe.leftover = r.fields.leftover.toLowerCase().split(/\s*(?:,|\bor\b|·)\s*/).map((x) => x.trim()).filter(Boolean);
     const declared = String(r.fields["good for"] || "").toLowerCase();
     const tags = new Set(nutritionTags(recipe));
@@ -238,6 +242,7 @@ export function recipeToMarkdown(r) {
   if (r.nutFreeSwap) out.push(`- **Nut-free swap:** ${r.nutFreeSwap}`);
   if (r.airFryer?.text) out.push(`- **Air fryer:** ${r.airFryer.text}`);
   if (r.oven?.text) out.push(`- **Oven:** ${r.oven.text}`);
+  if (r.busyMorning) out.push(`- **Busy morning:** ${r.busyMorning.replace("-", " ")}`);
   if (r.leftover?.length) out.push(`- **Leftover:** ${r.leftover.join(", ")}`);
   if (r.familyFavorite) out.push(`- **Family favorite:** yes`);
   if (r.id && r.id !== "lib-" + slug(r.title)) out.push(`- **ID:** ${r.id}`);
