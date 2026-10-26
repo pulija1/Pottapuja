@@ -2,7 +2,7 @@
 // least five different vegetable curries to choose from.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { familyDinnerIdeas, withVegCurries, isVegCurry, isMainVegetable, VEG_CURRY_MIN, DINNER_POOL, LIBRARY } from "../public/shared/recipes.js";
+import { familyDinnerIdeas, withVegCurries, isVegCurry, isMainVegetable, mainVegOf, oneEachVeg, VEG_CURRY_MIN, DINNER_POOL, LIBRARY } from "../public/shared/recipes.js";
 import { normName } from "../public/shared/shopping.js";
 
 // The app's starting kitchen, plus the vegetables of a usual shop.
@@ -74,12 +74,28 @@ test("FAM-06 vegetable curries: a curry with a vegetable and no meat or egg", ()
   assert.ok(LIBRARY.filter((r) => r.forWhom === "family" && isVegCurry(r)).length >= 20);
 });
 
-test("FAM-07 the pool keeps at least five vegetable curries among the first ideas", () => {
+test("FAM-07 the pool keeps at least five vegetable curries, ahead of the other dinners", () => {
   const ideas = familyDinnerIdeas(SHOPPED);
   const pool = withVegCurries(ideas);
-  assert.equal(pool.length, DINNER_POOL);
+  assert.ok(pool.length >= VEG_CURRY_MIN && pool.length <= DINNER_POOL);
   assert.ok(pool.filter(isVegCurry).length >= VEG_CURRY_MIN);
-  // In the ideas' own order.
+  // The vegetable curries first, then the rest, each in the ideas' own order.
   const at = (r) => ideas.indexOf(r);
-  assert.deepEqual(pool.map(at), [...pool.map(at)].sort((a, b) => a - b));
+  const firstOther = pool.findIndex((r) => !isVegCurry(r));
+  if (firstOther >= 0) assert.ok(pool.slice(firstOther).every((r) => !isVegCurry(r)), "vegetable curries come first");
+  for (const part of [pool.filter(isVegCurry), pool.filter((r) => !isVegCurry(r))]) assert.deepEqual(part.map(at), [...part.map(at)].sort((a, b) => a - b));
+});
+
+test("FAM-08 a new vegetable each time: never three brinjal curries in a row", () => {
+  for (const pantry of [STARTER, SHOPPED, [...SHOPPED, "ivy gourd", "drumstick"]]) {
+    const pool = withVegCurries(familyDinnerIdeas(pantry, { frozen: FREEZER }));
+    const vegs = pool.map(mainVegOf);
+    assert.equal(new Set(vegs).size, vegs.length, `one dish per vegetable: ${pool.map((r) => r.title).join(" | ")}`);
+    assert.ok(new Set(pool.filter(isVegCurry).map(mainVegOf)).size >= VEG_CURRY_MIN, "5+ vegetables among the curries");
+  }
+  // The book has several brinjal curries; only the best one stays.
+  const brinjal = LIBRARY.filter((r) => r.forWhom === "family" && isVegCurry(r) && mainVegOf(r) === "brinjal");
+  assert.ok(brinjal.length >= 3);
+  assert.equal(oneEachVeg(brinjal).length, 1);
+  assert.equal(mainVegOf(LIBRARY.find((r) => r.title.startsWith("Vankaya bangaladumpa kura"))), "brinjal");
 });

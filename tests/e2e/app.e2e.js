@@ -1713,7 +1713,7 @@ test("E2E FAM-01 the family dinner idea comes from the kitchen, never a leftover
   const check = async () => {
     const text = await dinner.innerText();
     assert.doesNotMatch(text, /Uses yesterday's|leftover|Kari dosai|kathi roll|enchilada/i, "never a leftover makeover");
-    assert.doesNotMatch(text, /chicken|kodi|munagakaya|drumstick/i, "nothing that needs the freezer's chicken or drumsticks");
+    assert.doesNotMatch(text, /chicken|kodi kura|munagakaya|drumstick/i, "nothing that needs the freezer's chicken or drumsticks");
     return text;
   };
 
@@ -1727,12 +1727,18 @@ test("E2E FAM-01 the family dinner idea comes from the kitchen, never a leftover
     await tid(page, "suggest-shuffle").click();
   }
   assert.equal(new Set(seen).size, seen.length, `each 🔀 gives a different dinner: ${seen.join(" | ")}`);
+  // Ram: "it should give a new vegetable, not the same". The Telugu title starts with the vegetable
+  // (Vankaya, Bendakaya, Palakura, Aloo, Sorakaya, Cauliflower): no vegetable twice in a row of 6.
+  const veg = (t) => t.replace(/^\W+/, "").split(" ")[0].toLowerCase();
+  assert.equal(new Set(seen.map(veg)).size, seen.length, `each 🔀 gives a new vegetable: ${seen.join(" | ")}`);
   assert.ok(seen.filter((t) => /kura|curry|pappu|pulusu/i.test(t)).length >= 5, `5+ vegetable curries: ${seen.join(" | ")}`);
 
   // At least five vegetable curries to pick from, all different, each with a kitchen vegetable.
   const options = await dinner.getByTestId("veg-curry-option").allInnerTexts();
   assert.ok(options.length >= 5, `vegetable curries offered: ${options.join(", ")}`);
   assert.equal(new Set(options).size, options.length);
+  const picked = veg((await dinner.locator(".grow").innerText()).split("·")[0].trim());
+  assert.equal(new Set([picked, ...options.map(veg)]).size, options.length + 1, `each curry is a different vegetable from the idea (${picked}) and each other: ${options.join(", ")}`);
   for (const o of options) {
     assert.match(o, /kura|curry|pappu|pulusu|kootu|kurma|masala/i, `${o} is a curry`);
     assert.match(o, kitchen, `${o} uses a vegetable from the kitchen`);

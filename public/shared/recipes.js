@@ -379,6 +379,19 @@ export function isVegCurry(recipe) {
   return !names.some((n) => MEAT.test(n)) && !MEAT.test(String(recipe.title || "").toLowerCase()) && names.some(isMainVegetable);
 }
 
+// What a dish is mostly made of: its first main vegetable ("brinjal" for vankaya bangaladumpa kura),
+// else its protein, else its own id. Ideas are kept to one dish per main vegetable, so 🔀 and the
+// vegetable curry list bring a new vegetable each time instead of three brinjal curries.
+export function mainVegOf(recipe) {
+  const names = (recipe?.ingredients || []).map((i) => normName(i.name));
+  return names.find(isMainVegetable) || names.find((n) => PROTEIN.test(n)) || `#${recipe?.id}`;
+}
+// The best-ranked dish for each main vegetable, in the list's own order.
+export function oneEachVeg(list) {
+  const seen = new Set();
+  return list.filter((r) => { const v = mainVegOf(r); return !seen.has(v) && seen.add(v); });
+}
+
 // How many vegetable curries the family dinner always offers, and how many ideas 🔀 goes round.
 export const VEG_CURRY_MIN = 5;
 export const DINNER_POOL = 8;
@@ -389,7 +402,7 @@ export const DINNER_POOL = 8;
 // Fewest things to buy first, then the vegetable curries, food running out, the least from the freezer, the picked
 // cuisines, the favorites and the most from the kitchen. When the kitchen has fewer than
 // VEG_CURRY_MIN vegetable curries, vegetable curries that need the fewest things bought fill in,
-// so there are always that many to pick from. Returns recipes.
+// so there are always that many to pick from, each with a different vegetable. Returns recipes.
 export function familyDinnerIdeas(pantry, { frozen = [], staples = [], cuisines = [], useSoon = null, settings = null, appliances = [], maxMissing = 3, extraVeg = 7 } = {}) {
   const k = kitchen(pantry, frozen, staples);
   const rated = LIBRARY.filter((x) => x.forWhom === "family" && x.mealType === "dinner" && !x.leftover && suits(x, settings))
@@ -397,26 +410,34 @@ export function familyDinnerIdeas(pantry, { frozen = [], staples = [], cuisines 
     .map((recipe) => {
       const needed = [...new Set(neededNames(recipe, k.assumed))];
       const mains = needed.filter(isMain);
-      return { recipe, veg: isVegCurry(recipe), fresh: mains.filter((n) => k.fresh.has(n)).length, frozenMain: mains.some((n) => k.cold.has(n)),
+      return { recipe, veg: isVegCurry(recipe), fresh: mains.filter((n) => k.fresh.has(n)).length, frozenMain: mains.some((n) => k.cold.has(n)), headline: k.fresh.has(mainVegOf(recipe)),
         fromFreezer: needed.filter((n) => k.cold.has(n)).length, missing: needed.filter((n) => !k.has(n)).length, soon: useSoonScore(needed, k.fresh, useSoon) };
     });
   const order = (a, b) => a.missing - b.missing || b.veg - a.veg || b.soon - a.soon || a.fromFreezer - b.fromFreezer
     || (cuisines.length ? inCuisines(b.recipe, cuisines) - inCuisines(a.recipe, cuisines) : 0)
     || (b.recipe.familyFavorite ? 1 : 0) - (a.recipe.familyFavorite ? 1 : 0) || b.fresh - a.fresh
     || usesAppliance(b.recipe, appliances) - usesAppliance(a.recipe, appliances);
-  const fromKitchen = rated.filter((x) => x.fresh > 0 && x.missing <= maxMissing).sort(order);
-  const vegHere = fromKitchen.filter((x) => x.veg).length;
-  // Fill-ins to buy for: never a dish whose vegetable sits in the freezer.
-  const fill = rated.filter((x) => x.veg && !fromKitchen.includes(x) && !x.frozenMain).sort(order)
-    .slice(0, Math.max(0, VEG_CURRY_MIN + extraVeg - vegHere));
-  return [...fromKitchen, ...fill].map((x) => x.recipe);
+  // The dish's own vegetable (or meat) must be fresh in the kitchen: an okra curry needs okra on the
+  // kitchen list, while frozen peas can still go in with fresh potatoes.
+  const fromKitchen = rated.filter((x) => x.headline && x.missing <= maxMissing).sort(order);
+  const vegHere = new Set(fromKitchen.filter((x) => x.veg).map((x) => mainVegOf(x.recipe)));
+  // Fill-ins to buy for, each a vegetable the kitchen ones don't use: never a dish whose vegetable sits in the freezer.
+  const fill = oneEachVeg(rated.filter((x) => x.veg && !fromKitchen.includes(x) && !x.frozenMain && !vegHere.has(mainVegOf(x.recipe))).sort(order).map((x) => x.recipe))
+    .slice(0, Math.max(0, VEG_CURRY_MIN + extraVeg - vegHere.size));
+  const out = [...fromKitchen.map((x) => x.recipe), ...fill];
+  // Which ones are bought for, not from the kitchen (for withVegCurries).
+  out.fill = new Set(fill.map((r) => r.id));
+  return out;
 }
 
-// The first `size` of a ranked list of dinners, with at least `min` vegetable curries among them
-// (the best-ranked ones), in the list's own order.
-export function withVegCurries(list, { size = DINNER_POOL, min = VEG_CURRY_MIN } = {}) {
-  const veg = list.filter(isVegCurry).slice(0, min);
-  const keep = new Set(veg);
-  for (const r of list) { if (keep.size >= size) break; keep.add(r); }
-  return list.filter((r) => keep.has(r)).slice(0, size);
+// The first `size` of a ranked list of dinners, one per main vegetable: the kitchen's vegetable
+// curries first (so 🔀 goes through every vegetable before an egg or chicken curry), then curries to
+// buy for only until there are `min`, then the other dinners, each in the list's own order. `fill` is the
+// ids bought for (familyDinnerIdeas(...).fill, used when `list` is that list itself).
+export function withVegCurries(list, { size = DINNER_POOL, min = VEG_CURRY_MIN, fill = list?.fill || new Set() } = {}) {
+  list = oneEachVeg(list);
+  const veg = list.filter((r) => isVegCurry(r) && !fill.has(r.id));
+  const toBuy = list.filter((r) => fill.has(r.id));
+  const need = Math.max(0, min - veg.length);
+  return [...veg, ...toBuy.slice(0, need), ...list.filter((r) => !isVegCurry(r) && !fill.has(r.id))].slice(0, Math.max(size, min));
 }

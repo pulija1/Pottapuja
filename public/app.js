@@ -5,7 +5,7 @@ import { catalogText, libraryRefs, savedRefs, planWindow, contextText, userTurn,
 import { QUICK_MINUTES } from "./shared/ai-prompt.js";
 import { todayKey, addDays, addMonths, monthGrid, monthLabel, prettyDate, fromKey, isDateKey, isSchoolDay, occurrences, daysBetween } from "./shared/dates.js";
 import { checkRecipe, checkForAudience, isNutIngredient, isSchoolFood } from "./shared/safety.js";
-import { LIBRARY, suggestFromLibrary, readyToCook, RECIPE_BOOK_STATUS, cookByVegetables, missingForRecipe, CUISINES, inCuisines, topPicks, leftoverKind, leftoverRecipesFor, freezerSet, sideDipsFor, quickBreakfasts, breakfastKind, fitsMorning, familyDinnerIdeas, withVegCurries, isVegCurry, VEG_CURRY_MIN, MORNING_MINUTES, EASY_NIGHT_MINUTES } from "./shared/recipes.js";
+import { LIBRARY, suggestFromLibrary, readyToCook, RECIPE_BOOK_STATUS, cookByVegetables, missingForRecipe, CUISINES, inCuisines, topPicks, leftoverKind, leftoverRecipesFor, freezerSet, sideDipsFor, quickBreakfasts, breakfastKind, fitsMorning, familyDinnerIdeas, withVegCurries, isVegCurry, mainVegOf, oneEachVeg, VEG_CURRY_MIN, MORNING_MINUTES, EASY_NIGHT_MINUTES } from "./shared/recipes.js";
 import { PREF_OPTIONS, prefsFor, prefProblem, avoidedIn, prefsPrompt, prefStaples, cleanPrefs } from "./shared/preferences.js";
 import { kitchenExpiry, useSoonWeights, goneBy, staplesFor, staplesSummary, expiryOf, dateKeyOf, daysLeftLabel, shelfLifeDays } from "./shared/freshness.js";
 import { nutritionTags, TAG_LABELS } from "./shared/recipe-book.js";
@@ -933,27 +933,32 @@ function suggestionsFor(key) {
     // The family dinner comes from the kitchen: fresh vegetables first, at least VEG_CURRY_MIN
     // vegetable curries to go round with 🔀, never yesterday's leftovers or the freezer alone.
     if (s.who === "family") {
-      const ideas = familyDinnerIdeas(pantry, { frozen: frozenOnHand(), staples: staplesOn(), cuisines, useSoon: opt.useSoon, settings: state.settings, appliances: appliancesOwned() })
-        .filter(safe);
+      const all = familyDinnerIdeas(pantry, { frozen: frozenOnHand(), staples: staplesOn(), cuisines, useSoon: opt.useSoon, settings: state.settings, appliances: appliancesOwned() });
+      const ideas = all.filter(safe);
       const notUsed = ideas.filter((r) => !used.has(r.id));
       const tier = [notUsed.filter((r) => !lastWeek.has(r.id)), notUsed.filter((r) => !avoid.has(r.id)), ideas].find((t) => t.length) || [];
-      const pool = withVegCurries(tier);
+      const pool = withVegCurries(tier, { fill: all.fill });
       if (!pool.length) continue;
       // Each 🔀 turn shows a dinner not shown yet this time round (the ranking can shift as the
       // other slots change), and the same turn keeps its dinner when the panel redraws.
       const turn = entry.seed + (entry.offsets[s.id] || 0);
       const shown = ((entry.shown ||= {})[s.id] ||= {});
       const chosen = findRecipe(entry.chosen[s.id]);
-      const before = Object.entries(shown).filter(([n]) => +n !== turn).map(([, id]) => id);
-      const r = chosen && ideas.includes(chosen) ? chosen
-        : pool.find((x) => x.id === shown[turn])
-          || [...pool.slice(turn % pool.length), ...pool.slice(0, turn % pool.length)].find((x) => !before.includes(x.id))
-          || pool[turn % pool.length];
+      // Vegetables already shown this time round: each turn brings a new one.
+      const before = new Set(Object.entries(shown).filter(([n]) => +n !== turn).map(([, id]) => findRecipe(id)).filter(Boolean).map(mainVegOf));
+      // Down the ranked list, so no vegetable in the kitchen is skipped.
+      let r = chosen && ideas.includes(chosen) ? chosen : pool.find((x) => x.id === shown[turn]) || pool.find((x) => !before.has(mainVegOf(x)));
+      if (!r) {
+        // Every vegetable has had its turn: start a new round, still not the one just shown.
+        const last = findRecipe(shown[turn - 1]);
+        for (const n of Object.keys(shown)) delete shown[n];
+        r = pool.find((x) => !last || mainVegOf(x) !== mainVegOf(last)) || pool[0];
+      }
       shown[turn] = r.id;
       picks[s.id] = r.id;
       used.add(r.id);
-      // The other vegetable curries, to pick one in a tap.
-      entry.vegOptions[s.id] = tier.filter((x) => isVegCurry(x) && x.id !== r.id).slice(0, VEG_CURRY_MIN).map((x) => x.id);
+      // The other vegetable curries, each with a vegetable of its own, to pick one in a tap.
+      entry.vegOptions[s.id] = oneEachVeg(tier.filter(isVegCurry)).filter((x) => mainVegOf(x) !== mainVegOf(r)).slice(0, VEG_CURRY_MIN).map((x) => x.id);
       continue;
     }
     // One leftover idea a day, in the first slot it fits. 🔀 on that slot moves on to the usual ideas.
