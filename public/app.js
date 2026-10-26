@@ -5,7 +5,7 @@ import { catalogText, libraryRefs, savedRefs, planWindow, contextText, userTurn,
 import { QUICK_MINUTES } from "./shared/ai-prompt.js";
 import { todayKey, addDays, addMonths, monthGrid, monthLabel, prettyDate, fromKey, isDateKey, isSchoolDay, occurrences, daysBetween } from "./shared/dates.js";
 import { checkRecipe, checkForAudience, isNutIngredient, isSchoolFood } from "./shared/safety.js";
-import { LIBRARY, suggestFromLibrary, readyToCook, RECIPE_BOOK_STATUS, cookByVegetables, missingForRecipe, CUISINES, inCuisines, topPicks, leftoverKind, leftoverRecipesFor, freezerSet, sideDipsFor, quickBreakfasts, breakfastKind, fitsMorning, MORNING_MINUTES, EASY_NIGHT_MINUTES } from "./shared/recipes.js";
+import { LIBRARY, suggestFromLibrary, readyToCook, RECIPE_BOOK_STATUS, cookByVegetables, missingForRecipe, CUISINES, inCuisines, topPicks, leftoverKind, leftoverRecipesFor, freezerSet, sideDipsFor, quickBreakfasts, breakfastKind, fitsMorning, familyDinnerIdeas, withVegCurries, isVegCurry, VEG_CURRY_MIN, MORNING_MINUTES, EASY_NIGHT_MINUTES } from "./shared/recipes.js";
 import { PREF_OPTIONS, prefsFor, prefProblem, avoidedIn, prefsPrompt, prefStaples, cleanPrefs } from "./shared/preferences.js";
 import { kitchenExpiry, useSoonWeights, goneBy, staplesFor, staplesSummary, expiryOf, dateKeyOf, daysLeftLabel, shelfLifeDays } from "./shared/freshness.js";
 import { nutritionTags, TAG_LABELS } from "./shared/recipe-book.js";
@@ -891,6 +891,8 @@ function suggestionsFor(key) {
   const day = getDay(state, key) || emptyDay();
   const entry = ui.suggest[key] || (ui.suggest[key] = { seed: 0, offsets: {}, picks: null });
   if (entry.picks) return entry.picks;
+  entry.chosen ||= {};
+  entry.vegOptions = {};
   const cuisines = cuisinePicks();
   // A curry cooked the day before becomes one of today's meals (roti quesadilla, kathi roll, kari dosa).
   const leftovers = leftoversFrom(addDays(key, -1));
@@ -927,6 +929,32 @@ function suggestionsFor(key) {
         (entry.rotation ||= {})[s.id] = true;
         continue;
       }
+    }
+    // The family dinner comes from the kitchen: fresh vegetables first, at least VEG_CURRY_MIN
+    // vegetable curries to go round with 🔀, never yesterday's leftovers or the freezer alone.
+    if (s.who === "family") {
+      const ideas = familyDinnerIdeas(pantry, { frozen: frozenOnHand(), staples: staplesOn(), cuisines, useSoon: opt.useSoon, settings: state.settings, appliances: appliancesOwned() })
+        .filter(safe);
+      const notUsed = ideas.filter((r) => !used.has(r.id));
+      const tier = [notUsed.filter((r) => !lastWeek.has(r.id)), notUsed.filter((r) => !avoid.has(r.id)), ideas].find((t) => t.length) || [];
+      const pool = withVegCurries(tier);
+      if (!pool.length) continue;
+      // Each 🔀 turn shows a dinner not shown yet this time round (the ranking can shift as the
+      // other slots change), and the same turn keeps its dinner when the panel redraws.
+      const turn = entry.seed + (entry.offsets[s.id] || 0);
+      const shown = ((entry.shown ||= {})[s.id] ||= {});
+      const chosen = findRecipe(entry.chosen[s.id]);
+      const before = Object.entries(shown).filter(([n]) => +n !== turn).map(([, id]) => id);
+      const r = chosen && ideas.includes(chosen) ? chosen
+        : pool.find((x) => x.id === shown[turn])
+          || [...pool.slice(turn % pool.length), ...pool.slice(0, turn % pool.length)].find((x) => !before.includes(x.id))
+          || pool[turn % pool.length];
+      shown[turn] = r.id;
+      picks[s.id] = r.id;
+      used.add(r.id);
+      // The other vegetable curries, to pick one in a tap.
+      entry.vegOptions[s.id] = tier.filter((x) => isVegCurry(x) && x.id !== r.id).slice(0, VEG_CURRY_MIN).map((x) => x.id);
+      continue;
     }
     // One leftover idea a day, in the first slot it fits. 🔀 on that slot moves on to the usual ideas.
     if (leftovers.length && !Object.keys(entry.leftover).length && !entry.offsets[s.id]) {
@@ -1044,6 +1072,7 @@ function swapMeal(key, slot) {
   const undo = snapshotDays([key]);
   delete d.meals[slot];
   const e = ui.suggest[key] || (ui.suggest[key] = { seed: 0, offsets: {}, picks: null });
+  if (e.chosen) delete e.chosen[slot];
   let r = null;
   for (let i = 0; i < 6 && !r; i++) {
     e.offsets[slot] = (e.offsets[slot] || 0) + 1;
@@ -1314,6 +1343,17 @@ function babyFruitNote(seed = 0, inline = false) {
   return inline ? `<span class="small" data-testid="baby-fruit">${esc(text)}</span>` : `<div class="notice info small" data-testid="baby-fruit">${esc(text)}</div>`;
 }
 
+// Under the family dinner idea: the other vegetable curries the kitchen can make, one tap to pick.
+function vegCurryChoices(key, slot) {
+  const ids = ui.suggest[key]?.vegOptions?.[slot] || [];
+  if (!ids.length) return "";
+  return `<span class="small veg-curries" data-testid="veg-curry-options"><span class="muted">🥬 Or a vegetable curry:</span>${ids.map((id) => {
+    const r = findRecipe(id);
+    const need = shoppingNeeds(r);
+    return `<button type="button" class="linkish" data-action="suggest-pick" data-slot="${slot}" data-id="${esc(id)}" data-testid="veg-curry-option" title="${need.length ? esc("Need " + need.map((i) => i.name).join(", ")) : "All in the kitchen"}">${esc(r.title)}</button>`;
+  }).join("")}</span>`;
+}
+
 function renderSuggestions(key) {
   if (key < TODAY) return "";
   const picks = suggestionsFor(key);
@@ -1334,7 +1374,7 @@ function renderSuggestions(key) {
       const cold = fromFreezer(r);
       return `<div class="suggest-row" data-testid="suggestion" data-slot="${s.id}">
         <span class="small muted">${esc(slotLabel(s, state.settings))}</span>
-        <span class="grow">${from ? `<span class="small" data-testid="leftover-idea">♻️ Uses yesterday's ${esc(from)}</span><br>` : ""}${turn ? `<span class="small muted" data-testid="lunch-turn">🔁 Next on ${esc(state.settings.kidName || "the 4-year-old")}'s lunch list</span><br>` : ""}${r.busyMorning && isSchoolDay(key) ? `<span class="small muted" data-testid="busy-morning">${esc(busyLabel(r))}</span><br>` : ""}${art(r, "xs")} ${esc(r.title)}${r.familyFavorite ? " ⭐" : ""}${tagIcons(r) ? ` <span aria-hidden="true">${tagIcons(r)}</span>` : ""}${applianceNote(r)}${need.length ? ` <span class="small" style="color:var(--warn)">· need ${esc(need.map((i) => i.name).join(", "))}</span>` : ' <span class="small" style="color:var(--ok)">· all in the kitchen</span>'}${cold.length ? ` <span class="small" data-testid="from-freezer">· 🧊 ${esc(cold.join(", "))} from the freezer</span>` : ""}${sideDipsFor(r).length ? `<br><span class="small" data-testid="side-dip">🥣 With ${esc(sideDipsFor(r).map((d) => d.title.toLowerCase()).join(" or "))}</span>` : ""}${s.id === "baby_breakfast" && !recipeHasFruit(r) ? `<br>${babyFruitNote(ui.suggest[key]?.seed || 0, true)}` : ""}</span>
+        <span class="grow">${from ? `<span class="small" data-testid="leftover-idea">♻️ Uses yesterday's ${esc(from)}</span><br>` : ""}${turn ? `<span class="small muted" data-testid="lunch-turn">🔁 Next on ${esc(state.settings.kidName || "the 4-year-old")}'s lunch list</span><br>` : ""}${r.busyMorning && isSchoolDay(key) ? `<span class="small muted" data-testid="busy-morning">${esc(busyLabel(r))}</span><br>` : ""}${art(r, "xs")} ${esc(r.title)}${r.familyFavorite ? " ⭐" : ""}${tagIcons(r) ? ` <span aria-hidden="true">${tagIcons(r)}</span>` : ""}${applianceNote(r)}${need.length ? ` <span class="small" style="color:var(--warn)">· need ${esc(need.map((i) => i.name).join(", "))}</span>` : ' <span class="small" style="color:var(--ok)">· all in the kitchen</span>'}${cold.length ? ` <span class="small" data-testid="from-freezer">· 🧊 ${esc(cold.join(", "))} from the freezer</span>` : ""}${sideDipsFor(r).length ? `<br><span class="small" data-testid="side-dip">🥣 With ${esc(sideDipsFor(r).map((d) => d.title.toLowerCase()).join(" or "))}</span>` : ""}${s.id === "baby_breakfast" && !recipeHasFruit(r) ? `<br>${babyFruitNote(ui.suggest[key]?.seed || 0, true)}` : ""}${vegCurryChoices(key, s.id)}</span>
         <button type="button" class="iconbtn" data-action="suggest-swap" data-slot="${s.id}" title="Another idea" aria-label="Another idea for ${esc(slotLabel(s, state.settings))}">🔀</button>
       </div>`;
     }).join("")}
@@ -2492,13 +2532,19 @@ document.addEventListener("click", (e) => {
     }
     case "suggest-shuffle": {
       const e = ui.suggest[ui.selected];
-      if (e) { e.seed++; e.picks = null; }
+      if (e) { e.seed++; e.picks = null; e.chosen = {}; }
       renderDay();
       break;
     }
     case "suggest-swap": {
       const e = ui.suggest[ui.selected];
-      if (e) { e.offsets[el.dataset.slot] = (e.offsets[el.dataset.slot] || 0) + 1; e.picks = null; }
+      if (e) { e.offsets[el.dataset.slot] = (e.offsets[el.dataset.slot] || 0) + 1; e.picks = null; if (e.chosen) delete e.chosen[el.dataset.slot]; }
+      renderDay();
+      break;
+    }
+    case "suggest-pick": {
+      const e = ui.suggest[ui.selected];
+      if (e) { (e.chosen ||= {})[el.dataset.slot] = el.dataset.id; e.picks = null; }
       renderDay();
       break;
     }
