@@ -821,6 +821,7 @@ function renderCalendar() {
           <button type="button" class="btn sm" data-action="fill-week" data-testid="fill-week"aria-label="Fill the week from the kitchen">📋 Fill from kitchen</button>
           <button type="button" class="btn sm primary" data-action="plan-chat" data-testid="plan-chat-open"aria-label="Plan the week with AI">💬 Plan with AI</button>
         </div>
+        <button type="button" class="linkish small clear-week" data-action="clear-week" data-testid="clear-week">🗑️ Clear this week's meals</button>
         <div class="legend">
           <span><i class="dot approved"></i>Approved</span>
           <span><i class="dot pending"></i>To approve</span>
@@ -1010,18 +1011,62 @@ function snapshotDays(keys) {
   };
 }
 
+// Takes out a date's planned meals that a child mustn't have: a food on their never-use list or
+// a hard need from Profile (no egg, no dairy). Meals planned before the list was set, or on another
+// phone, stay on the calendar otherwise, and filling only fills empty slots. Returns how many.
+function dropUnsuitable(key) {
+  const d = getDay(state, key);
+  if (!d?.meals) return 0;
+  let n = 0;
+  for (const s of slotsFor(key)) {
+    const m = d.meals[s.id];
+    if (!m?.title || s.who === "family") continue;
+    const r = (m.recipeId && findRecipe(m.recipeId)) || { title: m.title, ingredients: [] };
+    if (!prefProblem({ ...r, title: m.title }, s.who, state.settings)) continue;
+    delete d.meals[s.id];
+    n++;
+  }
+  if (n) markEdited(d);
+  return n;
+}
+
+const mealCount = (n) => `${n} meal${n > 1 ? "s" : ""}`;
+
 // Without AI: the kitchen suggestions for every empty meal of the week, a day at a time so each
-// day sees the one before it (no repeats, yesterday's curry as a leftover makeover).
+// day sees the one before it (no repeats, yesterday's curry as a leftover makeover). Meals that
+// break a child's needs are swapped for new ones first.
 function fillWeek() {
   const keys = weekDates();
   const undo = snapshotDays(keys);
-  let n = 0;
+  let n = 0, swapped = 0;
+  for (const k of keys) swapped += dropUnsuitable(k);
   for (const k of keys) {
     delete ui.suggest[k];
     n += applySuggestions(k);
   }
   commit();
-  toast(n ? `Added ${n} meal${n > 1 ? "s" : ""} to ${keys.length} day${keys.length > 1 ? "s" : ""}. Approve each day when ready.` : "Every meal this week is already planned.", n ? undo : null);
+  const swaps = swapped ? `Swapped out ${mealCount(swapped)} the children shouldn't have. ` : "";
+  toast(n || swapped ? `${swaps}Added ${mealCount(n)} to ${keys.length} day${keys.length > 1 ? "s" : ""}. Approve each day when ready.` : "Every meal this week is already planned.", n || swapped ? undo : null);
+}
+
+// Takes every planned meal off the week on screen, from today on, to plan it again from scratch.
+// To-dos, reminders, the kitchen and the recipe book stay as they are; Undo puts the meals back.
+function clearWeek() {
+  const keys = weekDates();
+  const undo = snapshotDays(keys);
+  let n = 0;
+  for (const k of keys) {
+    const d = getDay(state, k);
+    const planned = Object.keys(d?.meals || {}).filter((slot) => d.meals[slot]?.title);
+    if (!planned.length) continue;
+    d.meals = {};
+    markEdited(d);
+    delete ui.suggest[k];
+    n += planned.length;
+  }
+  if (!n) return toast("No meals planned this week yet.");
+  commit();
+  toast(`Cleared ${mealCount(n)} from this week. Tap 📋 Fill from kitchen to plan it again.`, undo);
 }
 
 const planCatalog = () => (planCatalog.text ||= catalogText(LIBRARY));
@@ -1102,13 +1147,15 @@ async function sendChat(text) {
   const week = weekDates();
   const fillUndo = snapshotDays(week);
   const filled = [];
+  let dropped = 0;
+  for (const k of week) dropped += dropUnsuitable(k);
   for (const k of week) {
     const before = { ...(getDay(state, k)?.meals || {}) };
     if (!applySuggestions(k)) continue;
     for (const [slot, m] of Object.entries(state.days[k].meals)) if (!before[slot]?.title && m?.title) filled.push({ date: k, slot, recipe: findRecipe(m.recipeId) || { title: m.title } });
   }
+  if (filled.length || dropped) commit();
   if (filled.length) {
-    commit();
     c.shown.push({ role: "app", text: `Filled ${filled.length} empty meal${filled.length > 1 ? "s" : ""} from your recipe book.`, applied: filled, undo: fillUndo });
   }
   const win = planWindow(ui.selected, TODAY);
@@ -2370,6 +2417,7 @@ document.addEventListener("click", (e) => {
     case "more-picks": ui.morePicks = true; render(); break;
     case "open-profile": profileDialog(); break;
     case "fill-week": fillWeek(); break;
+    case "clear-week": clearWeek(); break;
     case "plan-chat": planChatSheet(); break;
     case "open-ai-key": $("dialog[data-testid=plan-chat]")?.close(); profileDialog({ focusKey: true }); break;
     case "chat-idea": { const t = $("dialog[data-testid=plan-chat] textarea"); if (t) { t.value = el.dataset.text; t.focus(); } break; }
