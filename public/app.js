@@ -19,6 +19,9 @@ import { SLOTS, emptyDay, getDay, dayHasPlan, markEdited, approveDay, unapproveD
 const state = load();
 let TODAY = todayKey();
 const AI_TIMEOUT_MS = 50000;  // the server gives up at 40 s
+const KEY_AI_TIMEOUT_MS = 120000;  // straight to Claude with the family's key: no server limit, the answer streams in
+const CHAT_IDLE_MS = 60000;   // the planning chat gives up when nothing new arrives for a minute
+const CHAT_MAX_MS = 300000;   // or after five minutes in all
 
 const ui = {
   tab: "calendar",
@@ -1022,7 +1025,7 @@ function chatMessageHtml(m, i) {
   if (m.role === "parent") return `<div class="chat-msg parent" data-testid="chat-parent">${esc(m.text)}</div>`;
   if (m.role === "error") return `<div class="chat-msg error" data-testid="chat-error">⚠️ ${esc(m.text)}</div>`;
   const label = (c) => `${esc(prettyDate(c.date))} · ${esc(slotLabel(SLOTS.find((s) => s.id === c.slot), state.settings))}`;
-  return `<div class="chat-msg claude" data-testid="chat-claude">
+  return `<div class="chat-msg claude" data-testid="${m.role === "app" ? "chat-app" : "chat-claude"}">
     <p>${esc(m.text)}</p>
     ${m.applied?.length ? `<ul class="chat-changes" data-testid="chat-changes">${m.applied.map((c) => `<li>${art(c.recipe || {}, "xs", "✕")} ${label(c)}: <strong>${c.recipe ? esc(c.recipe.title) : "cleared"}</strong>${c.isNew ? ' <span class="pill">new</span>' : ""}</li>`).join("")}</ul>` : ""}
     ${m.skipped?.length ? `<p class="small" data-testid="chat-skipped" style="color:var(--warn)">Left out: ${m.skipped.map((c) => `${esc(c.title || c.slot)}${c.date ? ` (${esc(c.date)})` : ""}: ${esc(c.why)}`).join("; ")}</p>` : ""}
@@ -1034,7 +1037,7 @@ function renderChat(dlg = $("dialog[data-testid=plan-chat]")) {
   if (!dlg) return;
   const c = ui.chat;
   const log = dlg.querySelector("[data-testid=chat-log]");
-  log.innerHTML = c.shown.length ? c.shown.map(chatMessageHtml).join("") + (c.busy ? '<div class="chat-msg claude busy" data-testid="chat-busy">Planning… this can take up to a minute.</div>' : "")
+  log.innerHTML = c.shown.length ? c.shown.map(chatMessageHtml).join("") + (c.busy ? '<div class="chat-msg claude busy" data-testid="chat-busy">Planning… this can take a minute or two.</div>' : "")
     : `<p class="small muted">Ask for a plan for the week, then change it as you like: “no eggs this week”, “swap Tuesday's dinner”, “something with the frozen peas”. The meals go straight onto the calendar, waiting for your approval. Safety rules for both children, the nut-free lunchbox and warm weekday breakfasts are always kept.</p>`;
   log.scrollTop = log.scrollHeight;
   dlg.querySelector("[data-testid=chat-send]").disabled = c.busy;
@@ -1071,16 +1074,40 @@ async function sendChat(text) {
   const c = ui.chat;
   text = String(text || "").trim();
   if (!text || c.busy) return;
+  // The app plans the empty meals of the week on screen from the recipe book first, the way
+  // 📋 Fill from kitchen does, so Claude only makes the changes the parent asks for.
+  const week = weekDates();
+  const fillUndo = snapshotDays(week);
+  const filled = [];
+  for (const k of week) {
+    const before = { ...(getDay(state, k)?.meals || {}) };
+    if (!applySuggestions(k)) continue;
+    for (const [slot, m] of Object.entries(state.days[k].meals)) if (!before[slot]?.title && m?.title) filled.push({ date: k, slot, recipe: findRecipe(m.recipeId) || { title: m.title } });
+  }
+  if (filled.length) {
+    commit();
+    c.shown.push({ role: "app", text: `Filled ${filled.length} empty meal${filled.length > 1 ? "s" : ""} from your recipe book.`, applied: filled, undo: fillUndo });
+  }
   const win = planWindow(ui.selected, TODAY);
   const refs = chatRefs();
   const turn = { role: "user", content: userTurn(chatContext(win, refs), c.note ? `${c.note} ${text}` : text) };
   c.shown.push({ role: "parent", text });
   c.busy = true;
   c.controller = new AbortController();
-  const timer = setTimeout(() => c.controller?.abort("timeout"), 120000);
+  // The answer streams in, so give up only when nothing new has arrived for a while (or at the cap).
+  const ctl = c.controller;
+  const cap = setTimeout(() => ctl.abort("timeout"), CHAT_MAX_MS);
+  let timer = setTimeout(() => ctl.abort("timeout"), CHAT_IDLE_MS);
+  const onProgress = (text) => {
+    clearTimeout(timer);
+    timer = setTimeout(() => ctl.abort("timeout"), CHAT_IDLE_MS);
+    const meals = (text.match(/"slot"/g) || []).length;
+    const busy = document.querySelector("[data-testid=chat-busy]");
+    if (busy && meals) busy.textContent = `Planning… ${meals} meal${meals === 1 ? "" : "s"} so far.`;
+  };
   renderChat();
   try {
-    const out = await browserPlanChat([...c.turns, turn], { catalog: planCatalog(), signal: c.controller.signal });
+    const out = await browserPlanChat([...c.turns, turn], { catalog: planCatalog(), signal: c.controller.signal, onProgress });
     c.turns.push(turn, { role: "assistant", content: out.content });
     c.note = "";
     const { apply, skipped } = planChanges(out.changes, { dates: win.dates, refs, schoolNutFree: nutFreeOn(), settings: state.settings, appliances: appliancesOwned() });
@@ -1100,6 +1127,7 @@ async function sendChat(text) {
     c.shown.push({ role: "error", text: why });
   } finally {
     clearTimeout(timer);
+    clearTimeout(cap);
     c.busy = false;
     c.controller = null;
     renderChat();
@@ -1757,7 +1785,7 @@ async function askRecipes(body, { busyMorning = false, maxMinutes = 0 } = {}) {
   }
   ui.aiBusy = true;
   ui.aiController = new AbortController();
-  const timer = setTimeout(() => ui.aiController?.abort("timeout"), AI_TIMEOUT_MS);
+  const timer = setTimeout(() => ui.aiController?.abort("timeout"), ui.ai === "key" ? KEY_AI_TIMEOUT_MS : AI_TIMEOUT_MS);
   render();
   const started = performance.now();
   try {
