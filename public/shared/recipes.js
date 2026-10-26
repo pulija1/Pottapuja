@@ -192,6 +192,10 @@ const FAMILY_BOOST = 0.3;
 const BUSY_BOOST = 3;
 const WARM_BOOST = 3;
 const FRUIT_BOOST = 0.3;
+// Recipes the parent marked to use often (Recipes tab, by age) get a big lift, well ahead of a
+// good kitchen match, but less than the busy morning and warm breakfast boosts, which still decide
+// the school-day breakfasts.
+export const REGULAR_BOOST = 2;
 
 // Rank library recipes by how many of their ingredients are in the pantry.
 // With schoolNutFree, recipes that are not nut-free are left out of lunchbox and snack suggestions.
@@ -207,8 +211,10 @@ const FRUIT_BOOST = 0.3;
 // useSoon (Map of ingredient -> weight, from useSoonWeights) lifts recipes that use food running out.
 // settings (with prefs) and child ("baby"/"kid", who will eat it) leave out recipes that don't suit
 // that child and lift the ones that do; see preferences.js.
-export function suggestFromLibrary(pantry, { forWhom = "both", mealType = "", limit = 6, schoolNutFree = false, maxMinutes = 0, cuisines = [], frozen = [], appliances = [], busyMorning = false, staples = [], useSoon = null, settings = null, child = "" } = {}) {
+// regulars (recipe ids, see regulars.js) are the ones marked to use often, lifted by REGULAR_BOOST.
+export function suggestFromLibrary(pantry, { forWhom = "both", mealType = "", limit = 6, schoolNutFree = false, maxMinutes = 0, cuisines = [], frozen = [], appliances = [], busyMorning = false, staples = [], useSoon = null, settings = null, child = "", regulars = [] } = {}) {
   const k = kitchen(pantry, frozen, staples);
+  const often = new Set(regulars);
   // The whole family eats the 4-year-old's food too (mild, nothing whole), so "family" includes the
   // kid's recipes, after the family ones. The book's family recipes are mostly dinners, so without
   // this a family breakfast, lunch or snack found nothing.
@@ -232,7 +238,7 @@ export function suggestFromLibrary(pantry, { forWhom = "both", mealType = "", li
       const hit = needed.filter((n) => k.fresh.has(n)).length + needed.filter((n) => k.cold.has(n)).length * FROZEN_WEIGHT;
       const score = (needed.length ? hit / needed.length : 0) + useSoonScore(needed, k.fresh, useSoon) + (x.familyFavorite ? 0.15 : 0) + (cuisines.length && inCuisines(x, cuisines) ? CUISINE_BOOST : 0) + (usesAppliance(x, appliances) ? APPLIANCE_BOOST : 0)
         + (forWhom === "family" && x.forWhom === "family" ? FAMILY_BOOST : 0) + (busy(x) ? BUSY_BOOST : 0) + (warm(x) ? WARM_BOOST : 0) + (fruit(x) ? FRUIT_BOOST : 0)
-        + (settings ? prefBoost(x, childOf(x, child), settings, { mealType }) : 0);
+        + (settings ? prefBoost(x, childOf(x, child), settings, { mealType }) : 0) + (often.has(x.id) ? REGULAR_BOOST : 0);
       return { recipe: x, score, hit };
     })
     .sort((a, b) => b.score - a.score || b.hit - a.hit)

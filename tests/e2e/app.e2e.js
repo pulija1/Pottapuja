@@ -1527,3 +1527,39 @@ test("E2E MORN-01 school-day breakfasts are never slow; the weekend says what to
   assert.deepEqual(errors, []);
   await ctx.close();
 });
+
+test("E2E AGE-01 recipes by age: ☆ a baby dinner and the week's plan uses it often", async () => {
+  const { page, ctx, errors } = await open(mock, { viewport: { width: 390, height: 844 } });
+  await tid(page, "tab-recipes").click();
+  const sec = tid(page, "recipes-by-age");
+  await sec.locator("[data-action=age-who][data-who=baby]").click();
+  await sec.locator("[data-action=age-meal][data-meal=dinner]").click();
+  const rows = sec.getByTestId("age-recipe");
+  const pick = rows.last();
+  const id = await pick.getAttribute("data-recipe-id");
+  await pick.getByTestId("toggle-often").click();
+  // It moves to the top of the section, marked as used often.
+  assert.equal(await rows.first().getAttribute("data-recipe-id"), id);
+  assert.equal(await rows.first().getAttribute("data-often"), "true");
+  const regulars = await page.evaluate(() => window.__mealPlanner.state.settings.regulars);
+  assert.deepEqual(regulars.baby, [id]);
+
+  // Filling the week picks it for the baby's dinner, and brings it back every few days rather than once a week.
+  await tid(page, "tab-calendar").click();
+  await cell(page, "2026-10-26").click();
+  await tid(page, "fill-week").click();
+  await tid(page, "toast").waitFor();
+  const dinners = await page.evaluate(() => ["2026-10-25", "2026-10-26", "2026-10-27", "2026-10-28", "2026-10-29", "2026-10-30", "2026-10-31"]
+    .map((k) => window.__mealPlanner.state.days[k]?.meals?.baby_dinner?.recipeId));
+  assert.equal(dinners[0], id, dinners.join(" | "));
+  assert.ok(dinners.filter((d) => d === id).length >= 3, dinners.join(" | "));
+  // Never two days running.
+  for (let i = 1; i < dinners.length; i++) assert.ok(!(dinners[i] === id && dinners[i - 1] === id), dinners.join(" | "));
+
+  // ★ again takes it off the list.
+  await tid(page, "tab-recipes").click();
+  await sec.locator(`[data-recipe-id="${id}"] [data-testid=toggle-often]`).click();
+  assert.deepEqual(await page.evaluate(() => window.__mealPlanner.state.settings.regulars.baby), []);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});

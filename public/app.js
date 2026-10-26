@@ -14,6 +14,7 @@ import { APPLIANCES, ownedAppliances, methodsFor, fastestMinutes, basketPairs, a
 import { NUTRIENTS, DAILY_NEEDS, estimateNutrition, dailyShare } from "./shared/nutrition.js";
 import { mergeItems, groupByAisle, formatQty, missingFromPantry, normName, normUnit, aisleFor } from "./shared/shopping.js";
 import { foodArt } from "./shared/food-art.js";
+import { AGE_SECTIONS, SECTION_MEALS, REGULAR_GAP_DAYS, regularsFor, isRegular, toggleRegular, ageSection, regularsFirst } from "./shared/regulars.js";
 import { SLOTS, emptyDay, getDay, dayHasPlan, markEdited, approveDay, unapproveDay, slotsFor, todosOn, MEAL_GROUPS, whoLabel, slotLabel, remindersOn, pendingFor, dayStatus } from "./shared/plan.js";
 
 const state = load();
@@ -45,6 +46,7 @@ const ui = {
   gen: { forWhom: "both", mealType: "", notes: "", quick: false },
   cookVeg: [],            // vegetables picked in "Cook by vegetable"
   cookQuick: true,        // ...and only the ones ready in QUICK_MINUTES
+  age: { who: "kid", meal: "", all: false },   // Recipes by age: whose section, which meal, and the whole list or the first few
   confirmUnsafe: null,    // date whose unsafe plan the parent was warned about
   // The week-planning chat: what the parent and Claude said (shown), and the turns sent to Claude.
   chat: { shown: [], turns: [], busy: false, controller: null },
@@ -889,7 +891,9 @@ function suggestionsFor(key) {
   const prev = getDay(state, addDays(key, -1));
   const avoid = new Set(Object.values(prev?.meals || {}).map((m) => m?.recipeId).filter(Boolean));
   // Everything planned in the 6 days before: the same lunch shouldn't come back every day of the week.
-  const lastWeek = new Set([1, 2, 3, 4, 5, 6].flatMap((n) => Object.values(getDay(state, addDays(key, -n))?.meals || {}).map((m) => m?.recipeId)).filter(Boolean));
+  const recentFor = (days) => new Set(Array.from({ length: days }, (_, i) => i + 1).flatMap((n) => Object.values(getDay(state, addDays(key, -n))?.meals || {}).map((m) => m?.recipeId)).filter(Boolean));
+  const lastWeek = recentFor(6);
+  const lately = recentFor(REGULAR_GAP_DAYS);
   const used = new Set(Object.values(day.meals || {}).map((m) => m?.recipeId).filter(Boolean));
   const picks = {};
   // Food past the use-by date typed in for it is gone by this day.
@@ -899,7 +903,9 @@ function suggestionsFor(key) {
     if (day.meals?.[s.id]?.title) continue;
     const meal = s.id.split("_")[1];
     const child = s.who === "family" ? "" : s.who;
-    const opt = { forWhom: s.who, schoolNutFree: nutFreeOn(), limit: 40, cuisines, frozen: frozenOnHand(), appliances: appliancesOwned(), staples: staplesOn(), useSoon: useSoonOn(key, picks), settings: state.settings, child };
+    // The recipes the parent marked to use often for this person and this meal (Recipes tab, by age).
+    const often = regularsFor(state.settings, s.who).filter((id) => { const r = findRecipe(id); return r && (r.mealType === meal || (meal === "lunchbox" && r.mealType === "lunch")); });
+    const opt = { forWhom: s.who, schoolNutFree: nutFreeOn(), limit: 40, cuisines, frozen: frozenOnHand(), appliances: appliancesOwned(), staples: staplesOn(), useSoon: useSoonOn(key, picks), settings: state.settings, child, regulars: often };
     const seen = new Set();
     const safe = (r) => checkRecipe(r, { age: s.who === "baby" ? "baby" : "kid", lunchbox: s.id === "kid_lunchbox" || s.id === "kid_snack", schoolNutFree: nutFreeOn() }).safe && !prefProblem(r, child, state.settings);
     // One leftover idea a day, in the first slot it fits. 🔀 on that slot moves on to the usual ideas.
@@ -941,11 +947,14 @@ function suggestionsFor(key) {
     }
     const withGoal = (list) => (goal ? list.filter((r) => r.tags?.includes(goal)) : []);
     // Something not planned this week, else not yesterday, else anything; within each, the goal first.
+    // A recipe used often may come back after REGULAR_GAP_DAYS instead of a week, and comes first.
     const notUsed = candidates.filter((r) => !used.has(r.id));
-    const tiers = [notUsed.filter((r) => !lastWeek.has(r.id)), notUsed.filter((r) => !avoid.has(r.id)), candidates];
+    const oftenSet = new Set(often);
+    const fresh = (r) => !(oftenSet.has(r.id) ? lately : lastWeek).has(r.id);
+    const tiers = [notUsed.filter(fresh), notUsed.filter((r) => !avoid.has(r.id)), candidates].map((t) => regularsFirst(t, often));
     const tier = tiers.find((t) => t.length) || [];
-    const fresh = withGoal(tier).length ? withGoal(tier) : tier;
-    const pool = (fresh.length ? fresh : candidates).slice(0, 6);
+    const best = withGoal(tier).length ? withGoal(tier) : tier;
+    const pool = (best.length ? best : candidates).slice(0, 6);
     if (!pool.length) continue;
     const r = pool[(entry.seed + (entry.offsets[s.id] || 0)) % pool.length];
     picks[s.id] = r.id;
@@ -1479,6 +1488,7 @@ function renderRecipes() {
   $("#view-recipes").innerHTML = `
     ${renderQuickBreakfasts()}
     ${renderReadyToCook()}
+    ${renderAgeSections()}
 
     ${section({ id: "sec-kitchen", icon: "🧺", title: "What's in the kitchen",
       open: !state.pantry.length,
@@ -1540,6 +1550,47 @@ function renderRecipes() {
       body: `
       ${state.savedRecipes.length ? `<input type="search" placeholder="Search saved" value="${esc(ui.savedFilter)}" data-action="saved-filter" aria-label="Search saved recipes">` : ""}
       <div class="recipe-grid" data-testid="saved-recipes" style="margin-top:8px">${saved.map((r) => recipeCard(r, { saved: true })).join("") || '<p class="muted small">Save recipes you like and they will work even when offline.</p>'}</div>` })}`;
+}
+
+// Recipes by age: the book's recipes for the baby, the 4-year-old and the family, by meal. ☆ marks
+// a recipe to use often, and the meal planner then picks it first for that person's meals.
+const MEAL_LABELS = { breakfast: "Breakfast", lunch: "Lunch", lunchbox: "School lunchbox", snack: "Snack", dinner: "Dinner" };
+const AGE_ICONS = { baby: "👶", kid: "👧", family: "🍛" };
+const AGE_SHOWN = 8;
+
+function renderAgeSections() {
+  const who = ui.age.who;
+  const byMeal = ageSection(LIBRARY, who, state.settings);
+  const meals = SECTION_MEALS[who].filter((m) => byMeal[m].length);
+  const meal = meals.includes(ui.age.meal) ? ui.age.meal : "";
+  const list = meal ? byMeal[meal] : meals.flatMap((m) => byMeal[m]);
+  const often = regularsFor(state.settings, who).filter((id) => LIBRARY.some((r) => r.id === id));
+  // With every meal shown, the ones used often lead whatever the meal.
+  const shown = (meal ? list : regularsFirst(list, often));
+  const rows = ui.age.all ? shown : shown.slice(0, AGE_SHOWN);
+  const row = (r) => {
+    const on = often.includes(r.id);
+    return `<div class="age-row" data-testid="age-recipe" data-recipe-id="${esc(r.id)}" data-often="${on}">
+      <button type="button" class="ready-item" data-action="view-recipe" data-id="${esc(r.id)}">
+        ${art(r, "sm")}<span class="grow"><strong>${esc(r.title)}</strong>${r.familyFavorite ? " ⭐" : ""}${tagIcons(r) ? ` <span aria-hidden="true">${tagIcons(r)}</span>` : ""}
+          <span class="small muted">${esc(MEAL_LABELS[r.mealType] || r.mealType)}${r.prepMinutes ? ` · ${esc(r.prepMinutes)} min` : ""}${on ? ' · <span style="color:var(--ok)">used often in the planner</span>' : ""}</span></span></button>
+      <button type="button" class="iconbtn often${on ? " on" : ""}" aria-pressed="${on}" data-action="toggle-often" data-who="${who}" data-id="${esc(r.id)}" data-testid="toggle-often"
+        title="${on ? "Stop using often" : "Use often in the meal planner"}" aria-label="${on ? "Stop using often" : "Use often in the meal planner"}: ${esc(r.title)}">${on ? "★" : "☆"}</button>
+    </div>`;
+  };
+  const counts = AGE_SECTIONS.map((w) => regularsFor(state.settings, w).length);
+  return section({ id: "sec-by-age", icon: "🧒", title: "Recipes by age", testid: "recipes-by-age",
+    meta: counts.some(Boolean) ? AGE_SECTIONS.map((w, i) => counts[i] ? `${AGE_ICONS[w]} ${counts[i]} used often` : "").filter(Boolean).join(" · ") : "Baby, 4-year-old and family recipes. ☆ the ones to use often",
+    body: `
+    <div class="seg" role="group" aria-label="Whose recipes" style="margin-top:8px" data-testid="age-who">${AGE_SECTIONS.map((w) =>
+      `<button type="button" aria-pressed="${w === who}" data-action="age-who" data-who="${w}">${AGE_ICONS[w]} ${esc(w === "family" ? "Family" : whoLabel(w, state.settings, { age: true }))}</button>`).join("")}</div>
+    <div class="chips" style="margin-top:8px" data-testid="age-meal">${[["", "All"], ...meals.map((m) => [m, MEAL_LABELS[m]])].map(([m, l]) =>
+      `<button type="button" class="chip add veg${m === meal ? " on" : ""}" aria-pressed="${m === meal}" data-action="age-meal" data-meal="${m}">${esc(l)} <span class="muted">${m ? byMeal[m].length : meals.reduce((n, x) => n + byMeal[x].length, 0)}</span></button>`).join("")}</div>
+    <p class="small muted" style="margin:8px 0">${often.length
+      ? `★ ${often.length} used often: the meal planner picks ${often.length > 1 ? "these" : "this"} first for ${esc(who === "family" ? "the family" : whoLabel(who, state.settings))} and can bring ${often.length > 1 ? "them" : "it"} back after ${REGULAR_GAP_DAYS} days.`
+      : `Tap ☆ on the recipes you make all the time. The meal planner picks them first for ${esc(who === "family" ? "the family" : whoLabel(who, state.settings))}'s meals.`}</p>
+    <div class="ready-list" data-testid="age-list">${rows.map(row).join("")}</div>
+    ${shown.length > AGE_SHOWN ? `<div class="row" style="margin-top:6px"><button type="button" class="btn sm" data-action="age-all" data-testid="age-all">${ui.age.all ? "Show fewer" : `Show all ${shown.length}`}</button></div>` : ""}` });
 }
 
 // Cook by vegetable: tap one or more vegetables and see the book's fries and curries made with them.
@@ -2411,6 +2462,20 @@ document.addEventListener("click", (e) => {
       break;
     }
     case "cook-veg-clear": ui.cookVeg = []; render(); break;
+    case "age-who": ui.age = { who: el.dataset.who, meal: "", all: false }; render(); break;
+    case "age-meal": ui.age = { ...ui.age, meal: el.dataset.meal, all: false }; render(); break;
+    case "age-all": ui.age = { ...ui.age, all: !ui.age.all }; render(); break;
+    case "toggle-often": {
+      const { who, id } = el.dataset;
+      const r = findRecipe(id);
+      const on = !isRegular(state.settings, who, id);
+      state.settings.regulars = toggleRegular(state.settings, who, id);
+      // The day panel's suggestions are cached: drop them so the change shows up straight away.
+      ui.suggest = {};
+      commit();
+      toast(on ? `★ ${r?.title || "Recipe"} will come up often in the meal planner` : `${r?.title || "Recipe"} is no longer used often`);
+      break;
+    }
     case "pantry-quick": if (!state.pantry.some((p) => normName(p) === normName(el.dataset.name))) { state.pantry.push(el.dataset.name); noteAdded(el.dataset.name); } commit(); break;
     case "cancel-ai": ui.aiController?.abort("cancel"); break;
     case "save-recipe": {
