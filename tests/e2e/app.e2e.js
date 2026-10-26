@@ -1102,9 +1102,9 @@ test("E2E BRK-03 weekday suggestions: breakfast made the night before or no-cook
   await ctx.close();
 });
 
-test("E2E SNK-01 school-day snack is a light snack-box idea; nut-free swaps nut butter for sunflower seed butter", async () => {
+test("E2E SNK-01 school-day snack box is cheese or a ragi cookie, never nuts at a nut-free school, and no ragi cookie after a ragi breakfast", async () => {
   const { page, ctx, errors } = await open();
-  const BOX = /Apple slices with (peanut butter dip|sunflower seed butter)|Cheese cubes and cucumber sticks|Ragi cookies|Cheese and chopped nuts snack box|Date and dry fruit ladoo|Peanut butter oat energy bites/;
+  const BOX = /Cheese cubes and cucumber sticks|Ragi cookies|Cheese and chopped nuts snack box/;
   const snack = page.locator("[data-testid=suggestion][data-slot=kid_snack]");
   const seen = async (n) => {
     const out = [];
@@ -1116,17 +1116,37 @@ test("E2E SNK-01 school-day snack is a light snack-box idea; nut-free swaps nut 
   };
   await cell(page, "2026-10-26").click();   // a Monday
   for (const t of await seen(6)) assert.match(t, BOX);
-  // Nut-free school: still a tiny box, never a nut butter.
+  // Nut-free school: still cheese or a ragi cookie, never nuts.
   await tid(page, "tab-recipes").click();
   await tid(page, "school-nut-free").check();
   await tid(page, "tab-calendar").click();
   await cell(page, "2026-10-27").click();
   const nutFree = await seen(6);
   for (const t of nutFree) {
-    assert.match(t, /Apple slices with sunflower seed butter|Cheese cubes and cucumber sticks|Ragi cookies/);
+    assert.match(t, /Cheese cubes and cucumber sticks|Ragi cookies/);
     assert.doesNotMatch(t, /peanut|nuts\b|almond|cashew/i);
   }
-  assert.ok(nutFree.some((t) => /sunflower seed butter/.test(t)), nutFree.join(" | "));
+  // Ragi at breakfast: the snack box is cheese that day.
+  await planSlot(page, "2026-10-28", "kid_breakfast", "Ragi banana pancakes");
+  for (const t of await seen(6)) assert.match(t, /Cheese cubes and cucumber sticks/);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test("E2E SNK-02 filling the week with a curry every night doesn't put the same lunchbox on every school day", async () => {
+  const { page, ctx, errors } = await open();
+  for (const d of ["2026-10-25", "2026-10-26", "2026-10-27", "2026-10-28", "2026-10-29"]) await planSlot(page, d, "family_dinner", "Vankaya kura (brinjal curry)");
+  await cell(page, "2026-10-26").click();
+  await tid(page, "fill-week").click();
+  await tid(page, "toast").waitFor();
+  const meals = await page.evaluate(() => ["2026-10-26", "2026-10-27", "2026-10-28", "2026-10-29", "2026-10-30"].map((k) => window.__mealPlanner.state.days[k].meals));
+  const lunches = meals.map((m) => m.kid_lunchbox?.title);
+  assert.ok(lunches.every(Boolean), lunches.join(" | "));
+  assert.equal(new Set(lunches).size, lunches.length, lunches.join(" | "));
+  for (const m of meals) {
+    assert.match(m.kid_snack.title, /cheese|ragi cookie/i);
+    if (/ragi/i.test(m.kid_breakfast?.title || "")) assert.doesNotMatch(m.kid_snack.title, /ragi/i);
+  }
   assert.deepEqual(errors, []);
   await ctx.close();
 });
@@ -1441,7 +1461,7 @@ test("E2E PREF-01 a gassy baby on iron-fortified cereal: Profile saves it, sugge
   for (const m of meals) {
     for (const [slot, meal] of Object.entries(m)) {
       if (slot.startsWith("baby")) assert.doesNotMatch(meal.title, /cauliflower|cabbage|broccoli|rajma|chana|ragi/i);
-      if (slot.startsWith("kid")) assert.doesNotMatch(meal.title, /\begg/i, `${slot}: ${meal.title}`);
+      if (slot.startsWith("kid")) assert.doesNotMatch(meal.title, /(?<!no )\begg/i, `${slot}: ${meal.title}`);
     }
   }
 
