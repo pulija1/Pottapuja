@@ -1647,3 +1647,45 @@ test("E2E AGE-01 recipes by age: ☆ a baby dinner and the week's plan uses it o
   assert.deepEqual(errors, []);
   await ctx.close();
 });
+
+test("E2E TIDY-01 Recipes opens with the kitchen, recipes by age and ready to cook; leftovers fold; a shopping item can be deleted; HEB, Trader Joe's and Kroger are stores", async () => {
+  const ctx = await newContext({ viewport: { width: 390, height: 844 } });
+  // A list saved before the new stores were offered gets them once.
+  await ctx.addInitScript(() => {
+    if (sessionStorage.getItem("seeded")) return;
+    sessionStorage.setItem("seeded", "1");
+    localStorage.setItem("familyMealPlanner.v1", JSON.stringify({ version: 1, pantry: ["rice"], shopping: [], stores: ["Indian grocery", "Costco"], settings: {} }));
+  });
+  const page = await ctx.newPage();
+  const errors = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await page.goto(`${mock.url}?today=${TODAY}`);
+  await tid(page, "cal-grid").waitFor();
+
+  await tid(page, "tab-recipes").click();
+  const order = await page.evaluate(() => [...document.querySelectorAll("#view-recipes > details.section")].map((d) => d.dataset.group));
+  assert.deepEqual(order.slice(0, 3), ["sec-kitchen", "sec-by-age", "sec-ready"]);
+  assert.ok(!(await tid(page, "leftover-ideas").evaluate((d) => d.open)), "leftover makeovers start folded");
+
+  await tid(page, "tab-shopping").click();
+  assert.deepEqual(await page.evaluate(() => window.__mealPlanner.state.stores), ["Indian grocery", "Costco", "HEB", "Trader Joe's", "Kroger"]);
+  await addShopItems(page, ["Milk", "Eggs"]);
+  const item = (n) => page.locator(`[data-testid=shop-item][data-name="${n}"]`);
+  await item("milk").getByTestId("shop-delete").click();
+  assert.equal(await item("milk").count(), 0, "deleted, not moved to the cart");
+  assert.equal(await tid(page, "shop-cart").count(), 0);
+  assert.ok(!(await page.evaluate(() => window.__mealPlanner.state.pantry)).includes("milk"), "a deleted item doesn't go to the kitchen");
+  await tid(page, "toast-undo").click();
+  assert.equal(await item("milk").count(), 1);
+
+  // A store removed later stays removed after a reload.
+  await page.locator("[data-group=sec-fill] > summary").click();
+  await page.locator(".shop-extra > summary").click();
+  await page.getByRole("button", { name: "Remove Kroger" }).click();
+  await page.waitForTimeout(400);
+  await page.reload();
+  await page.waitForFunction(() => window.__mealPlanner);
+  assert.ok(!(await page.evaluate(() => window.__mealPlanner.state.stores)).includes("Kroger"));
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
