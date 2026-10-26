@@ -908,14 +908,29 @@ const claudeRecipe = (o) => ({ title: "Ragi banana porridge", forWhom: "baby", m
   ingredients: [{ name: "ragi flour", quantity: 2, unit: "tbsp" }, { name: "water", quantity: 1, unit: "cup" }, { name: "banana", quantity: 0.5, unit: "pcs" }],
   steps: ["Whisk ragi into water.", "Cook on low, stirring, until thick.", "Mash in banana and cool."], notes: "", ...o });
 
+// The browser asks Claude for a streamed answer; this sends `message` back as server-sent events,
+// a few characters at a time, the way the Messages API streams it.
+function sseBody({ content, ...message }) {
+  const ev = (type, o) => `event: ${type}\ndata: ${JSON.stringify({ type, ...o })}\n\n`;
+  let out = ev("message_start", { message: { ...message, content: [], stop_reason: null } });
+  content.forEach((b, index) => {
+    const start = b.type === "text" ? { type: "text", text: "" } : b.type === "thinking" ? { type: "thinking", thinking: "" } : b;
+    out += ev("content_block_start", { index, content_block: start });
+    if (b.type === "text") for (let i = 0; i < b.text.length; i += 7) out += ev("content_block_delta", { index, delta: { type: "text_delta", text: b.text.slice(i, i + 7) } });
+    if (b.type === "thinking") out += ev("content_block_delta", { index, delta: { type: "thinking_delta", thinking: b.thinking } }) + ev("content_block_delta", { index, delta: { type: "signature_delta", signature: b.signature } });
+    out += ev("content_block_stop", { index });
+  });
+  return out + ev("message_delta", { delta: { stop_reason: message.stop_reason } }) + ev("message_stop", {});
+}
+const streamed = (message) => ({ status: 200, contentType: "text/event-stream", headers: { "access-control-allow-origin": "*" }, body: sseBody(message) });
+
 async function fakeClaude(page, { status = 200, recipes = [claudeRecipe()] } = {}) {
   const calls = [];
   await page.route("https://api.anthropic.com/**", async (route) => {
     const req = route.request();
     calls.push({ headers: req.headers(), body: JSON.parse(req.postData() || "{}") });
     if (status !== 200) return route.fulfill({ status, contentType: "application/json", headers: { "access-control-allow-origin": "*" }, body: JSON.stringify({ type: "error", error: { type: "authentication_error", message: "invalid x-api-key" } }) });
-    await route.fulfill({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": "*" },
-      body: JSON.stringify({ id: "msg_1", type: "message", role: "assistant", stop_reason: "end_turn", content: [{ type: "text", text: JSON.stringify({ recipes }) }] }) });
+    await route.fulfill(streamed({ id: "msg_1", type: "message", role: "assistant", stop_reason: "end_turn", content: [{ type: "text", text: JSON.stringify({ recipes }) }] }));
   });
   return calls;
 }
@@ -943,6 +958,7 @@ test("E2E AIKEY-04 no AI on the site: add a key in the profile, get AI recipes f
   assert.equal(calls.length, 1);
   assert.equal(calls[0].headers["x-api-key"], FAKE_KEY);
   assert.equal(calls[0].headers["anthropic-dangerous-direct-browser-access"], "true");
+  assert.equal(calls[0].body.stream, true, "the answer streams so phones don't drop a long wait");
   assert.equal(calls[0].body.output_config.format.type, "json_schema");
   assert.match(calls[0].body.system, /never honey/);
   assert.match(await tid(page, "rejected-notice").textContent(), /Honey oats/);
@@ -1262,9 +1278,8 @@ async function fakePlanChat(page, answers) {
     const body = JSON.parse(req.postData() || "{}");
     calls.push({ headers: req.headers(), body });
     const answer = answers[calls.length - 1](body);
-    await route.fulfill({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": "*" },
-      body: JSON.stringify({ id: "msg_" + calls.length, type: "message", role: "assistant", stop_reason: "end_turn",
-        content: [{ type: "thinking", thinking: "", signature: "sig" + calls.length }, { type: "text", text: JSON.stringify(answer) }] }) });
+    await route.fulfill(streamed({ id: "msg_" + calls.length, type: "message", role: "assistant", stop_reason: "end_turn",
+      content: [{ type: "thinking", thinking: "", signature: "sig" + calls.length }, { type: "text", text: JSON.stringify(answer) }] }));
   });
   return calls;
 }

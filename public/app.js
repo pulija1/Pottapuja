@@ -19,6 +19,7 @@ import { SLOTS, emptyDay, getDay, dayHasPlan, markEdited, approveDay, unapproveD
 const state = load();
 let TODAY = todayKey();
 const AI_TIMEOUT_MS = 50000;  // the server gives up at 40 s
+const KEY_AI_TIMEOUT_MS = 120000;  // straight to Claude with the family's key: no server limit, the answer streams in
 
 const ui = {
   tab: "calendar",
@@ -1757,7 +1758,7 @@ async function askRecipes(body, { busyMorning = false, maxMinutes = 0 } = {}) {
   }
   ui.aiBusy = true;
   ui.aiController = new AbortController();
-  const timer = setTimeout(() => ui.aiController?.abort("timeout"), AI_TIMEOUT_MS);
+  const timer = setTimeout(() => ui.aiController?.abort("timeout"), ui.ai === "key" ? KEY_AI_TIMEOUT_MS : AI_TIMEOUT_MS);
   render();
   const started = performance.now();
   try {
