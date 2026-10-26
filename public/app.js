@@ -330,7 +330,11 @@ function kidGoals(key, extra = {}) {
 function renderKidGoals(key) {
   const goals = kidGoals(key);
   const sugg = key >= TODAY ? kidGoals(key, suggestionsFor(key)) : goals;
-  return `<div class="goals" data-testid="kid-goals" aria-label="Daily goals for ${esc(whoLabel("kid", state.settings))}">
+  // Folded to one small line under the meals: the checks still run, but take no room until opened.
+  const ticks = GOALS.filter((g) => goals[g]).length;
+  return `<details class="goals-foot" data-group="kid-goals" data-testid="kid-goals-foot" ${ui.openGroups.has("kid-goals") ? "open" : ""}>
+    <summary class="small muted">${GOALS.map((g) => GOAL_LABELS[g].split(" ")[0]).join("")} Egg, milk, nuts · ${ticks} of ${GOALS.length}</summary>
+    <div class="goals" data-testid="kid-goals" aria-label="Daily goals for ${esc(whoLabel("kid", state.settings))}">
     ${GOALS.map((g) => {
       const hit = goals[g];
       const idea = !hit && sugg[g];
@@ -338,7 +342,8 @@ function renderKidGoals(key) {
       return `<div class="goal ${hit ? "done" : idea ? "idea" : "todo"}" data-testid="kid-goal" data-goal="${g}" data-done="${!!hit}" title="${esc(how)}">
         <span class="goal-label">${GOAL_LABELS[g]} ${hit ? "✓" : ""}</span><span class="goal-how">${esc(how)}</span></div>`;
     }).join("")}
-  </div>`;
+    </div>
+  </details>`;
 }
 
 // A picture tile for a dish or an item: a big emoji on a soft colour (see shared/food-art.js).
@@ -1030,6 +1035,30 @@ function dropUnsuitable(key) {
   return n;
 }
 
+// 🔀 on a planned meal: swaps it for the next kitchen idea for that slot, as 🔀 does on a
+// suggestion. Each tap moves one idea further along; Undo puts the planned meal back.
+function swapMeal(key, slot) {
+  const d = ensureDay(key);
+  const old = d.meals[slot];
+  if (!old?.title) return;
+  const undo = snapshotDays([key]);
+  delete d.meals[slot];
+  const e = ui.suggest[key] || (ui.suggest[key] = { seed: 0, offsets: {}, picks: null });
+  let r = null;
+  for (let i = 0; i < 6 && !r; i++) {
+    e.offsets[slot] = (e.offsets[slot] || 0) + 1;
+    e.picks = null;
+    const pick = findRecipe(suggestionsFor(key)[slot]);
+    if (pick && pick.id !== old.recipeId && pick.title !== old.title) r = pick;
+  }
+  e.picks = null;
+  if (!r) { d.meals[slot] = old; return toast("No other idea from the kitchen for this meal right now."); }
+  d.meals[slot] = { recipeId: r.id, title: r.title, forWhom: r.forWhom };
+  markEdited(d);
+  commitDay(key);
+  toast(`Swapped ${old.title} for ${r.title}.`, undo);
+}
+
 const mealCount = (n) => `${n} meal${n > 1 ? "s" : ""}`;
 
 // Without AI: the kitchen suggestions for every empty meal of the week, a day at a time so each
@@ -1326,6 +1355,7 @@ function slotRow(s, day, issues) {
       ${m?.title ? art({ title: m.title }, "sm") : '<span class="art sm empty" aria-hidden="true">＋</span>'}
       <input type="text" list="dl-${s.who}" value="${esc(m?.title || "")}" placeholder="Pick a recipe or type a dish" data-action="slot" data-slot="${s.id}" data-who="${s.who}" data-testid="slot-${s.id}" aria-label="${esc(slotLabel(s, state.settings))}">
       ${r ? `<button class="iconbtn" data-action="view-recipe" data-id="${esc(r.id)}" title="View recipe" aria-label="View recipe">📖</button>` : ""}
+      ${m?.title && ui.selected >= TODAY ? `<button class="iconbtn" data-action="swap-meal" data-slot="${s.id}" data-testid="swap-meal" title="Another idea" aria-label="Another idea for ${esc(slotLabel(s, state.settings))}">🔀</button>` : ""}
       ${m?.title ? `<button class="iconbtn" data-action="clear-slot" data-slot="${s.id}" title="Clear" aria-label="Clear ${esc(slotLabel(s, state.settings))}">✕</button>` : ""}
     </div>
     ${issues[s.id] ? `<span class="small" style="color:var(--bad)" data-testid="slot-warning">⛔ ${esc(issues[s.id].messages[0])}</span>` : ""}
@@ -1416,7 +1446,6 @@ function renderDayPanel(key) {
     ${pendList.length ? `<ul class="pending-list" data-testid="day-pending">${pendList.map((p) => `<li data-type="${p.type}">${{ approval: "⏳", plan: "📝", reminder: "⏰", todo: "✅" }[p.type]} ${esc(p.text)}${p.overdue ? ' <span class="pill bad">overdue</span>' : ""}</li>`).join("")}</ul>` : ""}
 
     <h3 class="day-h">🍽️ Meals</h3>
-    ${renderKidGoals(key)}
     ${renderPrepAhead(key)}
     ${renderSuggestions(key)}
     ${renderBasketPlan(key)}
@@ -1441,6 +1470,7 @@ function renderDayPanel(key) {
       <button class="btn sm" data-action="copy-prev" data-testid="copy-prev">Copy previous day</button>
       <button class="btn sm" data-action="day-to-shopping" data-testid="day-to-shopping">🛒 Add missing to shopping</button>
     </div>
+    ${renderKidGoals(key)}
 
     <div class="day-sections">
     ${section({
@@ -2412,6 +2442,7 @@ document.addEventListener("click", (e) => {
     case "approve-anyway": approveDay(day()); ui.confirmUnsafe = null; commitDay(); toast("Day approved ✅"); break;
     case "cancel-approve": ui.confirmUnsafe = null; renderDay(); break;
     case "unapprove": unapproveDay(day()); commitDay(); break;
+    case "swap-meal": swapMeal(ui.selected, el.dataset.slot); break;
     case "clear-slot": { const d = day(); delete d.meals[el.dataset.slot]; markEdited(d); commitDay(); break; }
     case "view-recipe": { const r = findRecipe(el.dataset.id); if (r) recipeDialog(r); break; }
     case "more-picks": ui.morePicks = true; render(); break;

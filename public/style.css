@@ -443,6 +443,9 @@ label.row > input[type=checkbox] { width: 22px; height: 22px; accent-color: var(
 dialog details > * + * { margin-top: 8px; }
 
 /* Daily goals for the 4-year-old (egg, milk, nuts) and the "ready to cook" list */
+.goals-foot { margin-top: 10px; }
+.goals-foot > summary { cursor: pointer; padding: 4px 0; }
+.goals-foot .goals { margin-top: 6px; }
 .goals { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-bottom: 10px; }
 .goal { border-radius: 12px; padding: 10px 12px; min-height: 56px; display: flex; flex-direction: column; justify-content: center; gap: 2px; border: 2px solid var(--line); background: var(--card); }
 .goal .goal-label { font-weight: 700; font-size: 1rem; }

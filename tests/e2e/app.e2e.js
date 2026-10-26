@@ -822,6 +822,9 @@ test("E2E GOAL-01 each day shows egg, milk and nuts for the 4-year-old; planned 
   const { page, ctx, errors } = await open();
   await cell(page, "2026-10-26").click();
   const goal = (g) => page.locator(`[data-testid=kid-goal][data-goal=${g}]`);
+  // Folded under the meals so they take no room; one tap opens them.
+  assert.equal(await tid(page, "kid-goals-foot").getAttribute("open"), null);
+  await tid(page, "kid-goals-foot").locator("summary").click();
   assert.equal(await tid(page, "kid-goal").count(), 3);
   assert.equal(await goal("egg").getAttribute("data-done"), "false");
   await planSlot(page, "2026-10-26", "kid_breakfast", "Egg rava upma");
@@ -1553,6 +1556,30 @@ test("E2E PREF-02 ragi planned before the never-use list was set is swapped out 
   const again = await page.evaluate((keys) => keys.map((k) => window.__mealPlanner.state.days[k]?.meals || {}), week);
   assert.deepEqual(again.map((m) => Object.keys(m).sort().join()), meals.map((m) => Object.keys(m).sort().join()), "the week is planned again as before");
   for (const m of again) for (const [slot, meal] of Object.entries(m)) if (slot.startsWith("baby")) assert.doesNotMatch(meal.title, /ragi/i);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test("E2E SWAP-01 a planned meal has 🔀 next to 📖 for another idea, with Undo", async () => {
+  const { page, ctx, errors } = await open(off);
+  await page.evaluate(() => { window.__mealPlanner.state.pantry.push("rice", "toor dal", "tomato", "curd", "onion", "potato", "egg", "milk", "banana"); });
+  await tid(page, "tab-calendar").click();
+  await cell(page, TODAY).click();
+  await tid(page, "fill-week").click();
+  await tid(page, "toast").waitFor();
+  // Every slot is planned, so the suggestions box is gone; the planned meal itself carries 🔀.
+  assert.equal(await tid(page, "day-suggestions").count(), 0);
+  await openGroup(page, "family_dinner");
+  const slot = page.locator('[data-action="swap-meal"][data-slot="family_dinner"]');
+  assert.equal(await slot.count(), 1);
+  const before = await page.evaluate((k) => window.__mealPlanner.state.days[k].meals.family_dinner.title, TODAY);
+  await slot.click();
+  const after = await page.evaluate((k) => window.__mealPlanner.state.days[k].meals.family_dinner.title, TODAY);
+  assert.notEqual(after, before);
+  assert.match(await tid(page, "toast").textContent(), /Swapped .+ for .+/);
+  assert.equal(await tid(page, "slot-family_dinner").inputValue(), after);
+  await tid(page, "toast-undo").click();
+  assert.equal(await page.evaluate((k) => window.__mealPlanner.state.days[k].meals.family_dinner.title, TODAY), before);
   assert.deepEqual(errors, []);
   await ctx.close();
 });
