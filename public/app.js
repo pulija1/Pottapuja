@@ -14,6 +14,7 @@ import { APPLIANCES, ownedAppliances, methodsFor, fastestMinutes, basketPairs, a
 import { NUTRIENTS, DAILY_NEEDS, estimateNutrition, dailyShare } from "./shared/nutrition.js";
 import { mergeItems, groupByAisle, formatQty, missingFromPantry, normName, normUnit, aisleFor } from "./shared/shopping.js";
 import { foodArt } from "./shared/food-art.js";
+import { lunchTurn } from "./shared/lunch-rotation.js";
 import { AGE_SECTIONS, SECTION_MEALS, REGULAR_GAP_DAYS, regularsFor, isRegular, toggleRegular, ageSection, regularsFirst } from "./shared/regulars.js";
 import { SLOTS, emptyDay, getDay, dayHasPlan, markEdited, approveDay, unapproveDay, slotsFor, todosOn, MEAL_GROUPS, whoLabel, slotLabel, remindersOn, pendingFor, dayStatus } from "./shared/plan.js";
 
@@ -888,6 +889,7 @@ function suggestionsFor(key) {
   // A curry cooked the day before becomes one of today's meals (roti quesadilla, kathi roll, kari dosa).
   const leftovers = leftoversFrom(addDays(key, -1));
   entry.leftover = {};
+  entry.rotation = {};
   const prev = getDay(state, addDays(key, -1));
   const avoid = new Set(Object.values(prev?.meals || {}).map((m) => m?.recipeId).filter(Boolean));
   // Everything planned in the 6 days before: the same lunch shouldn't come back every day of the week.
@@ -908,6 +910,18 @@ function suggestionsFor(key) {
     const opt = { forWhom: s.who, schoolNutFree: nutFreeOn(), limit: 40, cuisines, frozen: frozenOnHand(), appliances: appliancesOwned(), staples: staplesOn(), useSoon: useSoonOn(key, picks), settings: state.settings, child, regulars: often };
     const seen = new Set();
     const safe = (r) => checkRecipe(r, { age: s.who === "baby" ? "baby" : "kid", lunchbox: s.id === "kid_lunchbox" || s.id === "kid_snack", schoolNutFree: nutFreeOn() }).safe && !prefProblem(r, child, state.settings);
+    // The school lunch goes round the 4-year-old's list in order, skipping the ones the kitchen can't make.
+    // Yesterday's curry makeover goes in another meal instead.
+    if (s.id === "kid_lunchbox") {
+      const ok = (id) => { const r = findRecipe(id); return !!r && safe(r); };
+      const turn = lunchTurn(key, { days: state.days, today: TODAY, kitchen: [...pantry, ...frozenOnHand()], ok }).filter((id) => !used.has(id));
+      if (turn.length) {
+        picks[s.id] = turn[(entry.seed + (entry.offsets[s.id] || 0)) % turn.length];
+        used.add(picks[s.id]);
+        (entry.rotation ||= {})[s.id] = true;
+        continue;
+      }
+    }
     // One leftover idea a day, in the first slot it fits. 🔀 on that slot moves on to the usual ideas.
     if (leftovers.length && !Object.keys(entry.leftover).length && !entry.offsets[s.id]) {
       const ideas = leftovers.flatMap((l) => leftoverRecipesFor(l.kind, { cuisines }).map((r) => ({ r, l })))
@@ -1240,10 +1254,11 @@ function renderSuggestions(key) {
       const r = findRecipe(picks[s.id]);
       const need = shoppingNeeds(r);
       const from = ui.suggest[key]?.leftover?.[s.id];
+      const turn = ui.suggest[key]?.rotation?.[s.id];
       const cold = fromFreezer(r);
       return `<div class="suggest-row" data-testid="suggestion" data-slot="${s.id}">
         <span class="small muted">${esc(slotLabel(s, state.settings))}</span>
-        <span class="grow">${from ? `<span class="small" data-testid="leftover-idea">♻️ Uses yesterday's ${esc(from)}</span><br>` : ""}${r.busyMorning && isSchoolDay(key) ? `<span class="small muted" data-testid="busy-morning">${esc(busyLabel(r))}</span><br>` : ""}${art(r, "xs")} ${esc(r.title)}${r.familyFavorite ? " ⭐" : ""}${tagIcons(r) ? ` <span aria-hidden="true">${tagIcons(r)}</span>` : ""}${applianceNote(r)}${need.length ? ` <span class="small" style="color:var(--warn)">· need ${esc(need.map((i) => i.name).join(", "))}</span>` : ' <span class="small" style="color:var(--ok)">· all in the kitchen</span>'}${cold.length ? ` <span class="small" data-testid="from-freezer">· 🧊 ${esc(cold.join(", "))} from the freezer</span>` : ""}${sideDipsFor(r).length ? `<br><span class="small" data-testid="side-dip">🥣 With ${esc(sideDipsFor(r).map((d) => d.title.toLowerCase()).join(" or "))}</span>` : ""}${s.id === "baby_breakfast" && !recipeHasFruit(r) ? `<br>${babyFruitNote(ui.suggest[key]?.seed || 0, true)}` : ""}</span>
+        <span class="grow">${from ? `<span class="small" data-testid="leftover-idea">♻️ Uses yesterday's ${esc(from)}</span><br>` : ""}${turn ? `<span class="small muted" data-testid="lunch-turn">🔁 Next on ${esc(state.settings.kidName || "the 4-year-old")}'s lunch list</span><br>` : ""}${r.busyMorning && isSchoolDay(key) ? `<span class="small muted" data-testid="busy-morning">${esc(busyLabel(r))}</span><br>` : ""}${art(r, "xs")} ${esc(r.title)}${r.familyFavorite ? " ⭐" : ""}${tagIcons(r) ? ` <span aria-hidden="true">${tagIcons(r)}</span>` : ""}${applianceNote(r)}${need.length ? ` <span class="small" style="color:var(--warn)">· need ${esc(need.map((i) => i.name).join(", "))}</span>` : ' <span class="small" style="color:var(--ok)">· all in the kitchen</span>'}${cold.length ? ` <span class="small" data-testid="from-freezer">· 🧊 ${esc(cold.join(", "))} from the freezer</span>` : ""}${sideDipsFor(r).length ? `<br><span class="small" data-testid="side-dip">🥣 With ${esc(sideDipsFor(r).map((d) => d.title.toLowerCase()).join(" or "))}</span>` : ""}${s.id === "baby_breakfast" && !recipeHasFruit(r) ? `<br>${babyFruitNote(ui.suggest[key]?.seed || 0, true)}` : ""}</span>
         <button type="button" class="iconbtn" data-action="suggest-swap" data-slot="${s.id}" title="Another idea" aria-label="Another idea for ${esc(slotLabel(s, state.settings))}">🔀</button>
       </div>`;
     }).join("")}

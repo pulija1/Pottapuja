@@ -1252,6 +1252,59 @@ How to read and edit this file: see [README.md](README.md).
 
 **Notes:** Contains peanuts. Spread a thin layer of peanut butter on both slices with jam in the middle to stop the bread getting soggy.
 
+### Cream cheese cucumber sandwich
+
+- **For:** kid
+- **Meal:** lunchbox
+- **Cuisine:** American
+- **Time:** 5 min
+- **Good for:** 🥛 Milk/dairy
+
+**Ingredients**
+
+- 2 slices whole wheat bread
+- 2 tbsp cream cheese
+- ¼ cucumber, thinly sliced
+- 1 pinch black pepper, optional
+
+**Steps**
+
+1. Pat the cucumber slices dry on a paper towel.
+2. Spread cream cheese on both slices of bread, right to the edges.
+3. Lay the cucumber on one slice, add a pinch of pepper if she likes it, and close the sandwich.
+4. Cut off the crusts if you like and cut into small squares or fingers.
+
+**Notes:** Cream cheese on both slices keeps the bread from going soggy. Pack with an ice pack.
+
+### Oat waffles with blueberries and chocolate chips
+
+- **For:** kid
+- **Meal:** lunchbox
+- **Serves:** 2
+- **Cuisine:** American
+- **Time:** 20 min
+- **Good for:** 🥚 Egg · 🥛 Milk/dairy
+
+**Ingredients**
+
+- 1 cup rolled oats, ground to a powder
+- 1 egg
+- ½ cup milk
+- 1 tsp baking powder
+- 1 tbsp butter, melted, plus more for the iron
+- ¼ cup blueberries
+- 2 tbsp mini chocolate chips
+
+**Steps**
+
+1. Grind the oats to a fine powder.
+2. Whisk the oats powder, baking powder, egg, milk and melted butter into a thick batter and rest it for 5 minutes.
+3. Fold in the blueberries and chocolate chips.
+4. Cook in a greased waffle iron until golden and cooked through.
+5. Cool on a rack before packing so they stay crisp, and cut into strips for small hands.
+
+**Notes:** Halve big blueberries. The waffles freeze well: make a batch at the weekend and toast one in the morning.
+
 ---
 
 ## School snack box: tiny and light
