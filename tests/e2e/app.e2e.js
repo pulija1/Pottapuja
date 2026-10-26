@@ -1026,7 +1026,7 @@ test("E2E APPL-01 appliances in the profile: recipes show the air fryer and oven
   await ctx.close();
 });
 
-test("E2E CUI-01 cuisines picked in the profile steer suggestions and top picks; yesterday's curry becomes a roti quesadilla", async () => {
+test("E2E CUI-01 cuisines picked in the profile steer suggestions and top picks; yesterday's curry becomes a kari dosai", async () => {
   const ctx = await newContext();
   const seed = { version: 1, pantry: ["Bendakaya (okra)", "onion", "tomato", "rice", "roti", "cheese", "curry leaves", "mustard seeds"], frozen: [{ id: "f1", name: "Frozen peas", qty: 2, unit: "packs", date: "2026-10-01" }],
     days: { [TODAY]: { meals: { family_dinner: { recipeId: "lib-kodi-kura", title: "Kodi kura (Andhra chicken curry, mild)", forWhom: "family" } }, schedule: [], status: "pending" } } };
@@ -1044,11 +1044,14 @@ test("E2E CUI-01 cuisines picked in the profile steer suggestions and top picks;
   await tid(page, "save-cuisines").click();
   assert.deepEqual(await page.evaluate(() => window.__mealPlanner.state.settings.cuisines), ["telugu", "tamil"]);
 
-  // The day after the Kodi kura, the school lunchbox suggestion is a leftover makeover.
+  // The day after the Kodi kura, one suggestion is a leftover makeover. The school lunchbox stays on the 4-year-old's list.
   await cell(page, TOMORROW).click();
   const lunch = page.locator("[data-testid=suggestion][data-slot=kid_lunchbox]");
-  assert.match(await lunch.innerText(), /Uses yesterday's Kodi kura[\s\S]*Roti chicken curry quesadilla/);
-  assert.doesNotMatch(await lunch.innerText(), /leftover chicken curry/, "the leftover is never something to buy");
+  assert.match(await lunch.innerText(), /Next on the 4-year-old's lunch list/);
+  assert.doesNotMatch(await lunch.innerText(), /Uses yesterday's/);
+  const dinner = page.locator("[data-testid=suggestion][data-slot=family_dinner]");
+  assert.match(await dinner.innerText(), /Uses yesterday's Kodi kura[\s\S]*Kari dosai/);
+  assert.doesNotMatch(await dinner.innerText(), /leftover chicken curry/, "the leftover is never something to buy");
 
   await tid(page, "tab-recipes").click();
   const top = tid(page, "top-picks");
@@ -1163,6 +1166,24 @@ test("E2E SNK-02 filling the week with a curry every night doesn't put the same 
     assert.match(m.kid_snack.title, /cheese|ragi cookie/i);
     if (/ragi/i.test(m.kid_breakfast?.title || "")) assert.doesNotMatch(m.kid_snack.title, /ragi/i);
   }
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test("E2E LUNCH-07 the school lunches go down the 4-year-old's list in order, skipping chicken quesadilla with no chicken", async () => {
+  // From a Monday: empty school days from today on each take their turn on the list.
+  const { page, ctx, errors } = await open(mock, { today: "2026-10-26" });
+  const week = ["2026-10-26", "2026-10-27", "2026-10-28", "2026-10-29", "2026-10-30"];
+  const lunches = () => page.evaluate((keys) => keys.map((k) => window.__mealPlanner.state.days[k]?.meals?.kid_lunchbox?.title), week);
+  // The kitchen starts with idli batter but no chicken.
+  await cell(page, week[0]).click();
+  await tid(page, "fill-week").click();
+  await tid(page, "toast").waitFor();
+  assert.deepEqual(await lunches(), ["Peanut butter and berry jam sandwich", "Egg corn fried rice", "Soft idli with chutney or sambar", "Mac and cheese with peas and broccoli", "Cream cheese cucumber sandwich"]);
+  // The next Monday carries on down the list, and says so.
+  await cell(page, "2026-11-02").click();
+  const next = page.locator("[data-testid=suggestion][data-slot=kid_lunchbox]");
+  assert.match(await next.innerText(), /Next on the 4-year-old's lunch list[\s\S]*Oat waffles with blueberries and chocolate chips/);
   assert.deepEqual(errors, []);
   await ctx.close();
 });
