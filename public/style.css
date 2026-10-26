@@ -456,6 +456,10 @@ dialog details > * + * { margin-top: 8px; }
 .ready-item { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 52px; text-align: left; border: 1px solid var(--line); border-radius: 12px; background: var(--card); color: var(--ink); padding: 8px 12px; font: inherit; cursor: pointer; }
 .ready-item:hover { border-color: var(--brand); }
 .ready-item .small { display: block; }
+.age-row { display: flex; align-items: center; gap: 4px; }
+.age-row .ready-item { flex: 1; min-width: 0; }
+.iconbtn.often { font-size: 1.4rem; min-width: 44px; min-height: 44px; color: var(--muted); }
+.iconbtn.often.on, .iconbtn.often:hover { color: var(--warn); }
 @media (max-width: 520px) { .goals { gap: 6px; } .goal { padding: 8px; } .goal .goal-label { font-size: .9rem; } }
 .sheet form > .btn.big { width: 100%; }
 .shop-head [data-testid=store-mode] { white-space: nowrap; flex: none; }
