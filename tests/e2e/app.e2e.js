@@ -1521,6 +1521,42 @@ test("E2E PREF-01 a gassy baby on iron-fortified cereal: Profile saves it, sugge
   await ctx.close();
 });
 
+test("E2E PREF-02 ragi planned before the never-use list was set is swapped out by Fill, and Clear empties the week to plan again", async () => {
+  const { page, ctx, errors } = await open(off, { today: "2026-10-26" });   // a Monday
+  const week = ["2026-10-26", "2026-10-27", "2026-10-28", "2026-10-29", "2026-10-30", "2026-10-31", "2026-11-01"];
+  // Ragi meals on the calendar first (planned earlier, or on another phone), then ragi goes on the baby's never-use list.
+  await planSlot(page, week[0], "baby_breakfast", "Ragi porridge (ragi kanji)");
+  await planSlot(page, week[1], "baby_snack", "Banana and ragi pancake fingers");
+  await page.evaluate(() => { const s = window.__mealPlanner.state; s.settings = { ...s.settings, babyName: "Maya", prefs: { baby: { tags: [], note: "", avoid: ["ragi"] } } }; });
+  await cell(page, week[0]).click();
+  assert.match(await tid(page, "slot-warning").first().textContent(), /ragi, which you asked to leave out for Maya/);
+
+  await tid(page, "fill-week").click();
+  assert.match(await tid(page, "toast").textContent(), /Swapped out 2 meals/);
+  const meals = await page.evaluate((keys) => keys.map((k) => window.__mealPlanner.state.days[k]?.meals || {}), week);
+  for (const m of meals) for (const [slot, meal] of Object.entries(m)) if (slot.startsWith("baby")) assert.doesNotMatch(meal.title, /ragi/i, `${slot}: ${meal.title}`);
+  assert.ok(meals[0].baby_breakfast?.title && meals[1].baby_snack?.title, "the swapped slots are planned again");
+  await cell(page, week[0]).click();
+  assert.equal(await tid(page, "slot-warning").count(), 0);
+
+  // Clear takes every meal off the week (today on), keeps the to-dos and kitchen, and Undo brings them back.
+  const pantry = await page.evaluate(() => window.__mealPlanner.state.pantry.length);
+  await tid(page, "clear-week").click();
+  assert.match(await tid(page, "toast").textContent(), /Cleared \d+ meals from this week/);
+  const left = await page.evaluate((keys) => keys.flatMap((k) => Object.values(window.__mealPlanner.state.days[k]?.meals || {})).length, week);
+  assert.equal(left, 0);
+  assert.equal(await page.evaluate(() => window.__mealPlanner.state.pantry.length), pantry);
+  await tid(page, "toast-undo").click();
+  assert.ok(await page.evaluate((k) => !!window.__mealPlanner.state.days[k].meals.baby_breakfast, week[0]));
+  await tid(page, "clear-week").click();
+  await tid(page, "fill-week").click();
+  const again = await page.evaluate((keys) => keys.map((k) => window.__mealPlanner.state.days[k]?.meals || {}), week);
+  assert.deepEqual(again.map((m) => Object.keys(m).sort().join()), meals.map((m) => Object.keys(m).sort().join()), "the week is planned again as before");
+  for (const m of again) for (const [slot, meal] of Object.entries(m)) if (slot.startsWith("baby")) assert.doesNotMatch(meal.title, /ragi/i);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
 test("E2E MORN-01 school-day breakfasts are never slow; the weekend says what to batch and the evening what to prep", async () => {
   const { page, ctx, errors } = await open(off, { today: "2026-10-24" });   // a Saturday
   await page.evaluate(() => { const s = window.__mealPlanner.state; s.pantry.push("egg", "spinach", "cheddar cheese", "flour tortilla", "potato", "black beans", "bread", "milk"); });
