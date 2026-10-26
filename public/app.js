@@ -1577,11 +1577,8 @@ function renderRecipes() {
   const saved = state.savedRecipes.filter((r) => !filt || r.title.toLowerCase().includes(filt));
   const soonCount = expiryList().filter((e) => e.daysLeft <= USE_SOON_DAYS).length;
 
+  // What's at home, the recipes by age and what the kitchen can make come first.
   $("#view-recipes").innerHTML = `
-    ${renderQuickBreakfasts()}
-    ${renderReadyToCook()}
-    ${renderAgeSections()}
-
     ${section({ id: "sec-kitchen", icon: "🧺", title: "What's in the kitchen",
       open: !state.pantry.length,
       meta: state.pantry.length ? `${state.pantry.length} item${state.pantry.length > 1 ? "s" : ""}${soonCount ? ` · ⏳ ${soonCount} to use soon` : ""} · ${esc(state.pantry.slice(0, 4).join(", "))}${state.pantry.length > 4 ? "…" : ""}` : "Empty: add what you have",
@@ -1604,6 +1601,11 @@ function renderRecipes() {
       ${quickAddGroup("Kuragayalu (Telugu vegetables)", TELUGU_VEG, pantrySet, "quick-telugu-veg")}
       ${quickAddGroup("Aakukuralu (leafy greens)", TELUGU_LEAVES, pantrySet, "quick-telugu-leaves")}` })}
 
+    ${renderAgeSections()}
+    ${renderReadyToCook()}
+    ${renderTopPicks()}
+    ${renderQuickBreakfasts()}
+    ${renderLeftoverIdeas()}
     ${renderCookByVegetable()}
 
     ${section({ id: "sec-generate", icon: "✨", title: aiOnline() ? "Make new recipes with AI" : "Find recipes for a meal",
@@ -1760,13 +1762,25 @@ function renderReadyToCook() {
       ${book.problems.length ? `${book.problems.length} recipe${book.problems.length > 1 ? "s" : ""} in the recipe book need fixing: ${book.problems.slice(0, 5).map((p) => `${esc(p.file)}${p.line ? " line " + p.line : ""} “${esc(p.title)}”: ${esc(p.message)}`).join("; ")}` : ""}
     </div>` : "";
   const opt = { schoolNutFree: nutFreeOn(), cuisines: cuisinePicks(), frozen: frozenOnHand(), staples: staplesOn(), useSoon: useSoonOn(TODAY), settings: state.settings };
-  const picks = topPicks(state.pantry, { ...opt, isVegetable: isMainVeg, limit: ui.morePicks ? 15 : 5 });
   const now = readyToCook(state.pantry, { ...opt, limit: 8 });
   const nearly = readyToCook(state.pantry, { ...opt, maxMissing: 1, limit: 30 }).filter((x) => x.missing.length === 1).slice(0, 8);
   const row = (x, testid = "ready-recipe") => `<button type="button" class="ready-item" data-action="view-recipe" data-id="${esc(x.recipe.id)}" data-testid="${testid}">
       ${art(x.recipe, "sm")}<span class="grow"><strong>${esc(x.recipe.title)}</strong>${x.recipe.familyFavorite ? " ⭐" : ""} <span aria-hidden="true">${tagIcons(x.recipe)}</span>
         <span class="small muted">${esc(whoLabel(x.recipe.forWhom, state.settings))} · ${esc(x.recipe.cuisine || x.recipe.mealType)}${x.missing.length ? ` · need ${esc(x.missing.join(", "))}` : ""}${x.fromFreezer?.length ? ` · 🧊 from the freezer: ${esc(x.fromFreezer.join(", "))}` : ""}</span></span>
       <span aria-hidden="true">›</span></button>`;
+  return section({ id: "sec-ready", icon: "🍳", title: "Ready to cook from your kitchen", testid: "ready-to-cook",
+    meta: `${now.length} ready now${nearly.length ? ` · ${nearly.length} need one thing` : ""}`, open: !!trouble,
+    body: `
+    ${trouble}
+    ${now.length ? `<div class="ready-list">${now.map((x) => row(x)).join("")}</div>` : `<p class="small muted">${state.pantry.length ? "Nothing in the recipe book can be made with only what's in the kitchen yet." : "Add what you have in the kitchen and recipes you can make right away show up here."}</p>`}
+    ${nearly.length ? `<h3>Just one thing to buy</h3><div class="ready-list" data-testid="nearly-ready">${nearly.map((x) => row(x)).join("")}</div>` : ""}
+    <p class="small muted" style="margin-top:8px">${LIBRARY.length} recipes in the family recipe book (the <code>recipes/</code> folder in the repository).</p>` });
+}
+
+// Top picks: easy recipes with the kitchen's vegetables, from the cuisines picked in Profile.
+function renderTopPicks() {
+  const opt = { schoolNutFree: nutFreeOn(), cuisines: cuisinePicks(), frozen: frozenOnHand(), staples: staplesOn(), useSoon: useSoonOn(TODAY), settings: state.settings };
+  const picks = topPicks(state.pantry, { ...opt, isVegetable: isMainVeg, limit: ui.morePicks ? 15 : 5 });
   const names = cuisinePicks().map((id) => CUISINES.find((x) => x.id === id).label.replace(/ \(.*\)/, ""));
   // Top picks are picture cards in a row you swipe sideways, like a recipe app's "for you" shelf.
   const pick = (x) => {
@@ -1778,22 +1792,16 @@ function renderReadyToCook() {
       <span class="small muted">${esc(whoLabel(r.forWhom, state.settings))}${x.missing.length ? ` · need ${esc(x.missing.join(", "))}` : " · all in the kitchen"}</span>
     </button>`;
   };
-  const top = picks.length ? `<div class="card picks" data-testid="top-picks">
+  return picks.length ? `<div class="card picks" data-testid="top-picks">
     <div class="row between"><h2>🌟 Top picks for you</h2>${ui.morePicks || picks.length < 5 ? "" : '<button type="button" class="btn sm ghost" data-action="more-picks" data-testid="more-picks">Show more</button>'}</div>
     <p class="small muted">Easy recipes with the vegetables in your kitchen${names.length ? `, from ${esc(names.join(", "))}` : ""}. ${names.length ? "Change cuisines" : "Pick your cuisines"} in <button type="button" class="linkish" data-action="open-profile">👤 Profile</button>.</p>
     <div class="pick-row">${picks.map(pick).join("")}</div>
   </div>` : "";
-  return `${top}${renderLeftoverIdeas()}${section({ id: "sec-ready", icon: "🍳", title: "Ready to cook from your kitchen", testid: "ready-to-cook",
-    meta: `${now.length} ready now${nearly.length ? ` · ${nearly.length} need one thing` : ""}`, open: !!trouble,
-    body: `
-    ${trouble}
-    ${now.length ? `<div class="ready-list">${now.map((x) => row(x)).join("")}</div>` : `<p class="small muted">${state.pantry.length ? "Nothing in the recipe book can be made with only what's in the kitchen yet." : "Add what you have in the kitchen and recipes you can make right away show up here."}</p>`}
-    ${nearly.length ? `<h3>Just one thing to buy</h3><div class="ready-list" data-testid="nearly-ready">${nearly.map((x) => row(x)).join("")}</div>` : ""}
-    <p class="small muted" style="margin-top:8px">${LIBRARY.length} recipes in the family recipe book (the <code>recipes/</code> folder in the repository).</p>` })}`;
 }
 
 // Leftover makeovers: when yesterday's or today's plan has a curry, what it can turn into.
 // Otherwise a short list of the book's makeovers, for leftovers that weren't planned.
+// Folded either way, so it doesn't push the rest of the tab down.
 function renderLeftoverIdeas() {
   const cuisines = cuisinePicks();
   const recent = [...leftoversFrom(addDays(TODAY, -1)), ...leftoversFrom(TODAY)];
@@ -1803,9 +1811,11 @@ function renderLeftoverIdeas() {
         <span class="small muted">${esc(whoLabel(r.forWhom, state.settings))} · ${esc(r.cuisine || r.mealType)}${r.prepMinutes ? " · " + esc(r.prepMinutes) + " min" : ""}</span></span>
       <span aria-hidden="true">›</span></button>`;
   if (fromPlan.length) {
-    return `<div class="card" data-testid="leftover-ideas"><h2>♻️ Leftover makeovers</h2>
+    return section({ id: "sec-leftovers", icon: "♻️", title: "Leftover makeovers", testid: "leftover-ideas",
+      meta: `${esc(fromPlan.map(({ l }) => l.title).join(", "))} can become something new`,
+      body: `
       ${fromPlan.map(({ l, list }) => `<p class="small">${esc(l.title)} can become:</p><div class="ready-list">${list.slice(0, 4).map(item).join("")}</div>`).join("")}
-      <p class="small muted" style="margin-top:8px">Put leftovers in the fridge within 2 hours, use them the next day, and reheat until steaming hot.</p></div>`;
+      <p class="small muted" style="margin-top:8px">Put leftovers in the fridge within 2 hours, use them the next day, and reheat until steaming hot.</p>` });
   }
   const all = LIBRARY.filter((r) => r.leftover).sort((a, b) => inCuisines(b, cuisines) - inCuisines(a, cuisines)).slice(0, 4);
   if (!all.length) return "";
@@ -2046,7 +2056,9 @@ function shopRow(i) {
     check: `<input type="checkbox" class="big-check" data-action="shop-toggle" data-id="${esc(i.id)}" ${i.bought ? "checked" : ""} aria-label="Got ${esc(i.name)}">`,
     pic: art(i.name, "row", AISLE_ICONS[aisleFor(i.name)]),
     body: `<span class="name">${esc(i.label || i.name)}</span>${meta ? `<span class="meta" data-testid="shop-qty-label">${meta}</span>` : ""}`,
-    more: `<button type="button" class="iconbtn lg" data-action="shop-more" data-id="${esc(i.id)}" aria-label="Details for ${esc(i.name)}" data-testid="shop-more">⋯</button>`,
+    // 🗑 takes off something added by mistake; ticking it instead moves it to the kitchen.
+    more: `<button type="button" class="iconbtn lg" data-action="shop-del" data-id="${esc(i.id)}" aria-label="Delete ${esc(i.name)}" title="Delete (added by mistake)" data-testid="shop-delete">🗑</button>
+      <button type="button" class="iconbtn lg" data-action="shop-more" data-id="${esc(i.id)}" aria-label="Details for ${esc(i.name)}" data-testid="shop-more">⋯</button>`,
   });
 }
 
@@ -2088,7 +2100,7 @@ function renderShopping() {
         ${inCart.sort((a, b) => a.name.localeCompare(b.name)).map(shopRow).join("")}
         ${ui.storeMode ? "" : `<button class="btn danger" style="margin-top:8px" data-action="clear-bought" data-testid="clear-bought">Clear the cart</button>`}
       </details>` : ""}
-      ${items.length ? '<p class="small muted swipe-hint">Tip: swipe an item right when you have it, or left to delete.</p>' : ""}
+      ${items.length ? '<p class="small muted swipe-hint">Tip: tick or swipe right when you have it. Added by mistake? Tap 🗑 or swipe left to delete.</p>' : ""}
     </div>
     ${ui.storeMode ? "" : section({ id: "sec-fill", icon: "📋", title: "Fill the list", meta: "From the meal plan, copy as text, stores", body: `
       <div class="row">

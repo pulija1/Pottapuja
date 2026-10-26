@@ -3,6 +3,8 @@
 import { migrateBringToTodos } from "./shared/plan.js";
 
 const KEY = "familyMealPlanner.v1";
+const STORES = ["Indian grocery", "Supermarket", "Costco", "HEB", "Trader Joe's", "Kroger"];
+const NEW_STORES = ["HEB", "Trader Joe's", "Kroger"];
 
 export function defaultState() {
   return {
@@ -12,12 +14,12 @@ export function defaultState() {
     savedRecipes: [],
     days: {},
     shopping: [],
-    stores: ["Indian grocery", "Supermarket", "Costco"],
+    stores: [...STORES],
     todos: [],
     frozen: [],        // what's in the freezer: { id, name, qty, unit, date (when it went in), note }
     reminders: [],
     notified: {},
-    settings: { schoolNutFree: false, kidName: "", babyName: "", airFryer: "", oven: false },   // airFryer: "dual" (two baskets), "single" or ""
+    settings: { schoolNutFree: false, kidName: "", babyName: "", airFryer: "", oven: false, moreStores: true },   // airFryer: "dual" (two baskets), "single" or ""
     updatedAt: null,   // last change made in the app; family sync uses it to tell a used phone from a new one
   };
 }
@@ -34,6 +36,8 @@ function sanitize(data) {
   }
   out.pantry = out.pantry.filter((x) => typeof x === "string");
   out.stores = out.stores.filter((x) => typeof x === "string");
+  // Lists saved before HEB, Trader Joe's and Kroger were offered get them once; one removed later stays removed.
+  if (!data.settings?.moreStores) out.stores.push(...NEW_STORES.filter((x) => !out.stores.includes(x)));
   out.pantryDates = cleanPantryDates(out.pantryDates);
   for (const k of ["savedRecipes", "shopping", "todos", "frozen", "reminders"]) out[k] = out[k].filter((x) => typeof x === "object");
   out.todos = out.todos.filter((t) => typeof t.text === "string" && typeof t.date === "string");
