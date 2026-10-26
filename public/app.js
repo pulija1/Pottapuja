@@ -1025,7 +1025,7 @@ function chatMessageHtml(m, i) {
   if (m.role === "parent") return `<div class="chat-msg parent" data-testid="chat-parent">${esc(m.text)}</div>`;
   if (m.role === "error") return `<div class="chat-msg error" data-testid="chat-error">⚠️ ${esc(m.text)}</div>`;
   const label = (c) => `${esc(prettyDate(c.date))} · ${esc(slotLabel(SLOTS.find((s) => s.id === c.slot), state.settings))}`;
-  return `<div class="chat-msg claude" data-testid="chat-claude">
+  return `<div class="chat-msg claude" data-testid="${m.role === "app" ? "chat-app" : "chat-claude"}">
     <p>${esc(m.text)}</p>
     ${m.applied?.length ? `<ul class="chat-changes" data-testid="chat-changes">${m.applied.map((c) => `<li>${art(c.recipe || {}, "xs", "✕")} ${label(c)}: <strong>${c.recipe ? esc(c.recipe.title) : "cleared"}</strong>${c.isNew ? ' <span class="pill">new</span>' : ""}</li>`).join("")}</ul>` : ""}
     ${m.skipped?.length ? `<p class="small" data-testid="chat-skipped" style="color:var(--warn)">Left out: ${m.skipped.map((c) => `${esc(c.title || c.slot)}${c.date ? ` (${esc(c.date)})` : ""}: ${esc(c.why)}`).join("; ")}</p>` : ""}
@@ -1074,6 +1074,20 @@ async function sendChat(text) {
   const c = ui.chat;
   text = String(text || "").trim();
   if (!text || c.busy) return;
+  // The app plans the empty meals of the week on screen from the recipe book first, the way
+  // 📋 Fill from kitchen does, so Claude only makes the changes the parent asks for.
+  const week = weekDates();
+  const fillUndo = snapshotDays(week);
+  const filled = [];
+  for (const k of week) {
+    const before = { ...(getDay(state, k)?.meals || {}) };
+    if (!applySuggestions(k)) continue;
+    for (const [slot, m] of Object.entries(state.days[k].meals)) if (!before[slot]?.title && m?.title) filled.push({ date: k, slot, recipe: findRecipe(m.recipeId) || { title: m.title } });
+  }
+  if (filled.length) {
+    commit();
+    c.shown.push({ role: "app", text: `Filled ${filled.length} empty meal${filled.length > 1 ? "s" : ""} from your recipe book.`, applied: filled, undo: fillUndo });
+  }
   const win = planWindow(ui.selected, TODAY);
   const refs = chatRefs();
   const turn = { role: "user", content: userTurn(chatContext(win, refs), c.note ? `${c.note} ${text}` : text) };

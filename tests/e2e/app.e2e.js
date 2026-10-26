@@ -1322,8 +1322,11 @@ test("E2E CHAT-01 the AI chat plans the week onto the calendar, changes it from 
   assert.equal(calls[0].body.stream, true, "the plan streams in, so a long answer isn't cut off");
   assert.match(calls[0].body.system[0].text, /never honey/);
   assert.match(calls[0].body.messages[0].content, /Parent: Plan this week$/);
-  assert.match(calls[0].body.messages[0].content, /2026-10-22 Thu school day: nothing planned/);
-  assert.equal(await tid(page, "chat-changes").locator("li").count(), 2);
+  // The app fills the week on screen from the recipe book itself; Claude only changes what was asked.
+  assert.match(await tid(page, "chat-app").textContent(), /Filled \d+ empty meals from your recipe book/);
+  assert.match(calls[0].body.messages[0].content, /2026-10-22 Thu school day: baby_breakfast=/);
+  assert.match(calls[0].body.messages[0].content, /2026-10-25 Sun weekend: nothing planned/, "only the week on screen is filled");
+  assert.equal(await tid(page, "chat-claude").locator("[data-testid=chat-changes] li").count(), 2);
   assert.match(await tid(page, "chat-skipped").textContent(), /Honey oats/);
   assert.equal(await cell(page, TODAY).getAttribute("data-status"), "pending");
   assert.equal(await page.evaluate((d) => window.__mealPlanner.state.days[d].meals.family_dinner.title, TODAY), dinners[2].trim());
@@ -1342,7 +1345,7 @@ test("E2E CHAT-01 the AI chat plans the week onto the calendar, changes it from 
   assert.ok(await page.evaluate((id) => window.__mealPlanner.state.savedRecipes.some((r) => r.id === id && r.ingredients.length === 2), dinner.recipeId));
 
   // Undo puts the first plan's dinner back.
-  await page.locator("[data-testid=chat-undo]").nth(1).click();
+  await page.locator("[data-testid=chat-claude] [data-testid=chat-undo]").nth(1).click();
   assert.equal(await page.evaluate((d) => window.__mealPlanner.state.days[d].meals.family_dinner.title, TODAY), dinners[2].trim());
   assert.deepEqual(errors, []);
   await ctx.close();
