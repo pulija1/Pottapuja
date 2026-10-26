@@ -1319,6 +1319,7 @@ test("E2E CHAT-01 the AI chat plans the week onto the calendar, changes it from 
   assert.equal(calls[0].headers["x-api-key"], FAKE_KEY);
   assert.equal(calls[0].body.output_config.format.type, "json_schema");
   assert.equal(calls[0].body.system[1].cache_control.type, "ephemeral", "the recipe book is cached");
+  assert.equal(calls[0].body.stream, true, "the plan streams in, so a long answer isn't cut off");
   assert.match(calls[0].body.system[0].text, /never honey/);
   assert.match(calls[0].body.messages[0].content, /Parent: Plan this week$/);
   assert.match(calls[0].body.messages[0].content, /2026-10-22 Thu school day: nothing planned/);

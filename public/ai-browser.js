@@ -28,7 +28,7 @@ export class BrowserAiError extends Error {
 // Reads a streamed Messages API answer (server-sent events) back into one message. Phone browsers
 // drop a request that sends nothing for about a minute (Safari on iPhone does), and a week plan
 // can take longer than that, so the answer streams in as Claude writes it.
-async function readStream(res) {
+async function readStream(res, onProgress) {
   const msg = { content: [] };
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
@@ -53,6 +53,7 @@ async function readStream(res) {
       buf = buf.slice(i + 2);
       if (data) handle(JSON.parse(data));
     }
+    onProgress?.(msg.content.filter((b) => b?.type === "text").map((b) => b.text || "").join(""));
     if (done) break;
   }
   msg.content = msg.content.filter(Boolean);
@@ -61,7 +62,7 @@ async function readStream(res) {
 
 // One Messages API request with the family's key. Returns the whole answer, or throws a
 // BrowserAiError with a message the parent can act on.
-async function callClaude(payload, { signal, key = getAiKey(), headers = {} } = {}) {
+async function callClaude(payload, { signal, key = getAiKey(), headers = {}, onProgress } = {}) {
   if (!key) throw new BrowserAiError("Add a Claude API key in 👤 Profile to get AI recipes.", "nokey");
   let res, data;
   try {
@@ -78,7 +79,7 @@ async function callClaude(payload, { signal, key = getAiKey(), headers = {} } = 
       body: JSON.stringify({ ...payload, stream: true }),
     });
     const streamed = res.ok && /event-stream/.test(res.headers.get("content-type") || "");
-    data = streamed ? await readStream(res) : await res.json().catch(() => ({}));
+    data = streamed ? await readStream(res, onProgress) : await res.json().catch(() => ({}));
   } catch (err) {
     if (signal?.aborted || err instanceof BrowserAiError) throw err;
     throw new BrowserAiError("Couldn't reach the recipe AI. Check the internet connection, keep the app open while it thinks, and try again.", "network");
@@ -130,15 +131,16 @@ export async function browserRecipes(body, { signal, key = getAiKey() } = {}) {
 // parent's new message; the answer's full content goes back into the conversation as Claude's turn.
 // The rules and the recipe book come first and are cached, so later turns cost much less.
 // If Claude Opus declines, the API retries on a fallback model (server-side fallback).
-export async function browserPlanChat(messages, { catalog, signal, key = getAiKey() }) {
+// `onProgress` gets the answer text so far each time more of it streams in.
+export async function browserPlanChat(messages, { catalog, signal, key = getAiKey(), onProgress }) {
   const data = await callClaude({
     model: MODEL,
     max_tokens: 16000,
     system: [{ type: "text", text: PLAN_RULES }, { type: "text", text: catalog, cache_control: { type: "ephemeral" } }],
-    output_config: { effort: "medium", format: { type: "json_schema", schema: PLAN_CHAT_SCHEMA } },
+    output_config: { effort: "low", format: { type: "json_schema", schema: PLAN_CHAT_SCHEMA } },
     fallbacks: "default",
     messages,
-  }, { signal, key, headers: { "anthropic-beta": "server-side-fallback-2026-07-01" } });
+  }, { signal, key, onProgress, headers: { "anthropic-beta": "server-side-fallback-2026-07-01" } });
   const parsed = answerJson(data);
   if (typeof parsed?.reply !== "string" || !Array.isArray(parsed?.changes)) throw new BrowserAiError("The AI returned an unreadable answer.");
   return { reply: parsed.reply, changes: parsed.changes, content: echoContent(data.content) };

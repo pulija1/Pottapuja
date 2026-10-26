@@ -41,6 +41,7 @@ How to plan:
 - Remember what the parent asked earlier in the chat (for example "no eggs this week") and keep to it in later changes.
 - "This week" means the days of the week on screen from today on. Only change dates in the planning window, never days before today.
 - Fill empty slots freely. Change a meal that is already planned only when the parent asks for it. Leave days marked "approved" alone unless the parent asks to change them.
+- Keep the changes short, so the answer comes quickly. For a recipe-book dish give only date, slot, ref and title, and leave ingredients and steps empty and notes "". Send only the slots that change: when the parent asks to change a day or a dish, don't send the rest of the plan again.
 - To clear a slot, give ref "" and title "".
 - If the parent only asks a question, answer it and make no changes.
 - In the reply, say in a sentence or two what you planned or changed, and anything to buy. Don't list every meal: the app shows the changes.`;
