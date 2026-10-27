@@ -1029,7 +1029,7 @@ test("E2E APPL-01 appliances in the profile: recipes show the air fryer and oven
   await ctx.close();
 });
 
-test("E2E CUI-01 cuisines picked in the profile steer suggestions and top picks; yesterday's curry becomes a kari dosai", async () => {
+test("E2E CUI-01 cuisines picked in the profile steer suggestions and top picks; yesterday's curry shows as a makeover in Recipes, not as the family dinner", async () => {
   const ctx = await newContext();
   const seed = { version: 1, pantry: ["Bendakaya (okra)", "onion", "tomato", "rice", "roti", "cheese", "curry leaves", "mustard seeds"], frozen: [{ id: "f1", name: "Frozen peas", qty: 2, unit: "packs", date: "2026-10-01" }],
     days: { [TODAY]: { meals: { family_dinner: { recipeId: "lib-kodi-kura", title: "Kodi kura (Andhra chicken curry, mild)", forWhom: "family" } }, schedule: [], status: "pending" } } };
@@ -1047,14 +1047,15 @@ test("E2E CUI-01 cuisines picked in the profile steer suggestions and top picks;
   await tid(page, "save-cuisines").click();
   assert.deepEqual(await page.evaluate(() => window.__mealPlanner.state.settings.cuisines), ["telugu", "tamil"]);
 
-  // The day after the Kodi kura, one suggestion is a leftover makeover. The school lunchbox stays on the 4-year-old's list.
+  // The day after the Kodi kura, the family dinner is still cooked from the kitchen (the okra), not a
+  // leftover makeover. The school lunchbox stays on the 4-year-old's list.
   await cell(page, TOMORROW).click();
   const lunch = page.locator("[data-testid=suggestion][data-slot=kid_lunchbox]");
   assert.match(await lunch.innerText(), /Next on the 4-year-old's lunch list/);
   assert.doesNotMatch(await lunch.innerText(), /Uses yesterday's/);
   const dinner = page.locator("[data-testid=suggestion][data-slot=family_dinner]");
-  assert.match(await dinner.innerText(), /Uses yesterday's Kodi kura[\s\S]*Kari dosai/);
-  assert.doesNotMatch(await dinner.innerText(), /leftover chicken curry/, "the leftover is never something to buy");
+  assert.match(await dinner.innerText(), /Bendakaya/);
+  assert.doesNotMatch(await dinner.innerText(), /Uses yesterday's|Kari dosai|leftover/i);
 
   await tid(page, "tab-recipes").click();
   const top = tid(page, "top-picks");
@@ -1686,6 +1687,67 @@ test("E2E TIDY-01 Recipes opens with the kitchen, recipes by age and ready to co
   await page.reload();
   await page.waitForFunction(() => window.__mealPlanner);
   assert.ok(!(await page.evaluate(() => window.__mealPlanner.state.stores)).includes("Kroger"));
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+// Ram: "the family recipes for the day give a leftover, or things from the freezer, not the kitchen".
+test("E2E FAM-01 the family dinner idea comes from the kitchen, never a leftover or the freezer alone, with 5+ vegetable curries and 🔀 for more", async () => {
+  const ctx = await newContext();
+  const pantry = ["okra", "brinjal", "potato", "bottle gourd", "spinach", "cauliflower", "onion", "tomato", "rice", "toor dal", "roti", "dosa batter", "egg", "curry leaves", "mustard seeds", "red chilli powder"];
+  const frozen = [{ id: "f1", name: "Chicken", qty: 2, unit: "packs", date: "2026-10-01" }, { id: "f2", name: "Frozen drumsticks", qty: 1, unit: "packs", date: "2026-10-01" }, { id: "f3", name: "Frozen peas", qty: 1, unit: "packs", date: "2026-10-01" }];
+  // Yesterday's dinner was a chicken curry, so a leftover makeover (kari dosai, kathi roll) could fit.
+  const seed = { version: 1, pantry, frozen,
+    days: { [TODAY]: { meals: { family_dinner: { recipeId: "lib-kodi-kura", title: "Kodi kura (Andhra chicken curry, mild)", forWhom: "family" } }, schedule: [], status: "pending" } } };
+  await ctx.addInitScript((s) => { if (!localStorage.getItem("familyMealPlanner.v1")) localStorage.setItem("familyMealPlanner.v1", s); }, JSON.stringify(seed));
+  const page = await ctx.newPage();
+  const errors = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await page.goto(`${mock.url}?today=${TODAY}`);
+  await tid(page, "cal-grid").waitFor();
+  await unfoldAll(page);
+  await cell(page, TOMORROW).click();
+
+  const dinner = page.locator("[data-testid=suggestion][data-slot=family_dinner]");
+  const kitchen = /okra|bendakaya|brinjal|vankaya|potato|bangaladumpa|aloo|bottle gourd|sorakaya|spinach|palak|cauliflower/i;
+  const check = async () => {
+    const text = await dinner.innerText();
+    assert.doesNotMatch(text, /Uses yesterday's|leftover|Kari dosai|kathi roll|enchilada/i, "never a leftover makeover");
+    assert.doesNotMatch(text, /chicken|kodi kura|munagakaya|drumstick/i, "nothing that needs the freezer's chicken or drumsticks");
+    return text;
+  };
+
+  // The first idea and every 🔀 Other ideas after it: from the kitchen, all different.
+  const seen = [];
+  for (let i = 0; i < 6; i++) {
+    await check();
+    const idea = (await dinner.locator(".grow").innerText()).split("·")[0].trim();
+    assert.match(idea, kitchen, `idea ${i + 1} uses a vegetable from the kitchen`);
+    seen.push(idea);
+    await tid(page, "suggest-shuffle").click();
+  }
+  assert.equal(new Set(seen).size, seen.length, `each 🔀 gives a different dinner: ${seen.join(" | ")}`);
+  // Ram: "it should give a new vegetable, not the same". The Telugu title starts with the vegetable
+  // (Vankaya, Bendakaya, Palakura, Aloo, Sorakaya, Cauliflower): no vegetable twice in a row of 6.
+  const veg = (t) => t.replace(/^\W+/, "").split(" ")[0].toLowerCase();
+  assert.equal(new Set(seen.map(veg)).size, seen.length, `each 🔀 gives a new vegetable: ${seen.join(" | ")}`);
+  assert.ok(seen.filter((t) => /kura|curry|pappu|pulusu/i.test(t)).length >= 5, `5+ vegetable curries: ${seen.join(" | ")}`);
+
+  // At least five vegetable curries to pick from, all different, each with a kitchen vegetable.
+  const options = await dinner.getByTestId("veg-curry-option").allInnerTexts();
+  assert.ok(options.length >= 5, `vegetable curries offered: ${options.join(", ")}`);
+  assert.equal(new Set(options).size, options.length);
+  const picked = veg((await dinner.locator(".grow").innerText()).split("·")[0].trim());
+  assert.equal(new Set([picked, ...options.map(veg)]).size, options.length + 1, `each curry is a different vegetable from the idea (${picked}) and each other: ${options.join(", ")}`);
+  for (const o of options) {
+    assert.match(o, /kura|curry|pappu|pulusu|kootu|kurma|masala/i, `${o} is a curry`);
+    assert.match(o, kitchen, `${o} uses a vegetable from the kitchen`);
+  }
+  // Tapping one makes it the family dinner idea, and approving puts it on the plan.
+  await dinner.getByTestId("veg-curry-option").nth(2).click();
+  assert.match(await dinner.locator(".grow").innerText(), new RegExp(options[2].replace(/[()]/g, ".")));
+  await tid(page, "suggest-approve").click();
+  assert.equal(await page.evaluate((k) => window.__mealPlanner.state.days[k].meals.family_dinner.title, TOMORROW), options[2]);
   assert.deepEqual(errors, []);
   await ctx.close();
 });
