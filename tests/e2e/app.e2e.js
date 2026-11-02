@@ -6,6 +6,9 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import net from "node:net";
 import { chromium } from "playwright";
+import { LIBRARY, libraryById } from "../../public/shared/recipes.js";
+import { checkRecipe } from "../../public/shared/safety.js";
+import { headlineVeg } from "../../public/shared/family-recipes.js";
 
 const SERVER = fileURLToPath(new URL("../../server.js", import.meta.url));
 const TODAY = "2026-10-22"; // a Thursday (school day)
@@ -1748,6 +1751,196 @@ test("E2E FAM-01 the family dinner idea comes from the kitchen, never a leftover
   assert.match(await dinner.locator(".grow").innerText(), new RegExp(options[2].replace(/[()]/g, ".")));
   await tid(page, "suggest-approve").click();
   assert.equal(await page.evaluate((k) => window.__mealPlanner.state.days[k].meals.family_dinner.title, TOMORROW), options[2]);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+// ---------- family recipes, approved weeks, one vegetable a week ----------
+const NEXT_WEEK = ["2026-10-25", "2026-10-26", "2026-10-27", "2026-10-28", "2026-10-29", "2026-10-30", "2026-10-31"];
+// Opens the app with `seed` saved, without unfolding the sections.
+async function openSeeded(seed, { today = TODAY } = {}) {
+  const ctx = await newContext({ viewport: { width: 390, height: 844 } });
+  if (seed) await ctx.addInitScript((x) => { if (!localStorage.getItem("familyMealPlanner.v1")) localStorage.setItem("familyMealPlanner.v1", x); }, JSON.stringify({ version: 1, ...seed }));
+  const page = await ctx.newPage();
+  const errors = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  page.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
+  await page.goto(`${mock.url}?today=${today}`);
+  await tid(page, "cal-grid").waitFor();
+  return { page, ctx, errors };
+}
+const mealsOf = (page, slot, keys = NEXT_WEEK) => page.evaluate(([s, ks]) => ks.map((k) => window.__mealPlanner.state.days[k]?.meals?.[s]?.recipeId || ""), [slot, keys]);
+async function fillWeekOf(page, date) {
+  await tid(page, "tab-calendar").click();
+  await cell(page, date).click();
+  await tid(page, "fill-week").click();
+  await tid(page, "toast").waitFor();
+}
+
+test("E2E HOUSE-01 Family recipes: folded in Recipes, add with checks, edit, delete with undo, kept after reload", async () => {
+  const { page, ctx, errors } = await openSeeded(null);
+  await tid(page, "tab-recipes").click();
+  const sec = tid(page, "family-recipes");
+  // Folded by default, with a count.
+  assert.equal(await sec.evaluate((d) => d.open), false);
+  assert.match(await sec.locator("summary").innerText(), /Family recipes \(0\)/);
+  await sec.locator("summary").click();
+  await tid(sec, "family-empty").waitFor();
+
+  // Adding: the form says what is missing before it saves.
+  await tid(page, "family-add").click();
+  const form = tid(page, "family-form");
+  await tid(form, "family-title").fill("Amma's ragi dosa");
+  await tid(form, "family-save").click();
+  assert.match(await tid(form, "family-problems").innerText(), /ingredient/i);
+  await form.locator("input[name=forWhom][value=kid]").check({ force: true });
+  await tid(form, "family-meal").selectOption("breakfast");
+  await tid(form, "family-minutes").fill("10");
+  await tid(form, "family-ingredients").fill("1 cup ragi flour\n1 cup idli batter\n1 tsp ghee");
+  await tid(form, "family-steps").fill("Mix the flour into the batter.\nMake thin dosas with ghee.");
+  await tid(form, "family-save").click();
+  await form.waitFor({ state: "detached" });
+  assert.match(await tid(page, "toast").innerText(), /Added Amma's ragi dosa/);
+  const rows = tid(page, "family-recipe");
+  assert.equal(await rows.count(), 1);
+  assert.match(await rows.first().innerText(), /Amma's ragi dosa[\s\S]*Breakfast · 10 min/);
+  assert.match(await sec.locator("summary").innerText(), /Family recipes \(1\)/);
+  const saved = await page.evaluate(() => window.__mealPlanner.state.savedRecipes);
+  assert.equal(saved.length, 1);
+  assert.equal(saved[0].family, true);
+  assert.deepEqual(saved[0].ingredients.map((i) => i.name), ["ragi flour", "idli batter", "ghee"]);
+
+  // Editing: the sheet opens filled in, and saving changes the same recipe.
+  await tid(rows.first(), "family-edit").click();
+  assert.equal(await tid(form, "family-title").inputValue(), "Amma's ragi dosa");
+  assert.match(await tid(form, "family-ingredients").inputValue(), /^1 cup ragi flour\n1 cup idli batter\n1 tsp ghee$/);
+  await tid(form, "family-title").fill("Amma's ragi dosa with ghee");
+  await tid(form, "family-save").click();
+  await form.waitFor({ state: "detached" });
+  const after = await page.evaluate(() => window.__mealPlanner.state.savedRecipes);
+  assert.equal(after.length, 1);
+  assert.equal(after[0].id, saved[0].id);
+  assert.equal(after[0].title, "Amma's ragi dosa with ghee");
+
+  // The recipe opens as a card marked as the family's, with Edit; it isn't listed with the saved recipes.
+  await rows.first().locator("[data-action=view-recipe]").click();
+  await page.locator("dialog [data-testid=family-badge]").waitFor();
+  await page.keyboard.press("Escape");
+  assert.match(await page.locator("[data-group=sec-saved] summary").innerText(), /Saved recipes \(0\)/);
+
+  // Kept after a reload.
+  await page.reload();
+  await tid(page, "tab-recipes").click();
+  assert.match(await tid(page, "family-recipes").locator("summary").innerText(), /Family recipes \(1\)/);
+
+  // The calendar suggests it first for the 4-year-old's breakfast.
+  await tid(page, "tab-calendar").click();
+  await cell(page, TOMORROW).click();
+  assert.match(await page.locator("[data-testid=suggestion][data-slot=kid_breakfast]").textContent(), /Amma's ragi dosa with ghee/);
+
+  // Deleting, with Undo.
+  await tid(page, "tab-recipes").click();
+  if (!(await tid(page, "family-recipes").evaluate((d) => d.open))) await tid(page, "family-recipes").locator("summary").click();
+  await tid(page, "family-edit").click();
+  await tid(page, "family-delete").click();
+  assert.equal(await tid(page, "family-recipe").count(), 0);
+  await tid(page, "toast-undo").click();
+  assert.equal(await tid(page, "family-recipe").count(), 1);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test("E2E HOUSE-02 the week's plan uses the family's recipes first, each once a week, safety still checked", async () => {
+  const fam = (title, forWhom, mealType, ingredients, extra = {}) => ({ id: `fam-${title.toLowerCase().replace(/\W+/g, "-")}`, title, forWhom, mealType, prepMinutes: 10, cuisine: "Telugu",
+    ingredients: ingredients.map((name) => ({ name, quantity: 1, unit: "cup" })), steps: ["Cook it."], notes: "", source: "family", family: true, tags: [], ...extra });
+  const savedRecipes = [
+    fam("Nanamma pesarattu", "kid", "breakfast", ["moong dal", "rice"]),
+    fam("Bottle gourd pappu house style", "family", "dinner", ["toor dal", "bottle gourd", "tomato"]),
+    fam("Honey ragi java", "baby", "breakfast", ["ragi flour", "honey"]),   // not safe for the baby: never suggested
+  ];
+  const { page, ctx, errors } = await openSeeded({ savedRecipes, pantry: ["rice", "moong dal", "toor dal", "bottle gourd", "okra", "brinjal", "potato", "carrot", "spinach", "tomato", "onion", "ragi flour", "egg", "bread", "milk", "curd"] });
+  await fillWeekOf(page, "2026-10-26");
+  const kid = await mealsOf(page, "kid_breakfast");
+  const dinners = await mealsOf(page, "family_dinner");
+  const baby = await mealsOf(page, "baby_breakfast");
+  // First in the week, and not back every day.
+  assert.equal(kid[0], "fam-nanamma-pesarattu", kid.join(" | "));
+  assert.equal(dinners[0], "fam-bottle-gourd-pappu-house-style", dinners.join(" | "));
+  assert.equal(kid.filter((x) => x === "fam-nanamma-pesarattu").length, 1, kid.join(" | "));
+  assert.equal(dinners.filter((x) => x === "fam-bottle-gourd-pappu-house-style").length, 1, dinners.join(" | "));
+  assert.ok(!baby.includes("fam-honey-ragi-java"), baby.join(" | "));
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+// Seven family dinners from the book, each with its own vegetable (or none), safe for the 4-year-old.
+const historyDinners = (() => {
+  const seen = new Set();
+  return LIBRARY.filter((r) => r.forWhom === "family" && r.mealType === "dinner" && !r.leftover && !/chicken|mutton|fish|egg|prawn/i.test(r.title)
+    && !(r.ingredients || []).some((i) => /^leftover/i.test(i.name)) && checkRecipe(r, { age: "kid" }).safe && headlineVeg(r))
+    .filter((r) => { const v = headlineVeg(r); return !seen.has(v) && seen.add(v); }).slice(-7);
+})();
+function approvedWeeksSeed(sundays) {
+  const days = {};
+  for (const sunday of sundays) {
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(`${sunday}T12:00:00`);
+      d.setDate(d.getDate() + i);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      const r = historyDinners[i];
+      days[key] = { meals: { family_dinner: { recipeId: r.id, title: r.title, forWhom: "family" }, baby_breakfast: { recipeId: "lib-rava-kanji", title: "Rava kanji", forWhom: "baby" } }, schedule: [], status: "approved", approvedAt: `${key}T20:00:00.000Z` };
+    }
+  }
+  return days;
+}
+
+test("E2E HOUSE-03 with 3 approved weeks the next week is built from them; with 2 the usual suggestions stay", async () => {
+  assert.equal(historyDinners.length, 7);
+  const ids = historyDinners.map((r) => r.id);
+  const pantry = ["rice", "toor dal", "onion", "tomato", "okra", "potato", "carrot"];
+  // Three approved weeks: each day of the new week gets the dinner approved on that weekday.
+  {
+    const { page, ctx, errors } = await openSeeded({ pantry, days: approvedWeeksSeed(["2026-09-27", "2026-10-04", "2026-10-11"]) });
+    await tid(page, "tab-recipes").click();
+    await tid(page, "family-recipes").locator("summary").click();
+    assert.match(await tid(page, "family-recipes").innerText(), /With 3 approved weeks/);
+    await fillWeekOf(page, "2026-10-26");
+    const dinners = await mealsOf(page, "family_dinner");
+    assert.deepEqual(dinners, ids, dinners.join(" | "));
+    assert.equal((await mealsOf(page, "baby_breakfast"))[0], "lib-rava-kanji");
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  // Only two: the kitchen suggestions as before.
+  {
+    const { page, ctx, errors } = await openSeeded({ pantry, days: approvedWeeksSeed(["2026-10-04", "2026-10-11"]) });
+    await tid(page, "tab-recipes").click();
+    await tid(page, "family-recipes").locator("summary").click();
+    assert.match(await tid(page, "family-recipes").innerText(), /After 3 approved weeks[\s\S]*\(2 so far\)/);
+    await fillWeekOf(page, "2026-10-26");
+    const dinners = await mealsOf(page, "family_dinner");
+    assert.ok(dinners.every(Boolean), dinners.join(" | "));
+    assert.notDeepEqual(dinners, ids);
+    assert.ok(dinners.filter((d, i) => d === ids[i]).length < 4, dinners.join(" | "));
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+});
+
+test("E2E HOUSE-04 a vegetable used in the week isn't suggested again that week while others are left", async () => {
+  const pantry = ["rice", "toor dal", "moong dal", "onion", "tomato", "okra", "brinjal", "potato", "bottle gourd", "spinach", "cauliflower", "carrot", "drumstick", "ridge gourd", "cabbage", "curry leaves", "mustard seeds", "red chilli powder", "tamarind"];
+  const { page, ctx, errors } = await openSeeded({ pantry });
+  await fillWeekOf(page, "2026-10-26");
+  const dinners = (await mealsOf(page, "family_dinner")).map(libraryById);
+  assert.ok(dinners.every(Boolean));
+  const veg = dinners.map(headlineVeg).filter(Boolean);
+  assert.ok(veg.length >= 5, veg.join(", "));
+  assert.equal(new Set(veg).size, veg.length, `no vegetable twice in the week's dinners: ${veg.join(", ")}`);
+  // Monday's dinner vegetable isn't the headline of any other family or 4-year-old meal that week.
+  const all = await page.evaluate((ks) => ks.flatMap((k) => Object.entries(window.__mealPlanner.state.days[k]?.meals || {}).filter(([s]) => !s.startsWith("baby")).map(([s, m]) => [k, s, m.recipeId])), NEXT_WEEK);
+  const monday = headlineVeg(dinners[1]);
+  const clash = all.filter(([k, , id]) => k !== NEXT_WEEK[1] && headlineVeg(libraryById(id)) === monday);
+  assert.deepEqual(clash, [], `${monday} again: ${clash.map((c) => c.join(" ")).join(", ")}`);
   assert.deepEqual(errors, []);
   await ctx.close();
 });
