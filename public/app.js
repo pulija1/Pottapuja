@@ -16,6 +16,7 @@ import { mergeItems, groupByAisle, formatQty, missingFromPantry, normName, normU
 import { foodArt } from "./shared/food-art.js";
 import { lunchTurn } from "./shared/lunch-rotation.js";
 import { AGE_SECTIONS, SECTION_MEALS, REGULAR_GAP_DAYS, regularsFor, isRegular, toggleRegular, ageSection, regularsFirst } from "./shared/regulars.js";
+import { familyRecipesIn, familyRecipesForSlot, isFamilyRecipe, familyRecipeFrom, familyRecipeFields, familyRecipeProblems, upsertFamilyRecipe, FAMILY_MEALS, MORNING_KINDS, approvedWeeks, APPROVED_WEEKS_MIN, weekHistory, vegUsedInWeek, headlineVeg, newVegFirst, preferredFirst } from "./shared/family-recipes.js";
 import { SLOTS, emptyDay, getDay, dayHasPlan, markEdited, approveDay, unapproveDay, slotsFor, todosOn, MEAL_GROUPS, whoLabel, slotLabel, remindersOn, pendingFor, dayStatus } from "./shared/plan.js";
 
 const state = load();
@@ -909,24 +910,42 @@ function suggestionsFor(key) {
   // Food past the use-by date typed in for it is gone by this day.
   const gone = new Set(goneBy(state.pantry, pantryDates(), { today: TODAY, onKey: key }));
   const pantry = state.pantry.filter((p) => !gone.has(p));
+  // The family's own recipes come first for their meal, and with 3 or more approved weeks the
+  // meals approved in those weeks come next (see family-recipes.js).
+  const familyList = familyRecipesIn(state.savedRecipes);
+  const history = weekHistory(state.days, key);
+  // A vegetable already used on another day of this week waits until the others have had a turn:
+  // the baby's vegetables are counted on their own, the 4-year-old and the family share theirs.
+  const vegGroup = (who) => (who === "baby" ? "baby" : "family");
+  const vegUsed = Object.fromEntries(["baby", "family"].map((g) => {
+    const inGroup = (d) => ({ ...d, meals: Object.fromEntries(Object.entries(d?.meals || {}).filter(([slot]) => vegGroup(slot.split("_")[0]) === g)) });
+    return [g, vegUsedInWeek(Object.fromEntries(Object.entries(state.days).map(([k, d]) => [k, inGroup(d)])), key, findRecipe)];
+  }));
   for (const s of slotsFor(key)) {
     if (day.meals?.[s.id]?.title) continue;
     const meal = s.id.split("_")[1];
     const child = s.who === "family" ? "" : s.who;
+    const weekVeg = vegUsed[vegGroup(s.who)];
+    const famHere = familyRecipesForSlot(familyList, s.who, meal);
+    const famIds = famHere.map((r) => r.id);
+    const histIds = history?.bySlot[s.id] || [];
     // The recipes the parent marked to use often for this person and this meal (Recipes tab, by age).
     const often = regularsFor(state.settings, s.who).filter((id) => { const r = findRecipe(id); return r && (r.mealType === meal || (meal === "lunchbox" && r.mealType === "lunch")); });
-    const opt = { forWhom: s.who, schoolNutFree: nutFreeOn(), limit: 40, cuisines, frozen: frozenOnHand(), appliances: appliancesOwned(), staples: staplesOn(), useSoon: useSoonOn(key, picks), settings: state.settings, child, regulars: often };
+    const opt = { forWhom: s.who, schoolNutFree: nutFreeOn(), limit: 40, cuisines, frozen: frozenOnHand(), appliances: appliancesOwned(), staples: staplesOn(), useSoon: useSoonOn(key, picks), settings: state.settings, child, regulars: often, extra: familyList };
     const seen = new Set();
     const safe = (r) => checkRecipe(r, { age: s.who === "baby" ? "baby" : "kid", lunchbox: s.id === "kid_lunchbox" || s.id === "kid_snack", schoolNutFree: nutFreeOn() }).safe && !prefProblem(r, child, state.settings);
     // The school lunch goes round the 4-year-old's list in order, skipping the ones the kitchen can't make.
     // Yesterday's curry makeover goes in another meal instead.
     if (s.id === "kid_lunchbox") {
       const ok = (id) => { const r = findRecipe(id); return !!r && safe(r); };
-      const turn = lunchTurn(key, { days: state.days, today: TODAY, kitchen: [...pantry, ...frozenOnHand()], ok }).filter((id) => !used.has(id));
+      const rotation = lunchTurn(key, { days: state.days, today: TODAY, kitchen: [...pantry, ...frozenOnHand()], ok }).filter((id) => !used.has(id));
+      // The family's own lunchbox recipes go first, once a week each.
+      const own = famHere.filter((r) => safe(r) && !used.has(r.id) && !lastWeek.has(r.id)).map((r) => r.id);
+      const turn = [...own, ...rotation.filter((id) => !own.includes(id))];
       if (turn.length) {
         picks[s.id] = turn[(entry.seed + (entry.offsets[s.id] || 0)) % turn.length];
         used.add(picks[s.id]);
-        (entry.rotation ||= {})[s.id] = true;
+        if (!own.includes(picks[s.id])) (entry.rotation ||= {})[s.id] = true;
         continue;
       }
     }
@@ -934,10 +953,18 @@ function suggestionsFor(key) {
     // vegetable curries to go round with 🔀, never yesterday's leftovers or the freezer alone.
     if (s.who === "family") {
       const all = familyDinnerIdeas(pantry, { frozen: frozenOnHand(), staples: staplesOn(), cuisines, useSoon: opt.useSoon, settings: state.settings, appliances: appliancesOwned() });
-      const ideas = all.filter(safe);
+      // The family's own dinners, then the dinners of the approved weeks, before the kitchen's ideas.
+      // Only ones not eaten in the last 6 days: when every dinner was, the fallback keeps the kitchen order.
+      const prefIds = [...famIds, ...histIds].filter((id) => !lastWeek.has(id));
+      const preferred = prefIds.map(findRecipe).filter((r) => r && r.forWhom === "family" && r.mealType === "dinner" && !r.leftover && !prefProblem(r, "", state.settings));
+      const ideas = [...new Set([...preferred, ...all])].filter(safe);
       const notUsed = ideas.filter((r) => !used.has(r.id));
       const tier = [notUsed.filter((r) => !lastWeek.has(r.id)), notUsed.filter((r) => !avoid.has(r.id)), ideas].find((t) => t.length) || [];
-      const pool = withVegCurries(tier, { fill: all.fill });
+      // Family and approved-week dinners eaten in the last 6 days come last when a repeat can't be helped.
+      const recent = new Set([...famIds, ...histIds].filter((id) => lastWeek.has(id)));
+      const kitchenPool = withVegCurries(tier.filter((r) => !prefIds.includes(r.id) && !recent.has(r.id)), { fill: all.fill });
+      // A vegetable already cooked this week goes to the back, however the dinner got here.
+      const pool = newVegFirst(preferredFirst([...tier.filter((r) => prefIds.includes(r.id)), ...kitchenPool, ...tier.filter((r) => recent.has(r.id))], prefIds), weekVeg);
       if (!pool.length) continue;
       // Each 🔀 turn shows a dinner not shown yet this time round (the ranking can shift as the
       // other slots change), and the same turn keeps its dinner when the panel redraws.
@@ -976,18 +1003,22 @@ function suggestionsFor(key) {
     // School-day mornings are rushed: breakfast is made the night before or needs no cooking.
     const busyMorning = meal === "breakfast" && isSchoolDay(key);
     // The 4-year-old eats the family breakfast too (overnight oats, peanut butter toast).
-    const fits = (r) => r.forWhom === s.who || (s.id === "kid_breakfast" && r.forWhom === "family" && r.mealType === "breakfast");
+    // A family recipe for the whole family's breakfast, lunch or snack is offered for the children's meals too (still safety-checked).
+    const fits = (r) => r.forWhom === s.who || (s.id === "kid_breakfast" && r.forWhom === "family" && r.mealType === "breakfast") || famIds.includes(r.id);
     let candidates = suggestFromLibrary(pantry, { ...opt, mealType: meal, busyMorning })
       .concat(suggestFromLibrary(pantry, opt))
+      // What the approved weeks had in this slot (saved and AI recipes too, not only the book's).
+      .concat(histIds.map(findRecipe).filter((r) => r && (r.mealType === meal || (meal === "lunchbox" && r.mealType === "lunch"))))
       .filter((r) => fits(r) && !r.leftover && !seen.has(r.id) && seen.add(r.id))
       .filter(safe)
       // Nothing that can't be ready that morning: no baking on a school day, and a weekend batch only while it keeps.
       .filter((r) => meal !== "breakfast" || fitsMorning(r, key, appliancesOwned()));
-    if (busyMorning && candidates.some((r) => r.busyMorning)) candidates = candidates.filter((r) => r.busyMorning);
+    // The family's own breakfasts stay in: they still have to be ready that morning (fitsMorning above).
+    if (busyMorning && candidates.some((r) => r.busyMorning)) candidates = candidates.filter((r) => r.busyMorning || isFamilyRecipe(r));
     // The school snack box is tiny: on school days it is cheese or a ragi cookie, and no ragi cookie when breakfast already had ragi.
     if (s.id === "kid_snack" && isSchoolDay(key)) {
       const breakfast = day.meals?.kid_breakfast?.title ? day.meals.kid_breakfast : findRecipe(picks.kid_breakfast);
-      const box = candidates.filter((r) => r.snackBox && SNACK_BOX.test(r.title) && !(hasRagi(r) && hasRagi(breakfast)));
+      const box = candidates.filter((r) => r.snackBox && (SNACK_BOX.test(r.title) || isFamilyRecipe(r)) && !(hasRagi(r) && hasRagi(breakfast)));
       if (box.length) candidates = box;
     }
     // Steer the 4-year-old's empty slots toward the daily goal: an egg at breakfast, milk in the lunchbox, nuts in the snack.
@@ -1004,9 +1035,19 @@ function suggestionsFor(key) {
     const notUsed = candidates.filter((r) => !used.has(r.id));
     const oftenSet = new Set(often);
     const fresh = (r) => !(oftenSet.has(r.id) ? lately : lastWeek).has(r.id);
-    const tiers = [notUsed.filter(fresh), notUsed.filter((r) => !avoid.has(r.id)), candidates].map((t) => regularsFirst(t, often));
+    // Within each: a new vegetable for the week first, then the family's own recipes, the approved
+    // weeks' meals and the ones used often ahead of the rest.
+    // Family and approved-week recipes eaten in the last 6 days don't jump the queue in the fallback tiers.
+    const prefNow = [...famIds, ...histIds].filter((id) => !lastWeek.has(id));
+    // When a repeat can't be helped, the family's and approved-week recipes eaten lately go last, not first.
+    const recentPref = new Set([...famIds, ...histIds].filter((id) => lastWeek.has(id) && !oftenSet.has(id)));
+    const lastOnes = (t) => [...t.filter((r) => !recentPref.has(r.id)), ...t.filter((r) => recentPref.has(r.id))];
+    const tiers = [notUsed.filter(fresh), notUsed.filter((r) => !avoid.has(r.id)), candidates].map((t) => lastOnes(newVegFirst(preferredFirst(t, [...prefNow, ...often]), weekVeg, { keep: oftenSet })));
     const tier = tiers.find((t) => t.length) || [];
-    const best = withGoal(tier).length ? withGoal(tier) : tier;
+    // The family's own recipes (with a vegetable not used yet this week) beat the daily goal; the goal picks among the rest.
+    const own = tier.filter((r) => famIds.includes(r.id) && !lastWeek.has(r.id) && !(headlineVeg(r) && weekVeg.has(headlineVeg(r)) && !oftenSet.has(r.id)));
+    const rest = tier.filter((r) => !own.includes(r));
+    const best = [...own, ...(withGoal(rest).length ? withGoal(rest) : rest)];
     const pool = (best.length ? best : candidates).slice(0, 6);
     if (!pool.length) continue;
     const r = pool[(entry.seed + (entry.offsets[s.id] || 0)) % pool.length];
@@ -1619,7 +1660,9 @@ function quickAddGroup(label, items, have, testid) {
 function renderRecipes() {
   const pantrySet = new Set(state.pantry.map(normName));
   const filt = ui.savedFilter.trim().toLowerCase();
-  const saved = state.savedRecipes.filter((r) => !filt || r.title.toLowerCase().includes(filt));
+  // The family's own recipes have their own section (👪 Family recipes).
+  const savedAll = state.savedRecipes.filter((r) => !isFamilyRecipe(r));
+  const saved = savedAll.filter((r) => !filt || r.title.toLowerCase().includes(filt));
   const soonCount = expiryList().filter((e) => e.daysLeft <= USE_SOON_DAYS).length;
 
   // What's at home, the recipes by age and what the kitchen can make come first.
@@ -1648,6 +1691,7 @@ function renderRecipes() {
 
     ${renderAgeSections()}
     ${renderReadyToCook()}
+    ${renderFamilyRecipes()}
     ${renderTopPicks()}
     ${renderQuickBreakfasts()}
     ${renderLeftoverIdeas()}
@@ -1684,11 +1728,67 @@ function renderRecipes() {
       <div class="recipe-grid">${ui.results.map((r) => recipeCard(r)).join("")}</div>
     </div>
 
-    ${section({ id: "sec-saved", icon: "⭐", title: `Saved recipes (${state.savedRecipes.length})`,
-      meta: state.savedRecipes.length ? esc(state.savedRecipes.slice(0, 3).map((r) => r.title).join(", ")) : "Save recipes you like", open: !!filt,
+    ${section({ id: "sec-saved", icon: "⭐", title: `Saved recipes (${savedAll.length})`,
+      meta: savedAll.length ? esc(savedAll.slice(0, 3).map((r) => r.title).join(", ")) : "Save recipes you like", open: !!filt,
       body: `
-      ${state.savedRecipes.length ? `<input type="search" placeholder="Search saved" value="${esc(ui.savedFilter)}" data-action="saved-filter" aria-label="Search saved recipes">` : ""}
+      ${savedAll.length ? `<input type="search" placeholder="Search saved" value="${esc(ui.savedFilter)}" data-action="saved-filter" aria-label="Search saved recipes">` : ""}
       <div class="recipe-grid" data-testid="saved-recipes" style="margin-top:8px">${saved.map((r) => recipeCard(r, { saved: true })).join("") || '<p class="muted small">Save recipes you like and they will work even when offline.</p>'}</div>` })}`;
+}
+
+// 👪 Family recipes: the family's own house recipes, added and edited here. Folded by default.
+// The meal planner puts them first for their meal (see suggestionsFor and family-recipes.js).
+const WHO_ICONS = { baby: "👶", kid: "👧", family: "🍛" };
+function renderFamilyRecipes() {
+  const list = familyRecipesIn(state.savedRecipes);
+  const weeks = approvedWeeks(state.days, TODAY).length;
+  const row = (r) => {
+    const safety = checkForAudience(r, { schoolNutFree: nutFreeOn() });
+    return `<div class="age-row" data-testid="family-recipe" data-recipe-id="${esc(r.id)}" data-safe="${safety.safe}">
+      <button type="button" class="ready-item" data-action="view-recipe" data-id="${esc(r.id)}">
+        ${art(r, "sm")}<span class="grow"><strong>${esc(r.title)}</strong>${tagIcons(r) ? ` <span aria-hidden="true">${tagIcons(r)}</span>` : ""}
+          <span class="small muted">${WHO_ICONS[r.forWhom] || ""} ${esc(r.forWhom === "family" ? "Family" : whoLabel(r.forWhom, state.settings))} · ${esc(MEAL_LABELS[r.mealType] || r.mealType)}${r.prepMinutes ? ` · ${esc(r.prepMinutes)} min` : ""}</span>
+          ${safety.safe ? "" : `<span class="small" style="color:var(--warn)" data-testid="family-unsafe">⛔ ${esc(String(safety.errors[0]?.message || "Not age-safe as written").replace(/[.\s]+$/, ""))}: the planner won't suggest it</span>`}</span></button>
+      <button type="button" class="btn sm" data-action="family-edit" data-id="${esc(r.id)}" data-testid="family-edit" aria-label="Edit ${esc(r.title)}">✏️ Edit</button>
+    </div>`;
+  };
+  return section({ id: "sec-family", icon: "👪", title: `Family recipes (${list.length})`, testid: "family-recipes",
+    meta: list.length ? esc(list.slice(0, 3).map((r) => r.title).join(", ")) : "Your own house recipes for the kids and the family",
+    body: `
+    <p class="small muted" style="margin:8px 0">The meal planner suggests these first for their meal, each once a week, before the recipe book (a whole-family breakfast, lunch or snack goes to ${esc(whoLabel("kid", state.settings))}'s meal).
+      ${weeks >= APPROVED_WEEKS_MIN ? `With ${weeks} approved weeks, new weeks are also built from the meals you approved.` : `After ${APPROVED_WEEKS_MIN} approved weeks (5 or more approved days each), new weeks are also built from the meals you approved${weeks ? ` (${weeks} so far)` : ""}.`}</p>
+    <div class="ready-list" data-testid="family-list">${list.map(row).join("") || '<p class="muted small" data-testid="family-empty">No family recipes yet. Add the dishes you make at home.</p>'}</div>
+    <div class="row" style="margin-top:8px"><button type="button" class="btn primary" data-action="family-add" data-testid="family-add">＋ Add a family recipe</button></div>` });
+}
+
+// The bottom sheet to add a family recipe, or edit one (`r`).
+function familyRecipeSheet(r = null) {
+  const f = familyRecipeFields(r || { forWhom: "kid", mealType: "breakfast" });
+  const meals = [...new Set(Object.values(FAMILY_MEALS).flat())];
+  sheet("family-recipe-sheet", `<form data-form="family-recipe" class="stack" ${r ? `data-id="${esc(r.id)}"` : ""} data-testid="family-form">
+    <div class="row between"><h2>${r ? `✏️ ${esc(r.title)}` : "👪 Add a family recipe"}</h2><button type="button" class="iconbtn lg" data-sheet-close aria-label="Close">✕</button></div>
+    <input type="text" name="title" placeholder="Name (e.g. Amma's tomato pappu)" required maxlength="80" value="${esc(f.title)}" aria-label="Recipe name" data-testid="family-title" class="big-input" autocomplete="off">
+    <div class="field"><span>For</span>${chipRadios("forWhom", [["kid", whoLabel("kid", state.settings, { age: true })], ["baby", whoLabel("baby", state.settings, { age: true })], ["family", "Whole family"]], f.forWhom, "family-for")}</div>
+    <label class="field"><span>Meal</span><select name="mealType" data-testid="family-meal">${meals.map((m) => `<option value="${m}" ${m === f.mealType ? "selected" : ""}>${esc(MEAL_LABELS[m])}${m === "lunchbox" ? " (4-year-old)" : ""}</option>`).join("")}</select></label>
+    <label class="field"><span>Minutes to make (optional)</span><input type="number" name="prepMinutes" min="1" max="600" inputmode="numeric" value="${esc(f.prepMinutes)}" data-testid="family-minutes"></label>
+    <label class="field"><span>On a school morning (breakfasts)</span><select name="busyMorning" data-testid="family-morning">${MORNING_KINDS.map((k) => `<option value="${k}" ${k === f.busyMorning ? "selected" : ""}>${{ "": "Cooked that morning", "make-ahead": "Made the night before", "no-cook": "No cooking" }[k]}</option>`).join("")}</select></label>
+    <label class="chk full small" style="min-height:0"><input type="checkbox" name="snackBox" ${f.snackBox ? "checked" : ""} data-testid="family-snackbox"> Small enough for the school snack box (snacks)</label>
+    <label class="field"><span>Cuisine (optional)</span><input type="text" name="cuisine" maxlength="40" value="${esc(f.cuisine)}" placeholder="e.g. Telugu" data-testid="family-cuisine"></label>
+    <label class="field"><span>Ingredients, one per line</span><textarea name="ingredients" rows="5" placeholder="1 cup toor dal&#10;2 tomatoes&#10;Salt, to taste" data-testid="family-ingredients">${esc(f.ingredients)}</textarea></label>
+    <label class="field"><span>Steps, one per line</span><textarea name="steps" rows="5" placeholder="Pressure cook the dal with turmeric.&#10;Add the tomatoes and simmer 5 minutes." data-testid="family-steps">${esc(f.steps)}</textarea></label>
+    <label class="field"><span>Notes (optional)</span><input type="text" name="notes" maxlength="300" value="${esc(f.notes)}" data-testid="family-notes"></label>
+    <div class="notice small" data-testid="family-problems" hidden></div>
+    <button class="btn primary big" data-testid="family-save">${r ? "Save" : "Add recipe"}</button>
+    ${r ? `<button type="button" class="btn danger big" data-action="family-delete" data-id="${esc(r.id)}" data-testid="family-delete">Delete</button>` : ""}
+  </form>`);
+  if (!r) $("[data-testid=family-title]")?.focus();
+}
+
+function deleteFamilyRecipe(id) {
+  const idx = state.savedRecipes.findIndex((r) => r.id === id && isFamilyRecipe(r));
+  if (idx < 0) return;
+  const [r] = state.savedRecipes.splice(idx, 1);
+  commit();
+  toast(`Deleted ${r.title}`, () => { if (!state.savedRecipes.some((x) => x.id === r.id)) state.savedRecipes.splice(idx, 0, r); commit(); });
 }
 
 // Recipes by age: the book's recipes for the baby, the 4-year-old and the family, by meal. ☆ marks
@@ -1902,7 +2002,7 @@ function recipeCard(r, { saved = false } = {}) {
     <div class="recipe-art tone-${a.tone}" aria-hidden="true"><span>${a.emoji}</span>${r.prepMinutes ? `<i>⏱️ ${esc(r.prepMinutes)} min</i>` : ""}</div>
     <div class="row between"><h3>${esc(r.title)}</h3><span>${r.familyFavorite ? '<span class="pill warn" data-testid="family-favorite">⭐ Family favorite</span> ' : ""}${whoPill(r.forWhom)}</span></div>
     ${hasNuts && !nutFreeOn() ? `<div class="small muted" data-testid="contains-nuts">🥜 Contains nuts${r.nutFreeSwap ? ". Nut-free swap: " + esc(r.nutFreeSwap) : ""}</div>` : ""}
-    <div class="small muted">${r.cuisine ? esc(r.cuisine) + " · " : ""}${esc(r.mealType || "")}${r.prepMinutes ? " · " + esc(r.prepMinutes) + " min" : ""}${r.busyMorning && r.mealType !== "side" ? ` · <span data-testid="busy-morning-tag">${esc(busyLabel(r))}</span>` : ""}${r.texture ? " · " + esc(r.texture) : ""}${r.source === "ai" ? " · ✨ AI" : r.source === "library" ? " · Family recipe book" : ""}</div>
+    <div class="small muted">${r.cuisine ? esc(r.cuisine) + " · " : ""}${esc(r.mealType || "")}${r.prepMinutes ? " · " + esc(r.prepMinutes) + " min" : ""}${r.busyMorning && r.mealType !== "side" ? ` · <span data-testid="busy-morning-tag">${esc(busyLabel(r))}</span>` : ""}${r.texture ? " · " + esc(r.texture) : ""}${r.source === "ai" ? " · ✨ AI" : r.source === "library" ? " · Family recipe book" : r.source === "family" ? ' · <span data-testid="family-badge">👪 Family recipe</span>' : ""}</div>
     ${methods.length ? `<div class="appliance-methods" data-testid="appliance-methods">${methods.map((m) => `<p class="small" data-appliance="${m.key}"><strong>${m.icon} ${esc(m.label)}${m.key === "airFryer" && state.settings.airFryer === "dual" ? " (two baskets)" : ""}:</strong> ${esc(m.text)}</p>`).join("")}</div>` : ""}
     ${r.tags?.length ? `<div class="small" data-testid="recipe-tags">${r.tags.map((t) => esc(TAG_LABELS[t])).join(" · ")}</div>` : ""}
     <div class="safety ${safety.safe && !safety.warnings.length ? "ok" : safety.safe ? "warn" : "warn"}" data-testid="safety-badge">
@@ -1916,7 +2016,7 @@ function recipeCard(r, { saved = false } = {}) {
     </details>
     <details><summary>Steps</summary><ol>${r.steps.map((s) => `<li>${esc(s)}</li>`).join("")}</ol>${r.notes ? `<p class="small muted">${esc(r.notes)}</p>` : ""}</details>
     <div class="actions">
-      ${saved ? `<button class="btn sm danger" data-action="unsave" data-id="${esc(r.id)}">Remove</button>` : isSaved ? '<span class="pill ok">Saved</span>' : `<button class="btn sm" data-action="save-recipe" data-id="${esc(r.id)}" data-testid="save-recipe">⭐ Save</button>`}
+      ${isFamilyRecipe(r) ? `<button class="btn sm" data-action="family-edit" data-id="${esc(r.id)}" data-testid="family-card-edit">✏️ Edit</button>` : saved ? `<button class="btn sm danger" data-action="unsave" data-id="${esc(r.id)}">Remove</button>` : isSaved ? '<span class="pill ok">Saved</span>' : `<button class="btn sm" data-action="save-recipe" data-id="${esc(r.id)}" data-testid="save-recipe">⭐ Save</button>`}
       <button class="btn sm" data-action="plan-recipe" data-id="${esc(r.id)}" data-testid="plan-recipe">📅 Plan</button>
       ${missing.size ? `<button class="btn sm" data-action="recipe-to-shopping" data-id="${esc(r.id)}" data-testid="recipe-to-shopping">🛒 Add ${missing.size} to list</button>` : ""}
     </div>
@@ -2642,6 +2742,9 @@ document.addEventListener("click", (e) => {
       toast("Saved. It will work offline too.");
       break;
     }
+    case "family-add": familyRecipeSheet(); break;
+    case "family-edit": { const r = state.savedRecipes.find((x) => x.id === el.dataset.id && isFamilyRecipe(x)); if (r) { el.closest("dialog")?.close(); familyRecipeSheet(r); } break; }
+    case "family-delete": el.closest("dialog")?.close(); deleteFamilyRecipe(el.dataset.id); break;
     case "unsave": state.savedRecipes = state.savedRecipes.filter((s) => s.id !== el.dataset.id); commit(); break;
     case "plan-recipe": { const r = findRecipe(el.dataset.id); if (r) planDialog(r); break; }
     case "recipe-to-shopping": {
@@ -2883,6 +2986,24 @@ document.addEventListener("submit", (e) => {
       state.todos.push({ id: uid(), text, who: f.who.value, date, time: f.time?.value || "", done: false });
       commitDay(date);
       $("[data-testid=day-todo-input]")?.focus();
+      break;
+    }
+    case "family-recipe": {
+      const fields = { title: f.title.value, forWhom: f.forWhom.value, mealType: f.mealType.value, prepMinutes: f.prepMinutes.value, busyMorning: f.busyMorning.value,
+        snackBox: f.snackBox.checked, cuisine: f.cuisine.value, ingredients: f.ingredients.value, steps: f.steps.value, notes: f.notes.value };
+      const problems = familyRecipeProblems(fields);
+      const box = form.querySelector("[data-testid=family-problems]");
+      if (problems.length) { box.textContent = problems.join(" "); box.hidden = false; box.scrollIntoView({ block: "center", behavior: "smooth" }); return; }
+      const prev = form.dataset.id ? state.savedRecipes.find((r) => r.id === form.dataset.id && isFamilyRecipe(r)) : null;
+      const recipe = familyRecipeFrom(fields, { prev });
+      upsertFamilyRecipe(state.savedRecipes, recipe);
+      form.closest("dialog")?.close();
+      // Suggestions on the calendar are worked out again with the new recipe in them.
+      ui.suggest = {};
+      ui.openGroups.add("sec-family");
+      commit();
+      const safety = checkForAudience(recipe, { schoolNutFree: nutFreeOn() });
+      toast(`${prev ? "Saved" : "Added"} ${recipe.title}.${safety.safe ? " The planner will suggest it first." : " It isn't age-safe as written, so the planner won't suggest it."}`);
       break;
     }
     case "frozen-add":

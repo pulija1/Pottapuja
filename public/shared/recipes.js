@@ -196,6 +196,8 @@ const FRUIT_BOOST = 0.3;
 // good kitchen match, but less than the busy morning and warm breakfast boosts, which still decide
 // the school-day breakfasts.
 export const REGULAR_BOOST = 2;
+// The family's own house recipes (👪 Family recipes, passed in as `extra`) are lifted the same.
+export const FAMILY_RECIPE_BOOST = 2;
 
 // Rank library recipes by how many of their ingredients are in the pantry.
 // With schoolNutFree, recipes that are not nut-free are left out of lunchbox and snack suggestions.
@@ -212,7 +214,8 @@ export const REGULAR_BOOST = 2;
 // settings (with prefs) and child ("baby"/"kid", who will eat it) leave out recipes that don't suit
 // that child and lift the ones that do; see preferences.js.
 // regulars (recipe ids, see regulars.js) are the ones marked to use often, lifted by REGULAR_BOOST.
-export function suggestFromLibrary(pantry, { forWhom = "both", mealType = "", limit = 6, schoolNutFree = false, maxMinutes = 0, cuisines = [], frozen = [], appliances = [], busyMorning = false, staples = [], useSoon = null, settings = null, child = "", regulars = [] } = {}) {
+// extra (the family's own recipes, see family-recipes.js) are ranked with the book's, lifted by FAMILY_RECIPE_BOOST.
+export function suggestFromLibrary(pantry, { forWhom = "both", mealType = "", limit = 6, schoolNutFree = false, maxMinutes = 0, cuisines = [], frozen = [], appliances = [], busyMorning = false, staples = [], useSoon = null, settings = null, child = "", regulars = [], extra = [] } = {}) {
   const k = kitchen(pantry, frozen, staples);
   const often = new Set(regulars);
   // The whole family eats the 4-year-old's food too (mild, nothing whole), so "family" includes the
@@ -228,7 +231,7 @@ export function suggestFromLibrary(pantry, { forWhom = "both", mealType = "", li
   const fruit = (x) => mealType === "breakfast" && x.forWhom === "baby" && recipeHasFruit(x);
   const minutes = (r) => fastestMinutes(r, appliances) || Infinity;
   const quick = (r) => minutes(r) <= maxMinutes;
-  return LIBRARY.filter((x) => !x.leftover && wanted.includes(x.forWhom))
+  return [...LIBRARY, ...(extra || [])].filter((x) => !x.leftover && wanted.includes(x.forWhom))
     .filter((x) => x.mealType !== "side" || mealType === "side")
     .filter((x) => !mealType || x.mealType === mealType || (mealType === "lunch" && x.mealType === "lunchbox"))
     .filter((x) => !schoolNutFree || x.forWhom !== "kid" || checkForAudience(x, { schoolNutFree: true }).safe)
@@ -238,7 +241,7 @@ export function suggestFromLibrary(pantry, { forWhom = "both", mealType = "", li
       const hit = needed.filter((n) => k.fresh.has(n)).length + needed.filter((n) => k.cold.has(n)).length * FROZEN_WEIGHT;
       const score = (needed.length ? hit / needed.length : 0) + useSoonScore(needed, k.fresh, useSoon) + (x.familyFavorite ? 0.15 : 0) + (cuisines.length && inCuisines(x, cuisines) ? CUISINE_BOOST : 0) + (usesAppliance(x, appliances) ? APPLIANCE_BOOST : 0)
         + (forWhom === "family" && x.forWhom === "family" ? FAMILY_BOOST : 0) + (busy(x) ? BUSY_BOOST : 0) + (warm(x) ? WARM_BOOST : 0) + (fruit(x) ? FRUIT_BOOST : 0)
-        + (settings ? prefBoost(x, childOf(x, child), settings, { mealType }) : 0) + (often.has(x.id) ? REGULAR_BOOST : 0);
+        + (settings ? prefBoost(x, childOf(x, child), settings, { mealType }) : 0) + (often.has(x.id) ? REGULAR_BOOST : 0) + (x.family ? FAMILY_RECIPE_BOOST : 0);
       return { recipe: x, score, hit };
     })
     .sort((a, b) => b.score - a.score || b.hit - a.hit)

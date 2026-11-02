@@ -151,7 +151,7 @@ export function contextText({ today, window, days = {}, refOf = () => "", pantry
   if (needs) lines.push("", "Each child's needs:", needs);
   if (saved.length) {
     lines.push("", "The family's saved recipes:");
-    for (const [ref, r] of saved) lines.push(catalogLine(ref, r));
+    for (const [ref, r] of saved) lines.push(catalogLine(ref, r) + (r.family ? " | the family's own house recipe: use it first for its meal" : ""));
   }
   return lines.join("\n");
 }
