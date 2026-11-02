@@ -1857,6 +1857,8 @@ test("E2E HOUSE-02 the week's plan uses the family's recipes first, each once a 
     fam("Nanamma pesarattu", "kid", "breakfast", ["moong dal", "rice"]),
     fam("Bottle gourd pappu house style", "family", "dinner", ["toor dal", "bottle gourd", "tomato"]),
     fam("Honey ragi java", "baby", "breakfast", ["ragi flour", "honey"]),   // not safe for the baby: never suggested
+    fam("Cheese ragi bites", "kid", "snack", ["ragi flour", "cheese"], { snackBox: true }),
+    fam("Sunday vegetable upma", "family", "breakfast", ["rava", "onion", "curry leaves"]),   // the whole family's breakfast: for the 4-year-old too
   ];
   const { page, ctx, errors } = await openSeeded({ savedRecipes, pantry: ["rice", "moong dal", "toor dal", "bottle gourd", "okra", "brinjal", "potato", "carrot", "spinach", "tomato", "onion", "ragi flour", "egg", "bread", "milk", "curd"] });
   await fillWeekOf(page, "2026-10-26");
@@ -1869,6 +1871,11 @@ test("E2E HOUSE-02 the week's plan uses the family's recipes first, each once a 
   assert.equal(kid.filter((x) => x === "fam-nanamma-pesarattu").length, 1, kid.join(" | "));
   assert.equal(dinners.filter((x) => x === "fam-bottle-gourd-pappu-house-style").length, 1, dinners.join(" | "));
   assert.ok(!baby.includes("fam-honey-ragi-java"), baby.join(" | "));
+  // Once a week, even when the other snack box ideas run out.
+  const snacks = await mealsOf(page, "kid_snack");
+  assert.equal(snacks.filter((x) => x === "fam-cheese-ragi-bites").length, 1, snacks.join(" | "));
+  // The whole family's breakfast is planned for the 4-year-old, once.
+  assert.equal(kid.filter((x) => x === "fam-sunday-vegetable-upma").length, 1, kid.join(" | "));
   assert.deepEqual(errors, []);
   await ctx.close();
 });

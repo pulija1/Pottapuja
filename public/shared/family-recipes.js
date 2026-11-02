@@ -60,7 +60,8 @@ export function familyRecipeFrom(fields, { prev = null, id = "", now = new Date(
     prepMinutes: minutes > 0 ? Math.min(minutes, 600) : null,
     cuisine: String(fields.cuisine || "").trim().slice(0, 40),
     texture: forWhom === "baby" ? String(fields.texture || "").trim().toLowerCase().slice(0, 40) : "",
-    ingredients: lines(fields.ingredients).slice(0, 40).map((l) => parseIngredient(l)).filter((i) => i.name),
+    // Each line is kept as typed (text), so editing shows "2 cups" and not "2 cup".
+    ingredients: lines(fields.ingredients).slice(0, 40).map((l) => ({ ...parseIngredient(l), text: l.replace(/^\s*[-*+]\s+/, "") })).filter((i) => i.name),
     steps: lines(fields.steps).slice(0, 30).map((s) => s.replace(/^\d+[.)]\s*/, "")),
     notes: String(fields.notes || "").trim().slice(0, 500),
     source: "family",
@@ -88,7 +89,7 @@ export function familyRecipeFields(r) {
     texture: r?.texture || "",
     busyMorning: r?.busyMorning || "",
     snackBox: !!r?.snackBox,
-    ingredients: (r?.ingredients || []).map((i) => `${qty(i)}${i.name}${i.note ? ", " + i.note : ""}`).join("\n"),
+    ingredients: (r?.ingredients || []).map((i) => i.text || `${qty(i)}${i.name}${i.note ? ", " + i.note : ""}`).join("\n"),
     steps: (r?.steps || []).join("\n"),
     notes: r?.notes || "",
   };
@@ -102,9 +103,13 @@ export function upsertFamilyRecipe(saved, recipe) {
   return list;
 }
 
-// The family recipes for a slot ("kid_lunchbox" eats kid lunchbox or lunch recipes).
+// The family recipes for a slot ("kid_lunchbox" eats kid lunchbox or lunch recipes). The whole
+// family's breakfast, lunch and snack recipes count for the 4-year-old's meals (the family's only
+// own slot is dinner, and the 4-year-old eats what the family eats); the planner still checks each
+// one is safe for her. The baby's food needs its own soft textures, so baby recipes are added as baby's.
 export function familyRecipesForSlot(list, who, meal) {
-  return familyRecipesIn(list).filter((r) => r.forWhom === who && (r.mealType === meal || (meal === "lunchbox" && r.mealType === "lunch")));
+  const forWho = (r) => r.forWhom === who || (who === "kid" && r.forWhom === "family" && r.mealType !== "dinner");
+  return familyRecipesIn(list).filter((r) => forWho(r) && (r.mealType === meal || (meal === "lunchbox" && r.mealType === "lunch")));
 }
 
 // ---------- approved weeks ----------
@@ -135,8 +140,8 @@ export function approvedWeeks(days, key, { min = APPROVED_DAYS_MIN, max = HISTOR
 }
 
 // What the approved weeks had in each slot, when there are at least APPROVED_WEEKS_MIN of them:
-// { weeks, bySlot: { slotId: [recipeId, ...] } }, each slot's recipes most used first (the same
-// weekday as `key` counts double, then the newest week first). null when there aren't enough.
+// { weeks, bySlot: { slotId: [recipeId, ...] } }, each slot's recipes ordered by how often they
+// were approved on the same weekday as `key`, then how often on any day, then the newest week. null when there aren't enough.
 export function weekHistory(days, key, { minWeeks = APPROVED_WEEKS_MIN } = {}) {
   const weeks = approvedWeeks(days, key);
   if (weeks.length < minWeeks) return null;
@@ -148,8 +153,9 @@ export function weekHistory(days, key, { minWeeks = APPROVED_WEEKS_MIN } = {}) {
       if (!d || d.status !== "approved") continue;
       for (const [slot, m] of Object.entries(d.meals || {})) {
         if (!m?.recipeId || !m.title) continue;
-        const s = ((score[slot] ||= new Map()).get(m.recipeId)) || { n: 0, newest: Infinity };
-        s.n += i === dow ? 2 : 1;
+        const s = ((score[slot] ||= new Map()).get(m.recipeId)) || { same: 0, n: 0, newest: Infinity };
+        if (i === dow) s.same++;
+        s.n++;
         s.newest = Math.min(s.newest, w);
         score[slot].set(m.recipeId, s);
       }
@@ -157,7 +163,7 @@ export function weekHistory(days, key, { minWeeks = APPROVED_WEEKS_MIN } = {}) {
   });
   const bySlot = {};
   for (const [slot, map] of Object.entries(score)) {
-    bySlot[slot] = [...map.entries()].sort((a, b) => b[1].n - a[1].n || a[1].newest - b[1].newest || a[0].localeCompare(b[0])).map(([id]) => id);
+    bySlot[slot] = [...map.entries()].sort((a, b) => b[1].same - a[1].same || b[1].n - a[1].n || a[1].newest - b[1].newest || a[0].localeCompare(b[0])).map(([id]) => id);
   }
   return { weeks, bySlot };
 }
@@ -170,7 +176,7 @@ const NOT_VEG = /tortilla|bread|roti|chapati|paratha|wrap|chips|flour|powder|pas
 export function vegName(name) {
   const n = normName(name);
   if (!n || NOT_VEG.test(n) || !isMainVegetable(n)) return "";
-  const plain = normName(n.replace(SIZE_WORDS, "").replace(/\s+(?:puree|purée|florets|cubes|mash)$/, ""));
+  const plain = normName(n.replace(SIZE_WORDS, "").replace(/(?:\s+(?:puree|purée|florets|cubes|mash|leaves|grated|chopped|diced|sliced|cubed|peeled|boiled))+$/, ""));
   return plain && isMainVegetable(plain) ? plain : n;
 }
 // The main vegetables of a dish: every vegetable in it that isn't an onion, tomato or other aromatic.

@@ -24,7 +24,7 @@ test("HOUSE-01 the form becomes a recipe like one from the book, marked as the f
   assert.equal(r.prepMinutes, 30);
   assert.equal(r.cuisine, "Telugu");
   assert.deepEqual(r.ingredients.map((i) => i.name), ["toor dal", "tomatoes", "chopped bottle gourd", "salt"]);
-  assert.deepEqual(r.ingredients[0], { name: "toor dal", quantity: 1, unit: "cup" });
+  assert.deepEqual(r.ingredients[0], { name: "toor dal", quantity: 1, unit: "cup", text: "1 cup toor dal" });
   assert.deepEqual(r.steps, ["Pressure cook the dal.", "Add the tomatoes and gourd, simmer."]);
   assert.equal(r.addedAt, NOW.toISOString());
   assert.deepEqual(r.tags, []);
@@ -53,7 +53,10 @@ test("HOUSE-03 editing keeps the id and when it was added; the fields round-trip
   const f = familyRecipeFields(r);
   assert.equal(f.title, pappu.title);
   assert.equal(f.ingredients.split("\n")[0], "1 cup toor dal");
-  assert.equal(f.ingredients.split("\n").at(-1), "salt, to taste");
+  assert.equal(f.ingredients.split("\n").at(-1), "Salt, to taste");
+  // Edited back exactly as typed: "2 cups" stays "2 cups".
+  const cups = familyRecipeFrom({ ...pappu, ingredients: "2 cups rice\n3 carrots, grated" }, { now: NOW });
+  assert.equal(familyRecipeFields(cups).ingredients, "2 cups rice\n3 carrots, grated");
   const later = new Date("2026-11-05T10:00:00Z");
   const edited = familyRecipeFrom({ ...f, title: "Tomato pappu (Amma's)" }, { prev: r, now: later });
   assert.equal(edited.id, r.id);
@@ -71,6 +74,13 @@ test("HOUSE-03 editing keeps the id and when it was added; the fields round-trip
   assert.equal(familyRecipesIn(saved).length, 2);
   assert.deepEqual(familyRecipesForSlot(saved, "baby", "breakfast").map((x) => x.title), ["Ragi java"]);
   assert.deepEqual(familyRecipesForSlot(saved, "family", "dinner").map((x) => x.title), ["Tomato pappu (Amma's)"]);
+  // A whole-family breakfast, lunch or snack is offered for the 4-year-old's meals; a family dinner stays the family's.
+  upsertFamilyRecipe(saved, familyRecipeFrom({ ...pappu, title: "Sunday upma", forWhom: "family", mealType: "breakfast" }, { now: later }));
+  upsertFamilyRecipe(saved, familyRecipeFrom({ ...pappu, title: "Lemon rice", forWhom: "family", mealType: "lunch" }, { now: later }));
+  assert.deepEqual(familyRecipesForSlot(saved, "kid", "breakfast").map((x) => x.title), ["Sunday upma"]);
+  assert.deepEqual(familyRecipesForSlot(saved, "baby", "breakfast").map((x) => x.title), ["Ragi java"]);
+  assert.deepEqual(familyRecipesForSlot(saved, "kid", "lunchbox").map((x) => x.title), ["Lemon rice"]);
+  assert.deepEqual(familyRecipesForSlot(saved, "kid", "dinner").map((x) => x.title), []);
 });
 
 test("HOUSE-04 a baby family recipe is still checked for age safety", () => {
@@ -159,6 +169,14 @@ test("HOUSE-09 with 3 approved weeks each slot gets what those weeks had, most u
   assert.equal(h.bySlot.family_dinner.length, 7);
   assert.equal(h.bySlot.family_dinner[0], ids.dinner[1]);
   assert.equal(weekHistory(days, "2026-11-04").bySlot.family_dinner[0], ids.dinner[3]);   // Wednesday
+  // The same weekday decides first, even against a dish approved on many other days: three weeks of
+  // Mon vankaya, Tue-Thu dal, Fri chana and Sat/Sun sambar give Monday the vankaya, Sunday the sambar.
+  const [vankaya, dal, chana, sambar] = ids.dinner;
+  const plan = [sambar, vankaya, dal, dal, dal, chana, sambar];
+  const days3 = {};
+  for (const sunday of ["2026-10-11", "2026-10-18", "2026-10-25"]) week(days3, sunday, 7, { dinners: plan });
+  const order = (k) => weekHistory(days3, k).bySlot.family_dinner[0];
+  assert.deepEqual(["2026-11-01", "2026-11-02", "2026-11-03", "2026-11-04", "2026-11-05", "2026-11-06", "2026-11-07"].map(order), plan);
   // Days still waiting for approval are left out.
   const days2 = {};
   week(days2, "2026-10-11", 5);
@@ -174,6 +192,9 @@ test("HOUSE-10 vegetables are known by their plain names", () => {
   assert.equal(vegName("vankaya"), "brinjal");
   assert.equal(vegName("grated carrot"), "carrot");
   assert.equal(vegName("pumpkin puree"), "pumpkin");
+  assert.equal(vegName("carrots grated"), "carrot");
+  assert.equal(vegName("gongura leaves"), "gongura");
+  assert.equal(vegName("curry leaves"), "");
   assert.equal(vegName("onion"), "");
   assert.equal(vegName("tomato"), "");
   assert.equal(vegName("small corn tortillas"), "");
